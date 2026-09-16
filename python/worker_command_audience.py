@@ -57,6 +57,9 @@ USER_FACING: frozenset[str] = frozenset({
     "start_download", "download_status", "cancel_download", "delete_model",
     "resolve_missing_models", "civitai_variants",
     "family_install_plan", "apply_family_install_plan", "resolve_component_stack",
+    # The settings one model wants. The cockpit asks on every checkpoint change (W2), which is what
+    # promoted it out of DIAGNOSTIC: MainWindow::fetchModelDefaultsAsync is the route.
+    "model_recommended_settings",
     # Workflows: import, discover, launch-readiness, dependency retry, delete.
     "import_workflow", "discover_comfy_workflows", "check_workflow_launch_readiness",
     "retry_workflow_dependencies", "delete_workflow_profile", "build_node_class_index",
@@ -124,12 +127,12 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # is Phase D3 and explicitly not started (CLAUDE.md §5), so this is an unfinished feature rather
     # than a wiring oversight. Classified honestly here rather than left to look like either.
     "t23d",
-    # Model intelligence (W1). DIAGNOSTIC until W2 wires model_recommended_settings into the
-    # cockpit and W5 wires the rest into the Models page -- the audience ratchet requires a
-    # qt_ui/ literal for anything called USER_FACING, and promoting these early would assert a
-    # route that does not exist yet.
+    # Model intelligence (W1). Still DIAGNOSTIC until W5 wires these into the Models page -- the
+    # audience ratchet requires a qt_ui/ literal for anything called USER_FACING, and promoting
+    # them early would assert a route that does not exist yet. `model_recommended_settings` left
+    # this list in W2, when the cockpit started asking it what a model wants.
     "model_intel_get", "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
-    "model_recommended_settings", "model_roots_status",
+    "model_roots_status",
 })
 
 # Never addressed by a person.

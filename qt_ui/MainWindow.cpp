@@ -2488,6 +2488,20 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     // Phase 3b: the fast/quality operating-point table provider (lazy cached fetch).
     (*slot)->setOperatingPointsProvider(
         [this](const QString &family) { return operatingPointsForFamily(family); });
+    // W2: what THIS model wants, on top of the family table above. Two functions, not one, and
+    // deliberately: the PROVIDER is a synchronous cache read, so applyModelDefaults() works with a
+    // fake provider and no worker anywhere; the FETCHER is the only part that talks to the worker.
+    // No fetch is issued here -- a page has no model selected at construction, and the page itself
+    // triggers one on every model change.
+    (*slot)->setModelDefaultsProvider(
+        [this](const QString &modelPath) { return modelDefaultsFor(modelPath); });
+    (*slot)->setModelDefaultsFetcher(
+        [this](const QString &modelPath,
+               const QString &family,
+               const QString &mode,
+               std::function<void()> completion) {
+            fetchModelDefaultsAsync(modelPath, family, mode, std::move(completion));
+        });
     const QPointer<ImageGenerationPage> pageGuard(*slot);
     fetchOperatingPointsAsync([pageGuard]() {
         if (pageGuard)
@@ -3426,6 +3440,90 @@ QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
     if (key.isEmpty())
         return {};
     return operatingPointsByFamily_.value(key);
+}
+
+namespace
+{
+// `D:\AI_ASSETS\models\x.safetensors` and `D:/ai_assets/models/X.safetensors` are one file on this
+// platform, and must be one cache entry. Both the store and the lookup go through here, so a path
+// that arrives from the catalog scan and the same path restored from QSettings cannot end up as two
+// requests for one model -- which is the shape the keyed single-flight exists to prevent.
+QString modelDefaultsCacheKey(const QString &path)
+{
+    return QDir::fromNativeSeparators(path.trimmed()).toLower();
+}
+} // namespace
+
+void MainWindow::fetchModelDefaultsAsync(const QString &modelPath,
+                                         const QString &family,
+                                         const QString &mode,
+                                         std::function<void()> completion)
+{
+    const QString key = modelDefaultsCacheKey(modelPath);
+    // No model, or already answered: the caller gets its completion now, on this stack, exactly as
+    // fetchOperatingPointsAsync does for an already-fetched table.
+    if (key.isEmpty() || modelDefaultsByPath_.contains(key))
+    {
+        if (completion)
+            completion();
+        return;
+    }
+    if (completion)
+        modelDefaultsWaiters_[key].push_back(std::move(completion));
+    // Single-flight PER PATH. A second ask for a model already in flight rides the answer that is
+    // coming rather than issuing a duplicate -- and, unlike the global flag above, an ask for a
+    // DIFFERENT model is not blocked by it.
+    if (modelDefaultsInFlight_.contains(key))
+        return;
+
+    modelDefaultsInFlight_.insert(key);
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("model_recommended_settings"));
+    request.insert(QStringLiteral("path"), modelPath.trimmed());
+    if (!family.trimmed().isEmpty())
+        request.insert(QStringLiteral("family"), family.trimmed().toLower());
+    if (!mode.trimmed().isEmpty())
+        request.insert(QStringLiteral("mode"), mode.trimmed().toLower());
+    // The worker bounds `path` to the roots the REQUEST names, and a request that names none gets
+    // no location check at all (model_intelligence_commands documents that honestly). Sending the
+    // configured library roots is what makes the documented containment true for this caller.
+    QJsonArray roots;
+    const QStringList configuredRoots = spellvision::shell::scannableModelsRoots(
+        spellvision::generation::chooseModelsRootPath(),
+        spellvision::shell::extraModelsRootsFromSettings());
+    for (const QString &root : configuredRoots)
+    {
+        if (!root.trimmed().isEmpty())
+            roots.append(root.trimmed());
+    }
+    if (!roots.isEmpty())
+        request.insert(QStringLiteral("roots"), roots);
+
+    sendWorkerRequestAsync(
+        request,
+        [this, key](const QJsonObject &response, const QString &, bool startedOk) {
+            modelDefaultsInFlight_.remove(key);
+            if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
+                modelDefaultsByPath_.insert(key, response);
+            // A failure caches NOTHING -- so a worker that comes back up is asked again rather than
+            // the cockpit being stuck on a remembered "we could not tell" -- but the waiters still
+            // fire, so the page applies the family operating point instead of waiting forever.
+            auto waiters = modelDefaultsWaiters_.take(key);
+            for (auto &waiter : waiters)
+            {
+                if (waiter)
+                    waiter();
+            }
+        },
+        12000);
+}
+
+QJsonObject MainWindow::modelDefaultsFor(const QString &modelPath) const
+{
+    const QString key = modelDefaultsCacheKey(modelPath);
+    if (key.isEmpty())
+        return {};
+    return modelDefaultsByPath_.value(key);
 }
 
 void MainWindow::sendWorkerRequestAsync(

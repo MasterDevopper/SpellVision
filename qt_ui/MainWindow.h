@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QStackedWidget>
@@ -270,6 +271,20 @@ private:
     // an unknown family / worker down -> the cockpit hides the selector).
     void fetchOperatingPointsAsync(std::function<void()> completion = {});
     QJsonObject operatingPointsForFamily(const QString &family) const;
+    // W2: the settings ONE model wants (`model_recommended_settings`), cached per weight path.
+    // Structurally unlike the family table above, and the difference is the whole point: that table
+    // is a single static snapshot, so one bool and one waiter list express its single-flight. There
+    // is a DISTINCT answer per model, so the cache, the in-flight marker and the waiter list are all
+    // KEYED by path -- a second ask for a path already in flight attaches a waiter instead of
+    // issuing a duplicate request, and an answer for one model never satisfies a wait on another.
+    // A failed fetch caches nothing and still fires its waiters, so the cockpit falls back to the
+    // family operating point rather than hanging on an answer that is not coming.
+    void fetchModelDefaultsAsync(const QString &modelPath,
+                                 const QString &family,
+                                 const QString &mode,
+                                 std::function<void()> completion = {});
+    // Cache-only, exactly like operatingPointsForFamily: {} until a fetch has landed.
+    QJsonObject modelDefaultsFor(const QString &modelPath) const;
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();
@@ -484,6 +499,13 @@ private:
     bool operatingPointsFetched_ = false;
     bool operatingPointsFetchInFlight_ = false;
     std::vector<std::function<void()>> operatingPointsFetchWaiters_;
+    // W2 per-model recommended-settings cache. KEYED where the three members above are GLOBAL: the
+    // family table is one snapshot for the whole app, this is one answer per weight, so "is a fetch
+    // in flight" and "who is waiting on it" are both questions about a path, not about the app.
+    // Keys go through modelDefaultsCacheKey() on both the store and the lookup side.
+    QHash<QString, QJsonObject> modelDefaultsByPath_;
+    QSet<QString> modelDefaultsInFlight_;
+    QHash<QString, std::vector<std::function<void()>>> modelDefaultsWaiters_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;
     QMap<QString, QString> lastSyncedGenerationErrorByMode_;

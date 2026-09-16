@@ -701,6 +701,20 @@ void ImageGenerationPage::refreshOperatingPointSelector()
     updateOperatingPointSelector();
 }
 
+void ImageGenerationPage::setModelDefaultsProvider(std::function<QJsonObject(const QString &)> provider)
+{
+    // Store only. Unlike setOperatingPointsProvider, this does NOT refresh the selector: the family
+    // table is app-wide and worth re-rendering the moment it arrives, while this answers a question
+    // about the selected model -- and at the moment MainWindow wires it, no model is selected.
+    modelDefaultsProvider_ = std::move(provider);
+}
+
+void ImageGenerationPage::setModelDefaultsFetcher(
+    std::function<void(const QString &, const QString &, const QString &, std::function<void()>)> fetcher)
+{
+    modelDefaultsFetcher_ = std::move(fetcher);
+}
+
 QString ImageGenerationPage::resolvedVideoFamilyForSelector() const
 {
     if (!isVideoMode())

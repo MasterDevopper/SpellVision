@@ -212,9 +212,10 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 ## Model Intelligence Commands
 
 Six commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
-site that hosts it, and the settings it wants. Filed `DIAGNOSTIC` in
-`worker_command_audience.py` -- nothing in `qt_ui/` reaches them yet; W2 wires
-`model_recommended_settings` into the cockpit and W5 wires the rest into the Models page.
+site that hosts it, and the settings it wants. `model_recommended_settings` is `USER_FACING` in
+`worker_command_audience.py` -- the cockpit asks it on every checkpoint change
+(`MainWindow::fetchModelDefaultsAsync`, W2). The other five are still filed `DIAGNOSTIC`: nothing
+in `qt_ui/` reaches them yet, and W5 wires them into the Models page.
 
 ### Model Intel Get Request
 
@@ -361,8 +362,10 @@ is the honest state of the code, and this paragraph exists because the previous 
 claimed the opposite -- it said a path outside the model roots was refused when only the extension
 was ever examined, and a test named for the location check passed on the extension. The surface is
 bounded instead by `worker_auth`: these commands are LOCAL_TRUSTED only, so a token holder is
-denied and `LOCAL_PROBE` gets `ping`. When W2/W5 promote them to USER_FACING, the caller must send
-its configured roots with every request.
+denied and `LOCAL_PROBE` gets `ping`. A caller promoted to USER_FACING must send its configured
+roots with every request: `MainWindow::fetchModelDefaultsAsync` (W2) sends `scannableModelsRoots`,
+which is what makes the containment above real for the cockpit's own asks. W5's Models-page callers
+must do the same when they land.
 
 ### Model Recommended Settings Request
 
@@ -468,8 +471,8 @@ cannot quietly go stale the way the "Planned commands" list did.
 
 | audience | count | what it means |
 |---|---|---|
-| user-facing | 57 | reachable from the UI by a normal user action |
-| diagnostic | 60 | for inspecting state; safe, but not part of a normal flow |
+| user-facing | 58 | reachable from the UI by a normal user action |
+| diagnostic | 59 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
 | **total** | **133** | |
 

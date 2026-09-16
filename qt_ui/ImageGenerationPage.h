@@ -135,6 +135,18 @@ public:
     // {default_operating_point, operating_points:[...]} for a video family ({} -> no selector).
     void setOperatingPointsProvider(std::function<QJsonObject(const QString &family)> provider);
     void refreshOperatingPointSelector();
+    // W2: the settings THIS model wants, as MainWindow cached them. Split in two on purpose --
+    // the provider is a SYNCHRONOUS cache read and the fetcher is the only half that talks to a
+    // worker, so a test can inject a provider alone and applyModelDefaults() stays callable with
+    // no worker, no socket and no event loop. Returns the whole
+    // {ok, family, operating_point, settings:{field:{value,provenance,confidence,n,total}}, warnings}
+    // reply; {} until a fetch has landed (or if it failed), which is the cockpit's cue to stay on
+    // the family operating point.
+    void setModelDefaultsProvider(std::function<QJsonObject(const QString &modelPath)> provider);
+    void setModelDefaultsFetcher(std::function<void(const QString &modelPath,
+                                                   const QString &family,
+                                                   const QString &mode,
+                                                   std::function<void()> completion)> fetcher);
     void useImageAsInput(const QString &path);
     // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
     // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
@@ -369,6 +381,10 @@ public:
     QString operatingPointFamily_;           // the family the selector is currently built for
     QString currentOperatingPoint_;          // the selected point's name (sent on the request)
     QStringList operatingPointLoras_;         // accel LoRA values the selector added (so Quality removes only those)
+    // W2 per-model defaults. The provider reads MainWindow's keyed cache; the fetcher fills it.
+    std::function<QJsonObject(const QString &)> modelDefaultsProvider_;
+    std::function<void(const QString &, const QString &, const QString &, std::function<void()>)>
+        modelDefaultsFetcher_;
     QString lastAutoPopulatedModel_;                       // engine runs once per model-change
     QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
     QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)
