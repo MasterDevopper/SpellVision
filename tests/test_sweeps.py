@@ -515,3 +515,41 @@ def test_the_watched_fields_rule_says_nothing_about_a_file_with_no_applier():
     watcher would be noise with a baseline, which is the shape of a ratchet nobody reads."""
     assert rules._check_resolved_fields_are_watched(
         Path("qt_ui/Probe.cpp"), "void Other::thing() { spin_->setValue(3); }") == []
+
+
+def test_the_argv_rule_fires_on_a_dict_with_no_arm():
+    """W3 Task 1's self-test -- required, not optional: W2 shipped a ratchet whose self-test was
+    never written and the final review caught it.
+
+    generation_time_sec with no optimizations beside it is the exact shape of the defect the rule
+    exists to catch: job_archive.json's third, unlabelled sage arm at 159.27s, discovered only
+    because a human happened to notice it -- nothing structural would have.
+    """
+    probe = "\n".join([
+        "def build_payload():",
+        "    return {",
+        '        "ok": True,',
+        '        "generation_time_sec": round(elapsed, 2),',
+        '        "steps_per_sec": round(steps_per_sec, 2),',
+        "    }",
+    ])
+    found = rules._check_argv_named(Path("python/probe.py"), probe)
+    assert [v.line for v in found] == [2], [(v.line, v.key) for v in found]
+    assert found[0].key == "build_payload"
+
+
+def test_the_argv_rule_is_silent_when_the_arm_is_recorded():
+    probe = "\n".join([
+        "def build_payload():",
+        "    return {",
+        '        "generation_time_sec": round(elapsed, 2),',
+        '        "optimizations": _optimizations_block(req),',
+        "    }",
+    ])
+    assert rules._check_argv_named(Path("python/probe.py"), probe) == []
+
+
+def test_the_argv_rule_says_nothing_about_a_dict_with_no_seconds():
+    """A rule that fired on every dict literal would be noise, not a ratchet."""
+    probe = "def other():\n    return {\"ok\": True, \"cache_hit\": False}\n"
+    assert rules._check_argv_named(Path("python/probe.py"), probe) == []

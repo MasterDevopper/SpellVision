@@ -210,6 +210,9 @@ def run_native_split_stack_video(req: dict[str, Any], emitter: JobEmitter, job: 
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
+        # See _optimizations_block: which build actually produced these seconds. Read from the
+        # sidecar payload already computed above rather than re-probing.
+        "optimizations": metadata_payload.get("optimizations"),
         # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
         # worker sees nothing -- and a zero in a field every other route fills with a measurement
         # reads as "used no memory" rather than "not measured here".
@@ -408,6 +411,7 @@ def run_native_image(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
+        "optimizations": metadata_payload.get("optimizations"),
         # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
         # worker sees nothing -- and a zero in a field every other route fills with a measurement
         # reads as "used no memory" rather than "not measured here".
@@ -659,6 +663,7 @@ def run_flux3_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, ac
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": 0.0,
+        "optimizations": metadata_payload.get("optimizations"),
         # FLUX.3 renders on the BFL API, so there is no local GPU to read. The old literal 0.0
         # was nearly true here and still wrong: it is the same zero the ComfyUI routes wrote when
         # they had not looked, and no reader could tell the two apart.
@@ -784,6 +789,7 @@ def run_native_video(req: dict[str, Any], emitter: JobEmitter, job: JobRecord, a
         "task_type": command,
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
+        "optimizations": metadata_payload.get("optimizations"),
         **worker_vram().payload(),
         "media_type": "video",
         "asset_kind": "native_video",

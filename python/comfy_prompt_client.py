@@ -1187,6 +1187,7 @@ def run_comfy_workflow(req: dict[str, Any], emitter: JobEmitter, job: JobRecord,
         "task_type": req.get("task_type", req.get("workflow_task_command", "comfy_workflow")),
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
+        "optimizations": metadata_payload.get("optimizations"),
         # Was a literal 0.0. On this route the weights are in ComfyUI's process, so torch in the
         # worker sees nothing -- and a zero in a field every other route fills with a measurement
         # reads as "used no memory" rather than "not measured here".

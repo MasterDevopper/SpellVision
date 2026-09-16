@@ -2691,6 +2691,67 @@ R_RESOLVED_FIELDS_ARE_WATCHED = Rule(
 )
 
 
+# --- R34: every dict that records generation_time_sec also records optimizations -------------------
+
+# None of the 59 keys in video_history.jsonl matched atten|sage|sdpa|accel|teacache|tiling|fp16|comfy
+# -- the stopwatch (generation_time_sec) was written to THREE places (the per-render metadata
+# sidecar, job_archive.json via JobResult, and video_history.jsonl derived from it) and none of them
+# named which build produced the number. The one published A/B on this project (Doc 55, sage vs
+# SDPA on krea2) is distinguishable solely because a human typed "t4_sage"/"t4_sdpa" into two output
+# filenames -- and job_archive.json held a THIRD arm nobody mentioned, at 159.27s against the quoted
+# 120.72s, smaller than the variance between two runs of the SAME arm.
+#
+# Scoped to the dict LITERAL, not to worker_metadata.py by name: fixing the one function that
+# happened to be cited was not enough on this tree -- job_archive.json and video_history.jsonl turned
+# out to read generation_time_sec from a SEPARATE dict (the runner's own "ok": True payload, and
+# JobResult built from it) that build_metadata_payload's fix never touched. A rule naming one file
+# would have missed exactly the two places the motivating defect actually lived in.
+
+
+def _check_argv_named(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {
+            key.value for key in node.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        if "generation_time_sec" not in keys or "optimizations" in keys:
+            continue
+        out.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=_enclosing_function(tree, node.lineno),
+            detail=(
+                "records generation_time_sec with no optimizations field beside it -- a seconds "
+                "figure with no recorded arm is not evidence, only a filename someone typed by hand"
+            ),
+        ))
+    return out
+
+
+R_ARGV_NAMED = Rule(
+    name="every-render-names-its-argv",
+    citation=(
+        "generation_time_sec and steps_per_sec were recorded on every render, twice over -- "
+        "job_archive.json and video_history.jsonl -- and none of the 59 history keys named which "
+        "ComfyUI build, attention backend or fast-math flag produced the number. The only published "
+        "A/B on this project (Doc 55, sage vs SDPA on krea2) is distinguishable solely because a "
+        "human typed t4_sage/t4_sdpa into two output filenames, and the archive holds a third arm "
+        "nobody mentioned at 159.27s against the quoted 120.72s -- smaller than the variance "
+        "between two runs of the SAME arm. A seconds figure with no arm recorded beside it is not "
+        "evidence."
+    ),
+    select=sources.python_sources,
+    check=_check_argv_named,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2725,6 +2786,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_PROGRESS_NOT_INVENTED,
     R_SAMPLING_DEFAULTS_ARE_DATA,
     R_RESOLVED_FIELDS_ARE_WATCHED,
+    R_ARGV_NAMED,
 )
 
 
