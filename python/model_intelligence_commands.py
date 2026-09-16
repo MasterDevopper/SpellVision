@@ -32,12 +32,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from model_intelligence import (
-    family_seed_table,
     hashing,
     jobs,
     previews,
     readable_roots,
     recommended,
+    resolve,
     sidecar,
 )
 from model_intelligence.civitai_lookup import DEFAULT_HOST, CivitaiClient
@@ -101,32 +101,37 @@ def handle_model_recommended_settings_command(req: dict[str, Any]) -> dict[str, 
     if path is None and str(req.get("path") or "").strip():
         return {"ok": False, "type": "model_recommended_settings", "error": refusal}
     family = str(req.get("family") or "").strip() or None
+    mode = str(req.get("mode") or "").strip()
     warnings: list[str] = []
 
     payload = sidecar.read(path) if path is not None else None
     if payload:
-        settings = dict(payload.get("recommended") or {})
         family = family or ((payload.get("identity") or {}).get("family"))
-    else:
-        settings = {}
-        if path is not None:
-            warnings.append("no sidecar yet; run model_intel_refresh to identify this model")
+    elif path is not None:
+        warnings.append("no sidecar yet; run model_intel_refresh to identify this model")
 
-    if family:
-        variant = "turbo" if "turbo" in str(path or "").lower() else None
-        for field, value in family_seed_table.seed_for(family, variant).items():
-            settings.setdefault(field, {
-                "value": value, "provenance": "table:family-default",
-                "confidence": 1.0, "n": None, "total": None,
-            })
+    live_samplers = req.get("live_samplers")
+    live_schedulers = req.get("live_schedulers")
+    resolved = resolve.resolve_model_defaults(
+        path=str(path) if path else "",
+        family=family,
+        mode=mode,
+        sidecar_payload=payload,
+        live_samplers=list(live_samplers) if live_samplers else None,
+        live_schedulers=list(live_schedulers) if live_schedulers else None,
+        vram_gb=req.get("vram_gb"),
+        host_ram_gb=req.get("host_ram_gb"),
+    )
+    warnings.extend(resolved["warnings"])
 
     return {
         "ok": True,
         "type": "model_recommended_settings",
         "path": str(path) if path else "",
-        "family": family,
-        "settings": settings,
+        "family": resolved["family"] or family,
+        "settings": resolved["settings"],
         "warnings": warnings,
+        "operating_point": resolved["operating_point"],
     }
 
 

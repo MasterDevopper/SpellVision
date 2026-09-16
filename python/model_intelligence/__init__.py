@@ -31,6 +31,7 @@ from model_intelligence.previews import cover_path, download_previews, preview_d
 from model_intelligence.readable_roots import readable_models_roots, root_status
 from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
 from model_intelligence.refresh import RefreshJob, refresh_one
+from model_intelligence.resolve import resolve_model_defaults
 from model_intelligence.refresh import plan as plan_refresh
 from model_intelligence.sidecar import SCHEMA as SIDECAR_SCHEMA
 from model_intelligence.sidecar import build_payload as build_sidecar_payload
@@ -76,6 +77,7 @@ __all__ = [
     "readable_models_roots",
     "refresh_one",
     "RefreshJob",
+    "resolve_model_defaults",
     "root_status",
     "running_refresh_jobs",
     "seed_for",

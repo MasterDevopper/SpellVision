@@ -46,6 +46,12 @@ def test_model_intel_get_reads_a_sidecar(worker_client, tmp_path):
 
 
 def test_model_recommended_settings_falls_back_to_the_family(worker_client, tmp_path):
+    """With no sidecar at all, the answer is the runtime operating-point table (tuned by this
+    project's own render comparisons), not the published family floor underneath it -- that
+    ordering is resolve.py's whole point (Task 3 / W2). Before the delegation this asserted
+    "table:family-default", which was the OLD, wrong precedence: the exact defect the resolver
+    exists to fix (krea2's own house checkpoint publishes 10/1 while the family table said 52/3.5,
+    and this command was answering 52/3.5 from the WEAKER of the two tables)."""
     weight = tmp_path / "unknown.safetensors"
     weight.write_bytes(b"w")
     reply = _first(
@@ -54,7 +60,9 @@ def test_model_recommended_settings_falls_back_to_the_family(worker_client, tmp_
         "model_recommended_settings",
     )
     assert reply["ok"] is True
-    assert reply["settings"]["steps"]["provenance"] == "table:family-default"
+    assert reply["settings"]["steps"]["value"] == 52
+    assert reply["settings"]["steps"]["provenance"] == "table:family-operating-point"
+    assert reply["operating_point"] == "raw"
 
 
 def test_model_recommended_settings_prefers_the_sidecar(worker_client, tmp_path):

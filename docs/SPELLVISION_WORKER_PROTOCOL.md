@@ -366,8 +366,11 @@ its configured roots with every request.
 
 ### Model Recommended Settings Request
 
-Resolves the settings a model wants: sidecar first, family table as fallback for anything the
-sidecar does not cover.
+Resolves the settings a model wants, through `model_intelligence/resolve.py` (W2): the sidecar
+first, then this project's own runtime operating-point table, then the family's published floor
+underneath it. A sampler or scheduler the family's graph cannot accept is dropped to the family's
+own default with a warning rather than offered; a canvas beyond a (deliberately heuristic) VRAM
+budget is snapped down with a warning instead of silently rendered smaller.
 
 #### Request
 
@@ -375,9 +378,20 @@ sidecar does not cover.
 {
   "command": "model_recommended_settings",
   "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
-  "family": "krea2"
+  "family": "krea2",
+  "mode": "t2i",
+  "live_samplers": ["euler", "er_sde"],
+  "live_schedulers": ["simple", "normal"],
+  "vram_gb": 24,
+  "host_ram_gb": 64
 }
 ```
+
+`family`, `mode`, `live_samplers`, `live_schedulers`, `vram_gb` and `host_ram_gb` are all optional.
+`live_samplers`/`live_schedulers` narrow the family's own sampler/scheduler allowlist further (a
+live `/object_info` dump, when the caller has one); `vram_gb` is the only input that can trigger a
+canvas cap, and an absent/zero value means "hardware not known", which resolves with no cap and no
+opinion.
 
 #### Response
 
@@ -387,10 +401,11 @@ sidecar does not cover.
   "ok": true,
   "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
   "family": "krea2",
+  "operating_point": "raw",
   "settings": {
     "steps": {
-      "value": 28,
-      "provenance": "table:family-default",
+      "value": 52,
+      "provenance": "table:family-operating-point",
       "confidence": 1.0,
       "n": null,
       "total": null
@@ -401,8 +416,14 @@ sidecar does not cover.
 ```
 
 A field's `provenance` is one of `user`, `site:image-meta-mode`, `site:trainedWords`,
-`card:frontmatter`, `card:snippet-regex`, `card:prose-regex` or `table:family-default` -- the
-site's own example images outrank a card snippet, per `model_intelligence/recommended.py`.
+`card:frontmatter`, `card:snippet-regex`, `card:prose-regex`, `site:image-meta-weak`,
+`table:family-operating-point` or `table:family-default` -- the site's own example images outrank
+a card snippet, and this project's own render-tuned operating-point table outranks the family's
+published floor, per `model_intelligence/resolve.py`. A capped field keeps its provenance with
+`:capped` appended (e.g. `site:image-meta-mode:capped`), so the caption can say the number shown
+is not the number the model asked for. `operating_point` names the operating point (`raw` /
+`turbo` / `quality` / `fast` / ...) the settings were resolved against, `null` for a family with
+none -- the cockpit's Speed chip reads it so the two never disagree.
 
 ### Model Roots Status Request
 
