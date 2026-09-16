@@ -46,7 +46,25 @@ def test_classify_models_reports_a_kind_from_the_vocabulary(worker_client):
 
 
 def test_an_unclassifiable_path_is_other_not_a_guess(worker_client):
+    """Assert the VALUE. `kind in KINDS` was a tautology over `KIND_VOCABULARY.get(x, "other")`:
+    every input produces a member of KINDS, so a stub answering "checkpoint" for everything
+    passed under a name promising the opposite."""
     reply = _classify_reply(
         worker_client({"command": "classify_models", "paths": ["C:/somewhere/mystery.bin"]})
     )
-    assert reply["classifications"][0]["kind"] in KINDS
+    assert reply["classifications"][0]["kind"] == "other"
+
+
+def test_the_sidecar_and_the_page_answer_the_same_kind():
+    """One vocabulary. It used to be declared in worker_service and re-derived in refresh."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+    from model_intelligence import kinds
+
+    assert set(kinds.KINDS) == KINDS
+    assert kinds.normalise_kind("unknown") == "other"
+    assert kinds.normalise_kind("video_stack") == "other"
+    assert kinds.normalise_family("unknown") is None
+    assert kinds.normalise_family("sdxl") == "sdxl"

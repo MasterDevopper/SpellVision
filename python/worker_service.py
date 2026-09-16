@@ -994,23 +994,11 @@ def detect_pipeline_type(model_name_or_path: str, requested_family: str | None =
     return detect_image_pipeline_type(model_name_or_path, requested_family)
 
 
-# The ten kinds the Models page tabs are built from (spec R1.2). This is the classifier's own
-# _L1_TYPE_CATEGORY vocabulary plus "other" -- a path that classifies as nothing gets "other"
-# rather than being filed under checkpoints, because a wrong tab is worse than an honest one.
-_KIND_VOCABULARY: dict[str, str] = {
-    "checkpoint": "checkpoint",
-    "diffusion_model": "diffusion_model",
-    "lora": "lora",
-    "vae": "vae",
-    "text_encoder": "text_encoder",
-    "clip_vision": "clip_vision",
-    "embedding": "embedding",
-    "upscaler": "upscaler",
-    "controlnet": "controlnet",
-    "style_model": "style_model",
-    "video_stack": "other",
-    "unknown": "other",
-}
+# The ten kinds the Models page tabs are built from (spec R1.2) live in ONE place now:
+# model_intelligence.kinds. They were declared here AND derived differently in
+# model_intelligence/refresh.py, so the same weight was "other" to this command and "unknown" in
+# the sidecar written beside it. See that module's docstring.
+from model_intelligence.kinds import normalise_kind as _normalise_kind  # noqa: E402
 
 
 def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
@@ -1036,7 +1024,7 @@ def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
                 "confidence": c.confidence,
                 "source_layer": c.source_layer,
                 "model_type": c.model_type,
-                "kind": _KIND_VOCABULARY.get(getattr(c, "model_type", "") or "", "other"),
+                "kind": _normalise_kind(getattr(c, "model_type", "")),
             })
         except Exception as exc:  # never fail the whole batch on one bad file
             classifications.append({"path": path, "family": "unknown", "error": str(exc), "kind": "other"})
