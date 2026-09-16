@@ -52,7 +52,11 @@ def download_previews(
     timeout: float = 25.0,
 ) -> list[dict[str, Any]]:
     """Fetch up to `limit` previews. A failure skips that image; it never aborts the refresh."""
-    client = opener or urllib.request
+    # build_opener() returns an OpenerDirector, which has .open(). The `urllib.request` MODULE
+    # does not -- defaulting to it means every real fetch raises AttributeError while every
+    # fake-opener test passes, which is exactly how this shipped twice before being caught by a
+    # live run rather than by the suite.
+    client = opener or urllib.request.build_opener()
     weight_path = Path(str(weight))
     target_dir = preview_dir(models_root, sha256)
     out: list[dict[str, Any]] = []

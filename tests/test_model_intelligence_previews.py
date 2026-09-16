@@ -103,3 +103,28 @@ def test_a_download_failure_is_skipped_not_fatal(tmp_path: Path):
     weight = _weight(tmp_path)
     assert previews.download_previews(_version(2), models_root=tmp_path, sha256="a" * 64,
                                       weight=weight, opener=Broken()) == []
+
+
+def test_the_default_opener_can_actually_open_a_request(tmp_path: Path, monkeypatch):
+    """No network: prove the DEFAULT client is a thing with .open, not the urllib module.
+
+    Every other test here injects a FakeOpener, so all of them pass against a default that
+    cannot open anything. This one fails against it, which is the whole point -- the same
+    defect reached production twice in this package and was caught by a live run, not by a test.
+    """
+    seen = {}
+
+    def fake_build_opener():
+        class Director:
+            def open(self, request, timeout=None):
+                seen["url"] = request.full_url
+                return FakeResponse(PNG)
+
+        return Director()
+
+    monkeypatch.setattr(previews.urllib.request, "build_opener", fake_build_opener)
+    weight = _weight(tmp_path)
+    images = previews.download_previews(_version(1), models_root=tmp_path, sha256="a" * 64,
+                                        weight=weight)
+    assert len(images) == 1
+    assert seen["url"].startswith("https://image.civitai.com/")
