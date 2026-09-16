@@ -52,6 +52,26 @@ FIELDS = (
 )
 
 
+def variant_of(civitai_version: dict[str, Any] | None) -> str | None:
+    """The operating-point VARIANT the site names for this weight, or None.
+
+    From the site's own words -- the version name ("V2.0 Quants", "Turbo") and its `baseModel` --
+    not from the file's name on disk. It lives here, and `sidecar.build_payload` records what it
+    returns under `identity.variant`, so the resolver has a DATA answer to read and only falls back
+    to a filename substring when the site said nothing. The fallback was the sole mechanism until
+    2026-09-16 and it read `turbo` out of `Turbocharged_Dreams_XL` and out of a wan checkpoint that
+    has no such operating point at all, erasing the whole tuned point.
+
+    One name per line rather than a loop over a vocabulary: every entry is a variant some family
+    actually declares in `family_seed_table` / `FAMILY_OPERATING_POINTS`, and a name no family
+    declares is not a variant -- it is a word in a title.
+    """
+    text = f"{(civitai_version or {}).get('name') or ''} {(civitai_version or {}).get('baseModel') or ''}".lower()
+    if "turbo" in text:
+        return "turbo"
+    return None
+
+
 def _entry(value: Any, provenance: str, *, n: int | None = None, total: int | None = None,
            confidence: float | None = None) -> dict[str, Any]:
     if confidence is None:
@@ -108,12 +128,7 @@ def build(
         if provenance in CARD_PROVENANCES:
             _offer(out, field, _entry(entry.get("value"), provenance))
 
-    variant = None
-    base = str(version.get("baseModel") or "")
-    name = f"{version.get('name') or ''} {base}".lower()
-    if "turbo" in name:
-        variant = "turbo"
-    for field, value in family_seed_table.seed_for(family, variant).items():
+    for field, value in family_seed_table.seed_for(family, variant_of(civitai_version)).items():
         _offer(out, field, _entry(value, "table:family-default"))
 
     return out

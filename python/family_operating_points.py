@@ -524,6 +524,25 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         # fps: never overridden by the ltx branch -- the generic fpsSpin_ construction default
         # (ImageGenerationPage.cpp:994-997).
         "fps": 16,
+        # steps/cfg PER ROUTE, and the reason there are two is CLAUDE.md S6: the distilled
+        # two-stage route (the default, `native_video_graphs._ltx_route_for`) runs ~4-8 steps
+        # through ManualSigmas with the guiders pinned at 1, while the opt-in
+        # `ltx_route='single_stage_full'` drives the full ltx-2.3-22b-dev, which "wants 25-40
+        # steps" at "CFG 3-5". One number cannot be right for both, so the data says both.
+        #
+        # This is the half of the deleted C++ branch that did NOT survive W2 Task 1. That branch
+        # (0820b47:ImageGenerationPage_video.cpp:250-268) set 30 / 3.5 with the comment "Full
+        # ltx-2.3-22b wants 25-40 steps, CFG 3-5" -- the full route's numbers, moved nowhere, so
+        # the resolver fell through to the distilled seed for BOTH routes and the cockpit pre-filled
+        # 8 / 1.0 under a caption claiming a table provenance.
+        #
+        # `default_route` is what the resolver answers when the caller names none, and it is the
+        # distilled one because that is what a render actually takes today.
+        "default_route": "two_stage_distilled",
+        "routes": {
+            "two_stage_distilled": {"steps": 8, "cfg": 1.0},
+            "single_stage_full": {"steps": 30, "cfg": 3.5},
+        },
     },
     "flux_image": {
         "samplers": ("euler", "euler_ancestral"),

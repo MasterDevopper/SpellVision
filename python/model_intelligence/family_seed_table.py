@@ -48,6 +48,21 @@ _ALIASES = {
 }
 
 
+def declares_variant(family: str | None, variant: str | None) -> bool:
+    """Whether this table has a row for `family:variant` -- not whether `seed_for` would ANSWER.
+
+    `seed_for` falls back to the base family row for an unknown variant, which is the right
+    behaviour for a floor and the wrong one for "does this family have that operating point". The
+    resolver needs the second question: a name no family declares must not be reported as the
+    weight's operating point, because `operating_point_params` then returns `{}` and the cockpit
+    silently drops to the floor while the reply names a Speed chip that does not exist.
+    """
+    key = str(family or "").strip().lower()
+    key = _ALIASES.get(key, key)
+    name = str(variant or "").strip().lower()
+    return bool(name) and f"{key}:{name}" in SEED_TABLE
+
+
 def seed_for(family: str | None, variant: str | None = None) -> dict[str, Any]:
     """Published defaults for a family (and optional variant), or {} when unknown."""
     key = str(family or "").strip().lower()

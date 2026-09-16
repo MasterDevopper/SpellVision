@@ -19,6 +19,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from model_intelligence import recommended as recommended_mod
+
 SCHEMA = "spellvision.model-sidecar/1"
 SUFFIX = ".spellvision.json"
 
@@ -172,6 +174,13 @@ def build_payload(
             "hashes": {"sha256": sha256, "autov2": (sha256 or "")[:10]},
             "kind": kind,
             "family": family,
+            # What the SITE calls this weight's operating point ("Turbo"), or None. Recorded here
+            # so `resolve._select_operating_point` has a data answer to read: until 2026-09-16 the
+            # only mechanism was a "turbo" substring in the FILE NAME, which named an operating
+            # point wan does not have and erased its whole tuned point (steps 20/3.5 where the
+            # table says 28/4.0). Derived by `recommended.variant_of`, the same function the
+            # published-defaults floor already used, so the two can never disagree.
+            "variant": recommended_mod.variant_of(version) if version else None,
             "base_model": version.get("baseModel") or card.get("base_model"),
             "quantisation": next(
                 (str((f.get("metadata") or {}).get("fp") or "")

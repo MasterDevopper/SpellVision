@@ -60,10 +60,22 @@ _CANVAS_SNAP: dict[str, dict[str, Any]] = {
 
 # A heuristic, not a measurement -- see the module docstring and CLAUDE.md S6. It exists only to
 # catch a canvas that is unrunnable on its face (4K on an 8GB card), not to model any family's real
-# footprint. Reserve roughly half of reported VRAM for the model/activations before spending the
-# rest on pixels, at a deliberately generous bytes-per-pixel so the cap only bites the obvious case.
-_CAP_VRAM_FRACTION = 0.5
-_CAP_BYTES_PER_PIXEL = 6_000
+# footprint.
+#
+# Retuned 2026-09-16, because the old 0.5 / 6000 B/px was not generous, it was WRONG: it gave an
+# 8 GB card 715 827 pixels, so a plain 1024x1024 SDXL default -- a size that renders fine on 8 GB --
+# resolved to 846x846, and a 6 GB card to 732x732. A cap that refuses the default size of the most
+# common family on the most common card is not catching the obvious case, it is the obvious case.
+# It was latent only because nothing sends `vram_gb` yet, which is the worst way for a number to be
+# safe.
+#
+# 0.75 / 1500 B/px gives 8 GB about 4.3 megapixels (~2072 square, and 1024x1024 passes with four
+# times the room), 12 GB about 6.4, 32 GB about 17.2. 3840x2160 -- the 8.3 Mpx case this cap was
+# written for -- is still refused on anything under ~15 GB. The direction of the error is
+# deliberate: an unrunnable canvas fails with an OOM the user can read, while a silently shrunk one
+# is a wrong render that looks like a working one.
+_CAP_VRAM_FRACTION = 0.75
+_CAP_BYTES_PER_PIXEL = 1_500
 
 
 def _rank(provenance: str) -> int:
@@ -83,11 +95,68 @@ def _offer(out: dict[str, dict[str, Any]], field: str, entry: dict[str, Any]) ->
         out[field] = entry
 
 
-def _sidecar_entries(sidecar_payload: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+def _apply_quorum(entry: dict[str, Any]) -> dict[str, Any]:
+    """Re-derive `site:image-meta-mode` vs `site:image-meta-weak` from the STORED `n`.
+
+    `recommended.build` applies `MODE_QUORUM` when it WRITES a sidecar. That made the quorum a
+    property of one writer rather than of the concept, and every sidecar written before the quorum
+    existed still claims full `site:image-meta-mode` rank at n=1. `sidecar.SCHEMA` did not change,
+    so nothing re-derives them -- 67 sidecars on the owner's disks carried 16 such fields, one of
+    which resolved `width 1792` from a single example under a caption reading "1 of 1 agree".
+
+    So the gate is applied HERE as well, on the read, from the evidence the entry carries about
+    itself. A file written by any version now resolves the same way, and a future writer that
+    stores a rank its own `n` does not support cannot make this reader believe it. Deliberately
+    NOT a schema bump: that invalidates old files rather than handling them, and leaves the next
+    writer free to store a provenance the reader still trusts.
+
+    An entry with no `n` at all is left alone: absent evidence is not evidence of thinness, and
+    every field that carries this provenance from `meta_parse.mode_over` carries its count with it.
+    """
+    if str(entry.get("provenance") or "") != "site:image-meta-mode":
+        return entry
+    n = entry.get("n")
+    if not isinstance(n, int) or n >= recommended.MODE_QUORUM:
+        return entry
+    return {**entry, "provenance": "site:image-meta-weak"}
+
+
+# A sanity floor on the four fields a site value can make NONSENSE of rather than merely wrong.
+# `hf_lookup` already bounds steps to 1..300; the image-meta path had no equivalent for any field,
+# and a real sidecar on this box resolved `height 8` from one example image. These are the spin
+# boxes' own ranges (ImageGenerationPage.cpp), so a value outside them could not be shown anyway --
+# the C++ silently dropped the height and kept the width, leaving a canvas half from the model and
+# half from whatever was there before, under a caption claiming the model published both.
+_SANE_RANGE: dict[str, tuple[int, int]] = {
+    "width": (64, 8192), "height": (64, 8192), "frames": (1, 2400), "fps": (1, 120),
+}
+
+
+def _is_sane(field: str, value: Any) -> bool:
+    bounds = _SANE_RANGE.get(field)
+    if bounds is None:
+        return True
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return False
+    return bounds[0] <= number <= bounds[1]
+
+
+def _sidecar_entries(sidecar_payload: dict[str, Any] | None,
+                     warnings: list[str] | None = None) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for field, entry in ((sidecar_payload or {}).get("recommended") or {}).items():
-        if field in recommended.FIELDS and isinstance(entry, dict) and entry.get("provenance"):
-            out[field] = dict(entry)
+        if field not in recommended.FIELDS or not isinstance(entry, dict) or not entry.get("provenance"):
+            continue
+        if not _is_sane(field, entry.get("value")):
+            if warnings is not None:
+                warnings.append(
+                    f"{field} {entry.get('value')!r} from {entry.get('provenance')} is outside "
+                    f"{_SANE_RANGE[field]}; using the family's value instead."
+                )
+            continue
+        out[field] = _apply_quorum(dict(entry))
     return out
 
 
@@ -108,21 +177,63 @@ def _canonical_sampler_family(family_key: str | None, mode: str | None) -> str |
     return candidate if candidate in fop.FAMILY_SAMPLER_ALLOWLISTS else family_key
 
 
+def _family_declares(family_key: str, operating_point: str) -> bool:
+    """Whether this family actually HAS the named operating point -- in either store.
+
+    `FAMILY_OPERATING_POINTS` names the runtime ones (wan's fast/quality). `family_seed_table` names
+    the published ones as `family:variant` rows (`krea2:turbo`). A family that declares neither has
+    no such point, and handing that name to `operating_point_params` returns `{}` -- which is how a
+    wan file with "turbo" in its name lost the whole tuned point and came back at the seed floor.
+    """
+    if fop.operating_point_params(family_key, operating_point):
+        return True
+    return family_seed_table.declares_variant(family_key, operating_point)
+
+
 def _select_operating_point(family_key: str | None, sidecar_payload: dict[str, Any] | None, path: str) -> str:
-    """Sidecar identity names one -> that. Else a `turbo` path substring. Else the family's own
-    default. Recorded in the result so the cockpit's Speed chip agrees with what was actually used."""
+    """The sidecar's recorded variant -> that. Else a `turbo` path substring. Else the family's own
+    default. Recorded in the result so the cockpit's Speed chip agrees with what was actually used.
+
+    Both non-default answers are DECLARATION-GATED: a name this family does not declare falls back
+    to the default rather than through to `operating_point_params` returning `{}`. That empty dict
+    was the real damage -- `wan2.2_t2v_turbo_fp8.safetensors` resolved operating point "turbo", wan
+    declares no such point, and the cockpit showed the seed floor's 20 / 3.5 where wan's own table
+    says 28 / 4.0, while `operating_point` in the reply named a Speed chip that does not exist.
+
+    `identity.variant` is the DATA answer (`sidecar.build_payload` records what CivitAI's version
+    name says). The filename substring stays only as the last resort for a weight with no sidecar,
+    it is not word-bounded, and it reads `turbo` out of `Turbocharged_Dreams_XL` -- which is exactly
+    why it may no longer name a point the family has not declared.
+    """
     if not family_key:
         return ""
+    default = fop.default_operating_point(family_key)
     identity = (sidecar_payload or {}).get("identity") or {}
     named = str(identity.get("variant") or identity.get("operating_point") or "").strip().lower()
-    if named:
+    if not named and "turbo" in Path(str(path or "")).stem.lower():
+        named = "turbo"
+    if named and _family_declares(family_key, named):
         return named
-    if "turbo" in Path(str(path or "")).stem.lower():
-        return "turbo"
-    return fop.default_operating_point(family_key)
+    return default
 
 
-def _table_operating_point_entries(family_key: str | None, operating_point: str, mode: str | None) -> dict[str, dict[str, Any]]:
+def _route_params(allow: dict[str, Any], route: str | None) -> dict[str, Any]:
+    """The steps/cfg a ROUTE-keyed family declares, for the named route or its own default.
+
+    Only LTX has these today, and only because one number cannot serve both its routes: the
+    distilled two-stage default samples ~8 steps with the guiders pinned at 1, the opt-in
+    single-stage-full path wants 25-40 at CFG 3-5 (CLAUDE.md S6). A family with no `routes` block
+    returns nothing and every other path here is unchanged.
+    """
+    routes = allow.get("routes") or {}
+    if not routes:
+        return {}
+    wanted = str(route or "").strip().lower() or str(allow.get("default_route") or "").strip()
+    return dict(routes.get(wanted) or routes.get(str(allow.get("default_route") or "")) or {})
+
+
+def _table_operating_point_entries(family_key: str | None, operating_point: str, mode: str | None,
+                                   route: str | None = None) -> dict[str, dict[str, Any]]:
     if not family_key:
         return {}
     raw = dict(fop.operating_point_params(family_key, operating_point))
@@ -131,6 +242,9 @@ def _table_operating_point_entries(family_key: str | None, operating_point: str,
     for field in _CANVAS_FIELDS:  # LTX's canvas lives here instead -- see module docstring.
         if not raw.get(field) and field in allow:
             raw[field] = allow[field]
+    for field, value in _route_params(allow, route).items():
+        if not raw.get(field):
+            raw[field] = value
     if not raw.get("sampler") and allow.get("default_sampler"):
         raw["sampler"] = allow["default_sampler"]
     if not raw.get("scheduler") and allow.get("default_scheduler"):
@@ -251,7 +365,8 @@ def _apply_hardware_cap(settings: dict[str, dict[str, Any]], vram_gb: float | No
 
 def resolve_model_defaults(*, path: str, family: str | None, mode: str, sidecar_payload: dict[str, Any] | None,
                            live_samplers: list[str] | None = None, live_schedulers: list[str] | None = None,
-                           vram_gb: float | None = None, host_ram_gb: float | None = None) -> dict[str, Any]:
+                           vram_gb: float | None = None, host_ram_gb: float | None = None,
+                           route: str | None = None) -> dict[str, Any]:
     family_key = str(family or "").strip().lower() or None
     warnings: list[str] = []
 
@@ -260,17 +375,21 @@ def resolve_model_defaults(*, path: str, family: str | None, mode: str, sidecar_
     floor: dict[str, dict[str, Any]] = {}
     for field, entry in _table_family_default_entries(family_key, operating_point).items():
         _offer(floor, field, entry)
-    for field, entry in _table_operating_point_entries(family_key, operating_point, mode).items():
+    for field, entry in _table_operating_point_entries(family_key, operating_point, mode, route).items():
         _offer(floor, field, entry)
 
     settings: dict[str, dict[str, Any]] = {k: dict(v) for k, v in floor.items()}
-    for field, entry in _sidecar_entries(sidecar_payload).items():
+    for field, entry in _sidecar_entries(sidecar_payload, warnings).items():
         _offer(settings, field, entry)
 
     _enforce_allowlist(settings, "sampler", "samplers", family_key, live_samplers, floor, mode, warnings)
     _enforce_allowlist(settings, "scheduler", "schedulers", family_key, live_schedulers, floor, mode, warnings)
-    _snap_canvas_legality(settings, family_key, mode, warnings)
+    # The cap runs BEFORE the legality snap, and the order is load-bearing: the other way round
+    # (which is how this shipped) produced a capped LTX canvas of 1123x636 -- 1123 % 32 == 3, a pair
+    # LTX's own adapter would refuse, displayed in the cockpit as though it were a size. Whatever
+    # the cap picks, the snap is what makes it legal, so the snap has to be last.
     _apply_hardware_cap(settings, vram_gb, warnings)
+    _snap_canvas_legality(settings, family_key, mode, warnings)
 
     return {
         "settings": settings,
