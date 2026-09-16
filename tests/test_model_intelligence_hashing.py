@@ -39,8 +39,7 @@ def test_cache_returns_the_digest_without_rereading(tmp_path: Path):
     blob = tmp_path / "w.safetensors"
     blob.write_bytes(b"one")
     cache = hashing.HashCache(tmp_path / "index.json")
-    digest = hashing.file_sha256(blob)
-    cache.put(blob, digest)
+    digest = hashing.hash_and_cache(cache, blob)
     assert cache.get(blob) == digest
 
 
@@ -48,7 +47,7 @@ def test_cache_misses_when_the_file_changed(tmp_path: Path):
     blob = tmp_path / "w.safetensors"
     blob.write_bytes(b"one")
     cache = hashing.HashCache(tmp_path / "index.json")
-    cache.put(blob, hashing.file_sha256(blob))
+    hashing.hash_and_cache(cache, blob)
     blob.write_bytes(b"two different bytes")
     assert cache.get(blob) is None
 
@@ -58,16 +57,90 @@ def test_cache_survives_a_reload(tmp_path: Path):
     blob.write_bytes(b"one")
     index = tmp_path / "index.json"
     first = hashing.HashCache(index)
-    digest = hashing.file_sha256(blob)
-    first.put(blob, digest)
+    digest = hashing.hash_and_cache(first, blob)
     first.save()
     assert hashing.HashCache(index).get(blob) == digest
+
+
+def test_save_merges_instead_of_overwriting_another_instances_entries(tmp_path: Path):
+    """Two `HashCache` objects on the SAME path -- a foreground refresh and a post-download hook's
+    own cache building concurrently, say -- must not stomp each other. `save()` used to write the
+    whole in-memory `_entries` dict over the file, so the second instance to save discarded
+    everything the first one had written. A third instance opened afterwards must see both."""
+    index = tmp_path / "index.json"
+    blob_a = tmp_path / "a.safetensors"
+    blob_b = tmp_path / "b.safetensors"
+    blob_a.write_bytes(b"aaa")
+    blob_b.write_bytes(b"bbbbb")
+
+    # Both open on an empty cache file, before EITHER has saved -- so neither's in-memory entries
+    # know about the other's, which is what makes a plain overwrite in save() lossy.
+    cache_one = hashing.HashCache(index)
+    cache_two = hashing.HashCache(index)
+
+    digest_a = hashing.hash_and_cache(cache_one, blob_a)
+    cache_one.save()
+
+    digest_b = hashing.hash_and_cache(cache_two, blob_b)
+    cache_two.save()
+
+    third = hashing.HashCache(index)
+    assert third.get(blob_a) == digest_a
+    assert third.get(blob_b) == digest_b
 
 
 def test_a_corrupt_cache_file_is_not_fatal(tmp_path: Path):
     index = tmp_path / "index.json"
     index.write_text("{ this is not json", encoding="utf-8")
     assert hashing.HashCache(index).get(tmp_path / "missing.safetensors") is None
+
+
+def test_put_refuses_a_stale_pre_hash_stamp(tmp_path: Path):
+    """`put` takes the STAMP READ BEFORE HASHING, not one it takes itself. Passing a stamp that no
+    longer matches the file's current identity -- the situation a file-changed-mid-hash produces --
+    must be refused, not silently accepted."""
+    blob = tmp_path / "w.safetensors"
+    blob.write_bytes(b"one")
+    cache = hashing.HashCache(tmp_path / "index.json")
+    stale_stamp = (999_999, 1)
+    assert cache.put(blob, "deadbeef", stale_stamp) is False
+    assert cache.get(blob) is None
+
+
+def test_a_file_that_changes_mid_hash_is_not_cached(tmp_path: Path, monkeypatch):
+    """The defect this fix closes: `put()` used to stat the file AFTER hashing finished and store
+    the digest beside that stamp, regardless of what the file looked like when hashing STARTED. A
+    write that lands between the last read and the eventual `put()` -- exactly what a post-download
+    hashing hook can race against -- meant the OLD content's digest got cached under the NEW
+    content's (size, mtime_ns), and a later `get()` would hand back a digest that does not belong
+    to what is on disk now.
+
+    Reproduced here with a `cancel` callback used as an interleaving hook: after hashing has
+    already consumed one real chunk, the file is overwritten with different-sized content (so the
+    stamp changes) before hashing runs to completion in the SAME `file_sha256` call -- mirroring a
+    concurrent writer finishing mid-hash rather than a clean cancel.
+    """
+    blob = tmp_path / "w.safetensors"
+    blob.write_bytes(b"a" * 20_000)
+    cache = hashing.HashCache(tmp_path / "index.json")
+
+    before = hashing.HashCache.stamp(blob)
+    calls = {"n": 0}
+
+    def rewrite_after_first_real_chunk():
+        calls["n"] += 1
+        if calls["n"] == 2:  # the first block has already been read and hashed by now
+            blob.write_bytes(b"b" * 55_000)
+        return False
+
+    digest = hashing.file_sha256(blob, chunk=1024, cancel=rewrite_after_first_real_chunk)
+    assert digest is not None
+    assert hashing.HashCache.stamp(blob) != before  # the file changed during that hash
+
+    cached = cache.put(blob, digest, before)
+
+    assert cached is False, "a digest computed across a mid-hash rewrite must not be cached"
+    assert cache.get(blob) is None
 
 
 def test_readable_roots_drops_a_root_that_raises(tmp_path: Path, monkeypatch):
@@ -86,6 +159,22 @@ def test_readable_roots_drops_a_root_that_raises(tmp_path: Path, monkeypatch):
     assert readable_roots.readable_models_roots([good, locked]) == [good]
     assert readable_roots.root_status(locked)["reason"] == "locked"
     assert readable_roots.root_status(good)["readable"] is True
+
+
+def test_a_root_with_an_embedded_null_byte_does_not_abort_the_others(tmp_path: Path):
+    """`os.listdir` raises ValueError ("embedded null character"), not OSError, for a path
+    containing chr(0). `root_status` promises never to raise, and the except chain only caught
+    FileNotFoundError/NotADirectoryError/OSError -- so this ValueError used to escape
+    `readable_models_roots` and abort enumeration of every other root in the same call."""
+    good = tmp_path / "good"
+    good.mkdir()
+    poisoned = str(tmp_path / "bad") + chr(0) + "root"
+
+    status = readable_roots.root_status(poisoned)
+    assert status["readable"] is False
+    assert status["reason"] == "error"
+
+    assert readable_roots.readable_models_roots([good, poisoned]) == [good]
 
 
 def test_a_missing_root_is_missing_not_locked(tmp_path: Path):

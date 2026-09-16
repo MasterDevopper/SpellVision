@@ -33,6 +33,10 @@ def root_status(root: str | Path) -> dict[str, Any]:
         winerror = getattr(exc, "winerror", None)
         locked = winerror in _BITLOCKER_ERRNOS or "BitLocker" in str(exc)
         return {"path": str(path), "readable": False, "reason": "locked" if locked else "error"}
+    except ValueError:
+        # os.listdir raises ValueError (not OSError) for a path with an embedded null byte, e.g.
+        # "embedded null character". One malformed root must not abort enumeration of the rest.
+        return {"path": str(path), "readable": False, "reason": "error"}
     return {"path": str(path), "readable": True, "reason": ""}
 
 
