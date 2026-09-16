@@ -17,19 +17,25 @@ from model_intelligence.civitai_lookup import (
     CivitaiClient,
     CivitaiThrottled,
 )
+from model_intelligence.family_seed_table import SEED_TABLE, seed_for
 from model_intelligence.hashing import HashCache, autov2, file_sha256, hash_and_cache
 from model_intelligence.hf_lookup import HfClient, card_identity, settings_from_readme, sha256_index
 from model_intelligence.meta_parse import mode_over, parse_meta, split_sampler
 from model_intelligence.readable_roots import readable_models_roots, root_status
+from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
 
 __all__ = [
     "ALLOWED_HOSTS",
     "DEFAULT_HOST",
     "CivitaiClient",
     "CivitaiThrottled",
+    "FIELDS",
     "HashCache",
     "HfClient",
+    "PROVENANCE_ORDER",
+    "SEED_TABLE",
     "autov2",
+    "build",
     "card_identity",
     "file_sha256",
     "hash_and_cache",
@@ -37,6 +43,7 @@ __all__ = [
     "parse_meta",
     "readable_models_roots",
     "root_status",
+    "seed_for",
     "settings_from_readme",
     "sha256_index",
     "split_sampler",
