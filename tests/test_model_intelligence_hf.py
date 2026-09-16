@@ -118,3 +118,22 @@ def test_a_snippet_outranks_prose():
 
 def test_nothing_found_is_empty_not_defaulted():
     assert hf_lookup.settings_from_readme("A model card with no numbers in it.") == {}
+
+
+def test_a_training_step_count_is_not_an_inference_step_count():
+    """"trained for 15000 steps" is provenance for the model, not a recommendation for the user.
+
+    The old pattern matched the last three digits and produced steps: 0 -- a value no one wrote,
+    outranking the family table. Never invent a value.
+    """
+    found = hf_lookup.settings_from_readme("This checkpoint was trained for 15000 steps on 8xA100.")
+    assert "steps" not in found
+
+
+def test_a_plausible_inference_step_count_is_still_read():
+    assert hf_lookup.settings_from_readme("We recommend 28 steps.")["steps"]["value"] == 28
+
+
+def test_zero_steps_is_never_returned():
+    for text in ("0 steps", "trained for 1000 steps", "100000 steps of training"):
+        assert hf_lookup.settings_from_readme(text).get("steps", {}).get("value") != 0

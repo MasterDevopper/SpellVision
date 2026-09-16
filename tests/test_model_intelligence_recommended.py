@@ -114,3 +114,56 @@ def test_every_value_declares_its_provenance():
     assert block
     for field, entry in block.items():
         assert entry["provenance"] in recommended.PROVENANCE_ORDER, field
+
+
+# --------------------------------------------------------------------------- W2: findings deferred from W1's review
+
+def test_a_card_cannot_claim_the_user_provenance():
+    """Only the user is the user. A card entry claiming "user" would outrank a unanimous site
+    value AND be preserved forever by sidecar.user_values -- a permanent wrong default written by
+    a third party's README."""
+    block = recommended.build(
+        civitai_version=_version("civitai_checkpoint_combined_sampler"),
+        card_settings={"steps": {"value": 999, "provenance": "user"}},
+        family="krea2",
+    )
+    assert block["steps"]["value"] == 10
+    assert block["steps"]["provenance"] == "site:image-meta-mode"
+
+
+def test_a_card_provenance_outside_the_vocabulary_is_ignored():
+    block = recommended.build(
+        civitai_version=None,
+        card_settings={"steps": {"value": 999, "provenance": "totally-made-up"}},
+        family="krea2",
+    )
+    assert block["steps"]["provenance"] == "table:family-default"
+
+
+def test_a_lone_example_does_not_outrank_a_card_snippet():
+    """The spec's n>=3 gate. One uploader's single example is evidence, not a recommendation."""
+    block = recommended.build(
+        civitai_version=_version("civitai_controlnet_sparse_meta"),  # steps present in 1 of 4
+        card_settings={"steps": {"value": 28, "provenance": "card:snippet-regex"}},
+        family=None,
+    )
+    assert block["steps"]["value"] == 28
+    assert block["steps"]["provenance"] == "card:snippet-regex"
+
+
+def test_a_lone_example_still_beats_nothing():
+    """Below the gate it is demoted, not discarded -- it still outranks the family floor."""
+    block = recommended.build(
+        civitai_version=_version("civitai_controlnet_sparse_meta"),
+        card_settings=None,
+        family="krea2",
+    )
+    assert block["steps"]["value"] == 8
+    assert block["steps"]["provenance"] == "site:image-meta-weak"
+    assert block["steps"]["n"] == 1
+
+
+def test_three_agreeing_examples_clear_the_gate():
+    version = {"images": [{"meta": {"steps": 7}} for _ in range(3)]}
+    block = recommended.build(civitai_version=version, card_settings=None, family=None)
+    assert block["steps"]["provenance"] == "site:image-meta-mode"

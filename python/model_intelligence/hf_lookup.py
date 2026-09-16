@@ -35,7 +35,14 @@ _SNIPPET_RE = re.compile(
     r"\s*=\s*([0-9]+(?:\.[0-9]+)?)"
 )
 _PROSE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("steps", re.compile(r"(\d{1,3})\s*(?:inference\s*)?steps\b", re.I)),
+    # "trained for 15000 steps" is not a recommendation, and the old pattern had no leading \b, so
+    # it matched the LAST THREE DIGITS of any longer run and produced steps: 0 -- a value nobody
+    # wrote, outranking the family table. A digit run is one contiguous \w block, and \b only sits
+    # at the edges of that block (digit-to-digit is never a boundary) -- so anchoring both ends of
+    # the capture with \b means a 4+-digit run (a training step count, an epoch count, a parameter
+    # count) can never match at all, not even partially: there is no boundary to land the \b on
+    # except at the true start and end of the whole run.
+    ("steps", re.compile(r"\b(\d{1,3})\b\s*(?:inference\s*)?steps\b", re.I)),
     ("cfg", re.compile(r"\bcfg(?:\s*scale)?\s*(?:of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)", re.I)),
     ("guidance", re.compile(r"\bguidance(?:\s*scale)?\s*(?:of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)", re.I)),
     ("shift", re.compile(r"\bshift\s*(?:of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)", re.I)),
@@ -114,6 +121,11 @@ def settings_from_readme(text: str) -> dict[str, dict[str, Any]]:
         field = _SNIPPET_KEYS[match.group(1)]
         raw = match.group(2)
         value = float(raw) if "." in raw else int(raw)
+        if field == "steps" and not (1 <= float(value) <= 300):
+            # A snippet is code the author actually ran, but a stray 0 (or an out-of-range
+            # figure a regex misread) is still not an inference-step count any sampler would
+            # accept -- never invent/keep a value nobody could have meant.
+            continue
         out[field] = {"value": value, "provenance": "card:snippet-regex"}
 
     for field, pattern in _PROSE_PATTERNS:
@@ -124,6 +136,12 @@ def settings_from_readme(text: str) -> dict[str, dict[str, Any]]:
             continue
         raw = match.group(1)
         value = float(raw) if "." in raw else int(raw)
+        if field == "steps" and not (1 <= float(value) <= 300):
+            # "0 steps" is the boundary case the leading \b fix above does not cover on its own --
+            # a single-digit run of "0" is a genuine \b-bounded token, so it still matches the
+            # pattern. It is never a real recommendation either way, so bound the result instead of
+            # trusting whatever the regex happened to capture.
+            continue
         out[field] = {"value": value, "provenance": "card:prose-regex"}
 
     return out

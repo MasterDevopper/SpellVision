@@ -28,10 +28,23 @@ PROVENANCE_ORDER: tuple[str, ...] = (
     "card:frontmatter",
     "card:snippet-regex",
     "card:prose-regex",
+    "site:image-meta-weak",
     "table:family-default",
 )
 
 _RANK = {name: index for index, name in enumerate(PROVENANCE_ORDER)}
+
+# Provenances a CARD may claim. "user" is deliberately absent: only the user is the user, and a
+# card entry claiming it would outrank a unanimous site value and then be preserved forever by
+# sidecar.user_values -- a permanent wrong default written by a third party's README.
+CARD_PROVENANCES: frozenset[str] = frozenset(
+    {"card:frontmatter", "card:snippet-regex", "card:prose-regex"}
+)
+
+# Example images needed before their mode counts as a recommendation rather than an observation.
+# Spec section 1.3. Below it the value is kept but DEMOTED -- one uploader's single render is
+# evidence, and evidence still beats a generic family floor.
+MODE_QUORUM = 3
 
 FIELDS = (
     "steps", "cfg", "guidance", "shift", "sampler", "scheduler", "clip_skip",
@@ -77,16 +90,22 @@ def build(
     version = civitai_version or {}
     metas = [image.get("meta") for image in version.get("images") or []]
     for field, mode in meta_parse.mode_over(metas).items():
-        _offer(out, field, _entry(mode["value"], "site:image-meta-mode",
-                                  n=mode["n"], total=mode["total"]))
+        # Spec 1.3's n>=3 gate. Below quorum, the value is DEMOTED (site:image-meta-weak) rather
+        # than dropped -- one uploader's single render is still evidence, and evidence still beats
+        # the generic family floor. At/above quorum it is a recommendation the model's own author
+        # rendered with, repeatedly, so it keeps outranking a card.
+        provenance = "site:image-meta-mode" if mode["n"] >= MODE_QUORUM else "site:image-meta-weak"
+        _offer(out, field, _entry(mode["value"], provenance, n=mode["n"], total=mode["total"]))
 
     words = [str(w).strip() for w in version.get("trainedWords") or [] if str(w).strip()]
     if words:
         _offer(out, "prompt_prefix", _entry(", ".join(words), "site:trainedWords"))
 
     for field, entry in (card_settings or {}).items():
+        # Only a provenance a CARD could honestly claim is accepted -- "user" is not in
+        # CARD_PROVENANCES, so a card entry forging it is silently ignored rather than trusted.
         provenance = str(entry.get("provenance") or "card:prose-regex")
-        if provenance in _RANK:
+        if provenance in CARD_PROVENANCES:
             _offer(out, field, _entry(entry.get("value"), provenance))
 
     variant = None
