@@ -1757,6 +1757,13 @@ void MainWindow::buildPages()
     pageTrace("modelsPage warmCache deferred");
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
+    // W2: refreshing the inventory is the user saying "look at the library again". Whatever it
+    // finds, the per-model answers cached from the PREVIOUS look are now claims about a state
+    // nobody has re-checked, so they go. Without this the cockpit kept serving an answer resolved
+    // before a sidecar existed, for the whole session, under a caption that told the user to go and
+    // create that sidecar.
+    connect(modelsPage_, &ModelManagerPage::inventoryRefreshStarted, this,
+            [this]() { clearModelDefaultsCache(); });
     // Models page: the existing download lane, and the new delete.
     connect(modelsPage_, &ModelManagerPage::downloadModelRequested, this, [this](const QString &reference) {
         startModelDownload(reference, QString(), QJsonObject{{QStringLiteral("origin"), QStringLiteral("models_page")}});
@@ -2494,7 +2501,9 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     // No fetch is issued here -- a page has no model selected at construction, and the page itself
     // triggers one on every model change.
     (*slot)->setModelDefaultsProvider(
-        [this](const QString &modelPath) { return modelDefaultsFor(modelPath); });
+        [this](const QString &modelPath, const QString &family, const QString &mode) {
+            return modelDefaultsFor(modelPath, family, mode);
+        });
     (*slot)->setModelDefaultsFetcher(
         [this](const QString &modelPath,
                const QString &family,
@@ -3448,9 +3457,24 @@ namespace
 // platform, and must be one cache entry. Both the store and the lookup go through here, so a path
 // that arrives from the catalog scan and the same path restored from QSettings cannot end up as two
 // requests for one model -- which is the shape the keyed single-flight exists to prevent.
-QString modelDefaultsCacheKey(const QString &path)
+//
+// The FAMILY AND MODE are part of the key, because they are part of the question. `resolve.py`
+// branches on both for sampler, scheduler, width, height, frames, fps and the reported operating
+// point, and the page sends both -- so keying on the path alone cached one answer and served it for
+// every other question about the same file. Switching the T2V family bar from Auto (resolving wan)
+// to LTX with the same checkpoint re-applied the WAN answer: LTX's 49 frames and its own sampler
+// never arrived, for the rest of the session, with nothing on screen saying so. The same weight
+// opened on T2V and then I2V had the same shape.
+QString modelDefaultsCacheKey(const QString &path, const QString &family, const QString &mode)
 {
-    return QDir::fromNativeSeparators(path.trimmed()).toLower();
+    return QDir::fromNativeSeparators(path.trimmed()).toLower() + QLatin1Char('|')
+        + family.trimmed().toLower() + QLatin1Char('|') + mode.trimmed().toLower();
+}
+
+// The path half of a key, for evicting every family/mode answer about one file at once.
+QString modelDefaultsPathPrefix(const QString &path)
+{
+    return QDir::fromNativeSeparators(path.trimmed()).toLower() + QLatin1Char('|');
 }
 } // namespace
 
@@ -3459,10 +3483,10 @@ void MainWindow::fetchModelDefaultsAsync(const QString &modelPath,
                                          const QString &mode,
                                          std::function<void()> completion)
 {
-    const QString key = modelDefaultsCacheKey(modelPath);
+    const QString key = modelDefaultsCacheKey(modelPath, family, mode);
     // No model, or already answered: the caller gets its completion now, on this stack, exactly as
     // fetchOperatingPointsAsync does for an already-fetched table.
-    if (key.isEmpty() || modelDefaultsByPath_.contains(key))
+    if (modelPath.trimmed().isEmpty() || modelDefaultsByPath_.contains(key))
     {
         if (completion)
             completion();
@@ -3518,12 +3542,32 @@ void MainWindow::fetchModelDefaultsAsync(const QString &modelPath,
         12000);
 }
 
-QJsonObject MainWindow::modelDefaultsFor(const QString &modelPath) const
+QJsonObject MainWindow::modelDefaultsFor(const QString &modelPath, const QString &family,
+                                         const QString &mode) const
 {
-    const QString key = modelDefaultsCacheKey(modelPath);
-    if (key.isEmpty())
+    if (modelPath.trimmed().isEmpty())
         return {};
-    return modelDefaultsByPath_.value(key);
+    return modelDefaultsByPath_.value(modelDefaultsCacheKey(modelPath, family, mode));
+}
+
+void MainWindow::clearModelDefaultsCache(const QString &modelPath)
+{
+    // A cached answer is only correct while the sidecar it was resolved from is. Nothing used to
+    // drop one, so a refresh that WROTE a sidecar changed what the cockpit showed only after a
+    // restart -- and the caption was telling the user to go and run that refresh. In-flight entries
+    // are deliberately left alone: their waiters still hold widgets, and cancelling them would give
+    // the page a completion that never comes.
+    if (modelPath.trimmed().isEmpty())
+    {
+        modelDefaultsByPath_.clear();
+        return;
+    }
+    const QString prefix = modelDefaultsPathPrefix(modelPath);
+    for (const QString &key : modelDefaultsByPath_.keys())
+    {
+        if (key.startsWith(prefix))
+            modelDefaultsByPath_.remove(key);
+    }
 }
 
 void MainWindow::sendWorkerRequestAsync(

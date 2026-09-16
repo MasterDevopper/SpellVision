@@ -1931,6 +1931,30 @@ void ImageGenerationPage::buildUi()
     });
 
     QWidget *aspectRow = makeStackedField(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
+
+    // Spec 2.2 / plan Task 6 Step 3: orientation in SIMPLE. CLAUDE.md names it as the example of an
+    // intent-level control -- "orientation as Portrait / Landscape" -- and the point is that it must
+    // SWAP the resolved pair, not override it with a literal. The Aspect combo beside it does the
+    // other thing: it states 1216x832 whatever the model said, and the model's own answer is then
+    // blocked for the rest of the session. Orientation keeps the numbers the model published and
+    // changes only which way round they are, so a wan checkpoint that resolves 832x480 shows
+    // 480x832 in Portrait and is still showing wan's canvas.
+    //
+    // Visible in BOTH modes, because the house rule is that Advanced REVEALS IN PLACE and never
+    // relocates: hiding this in Advanced would move orientation from one control to two spin boxes
+    // in a different card, which is exactly the muscle-memory break the rule forbids.
+    orientationCombo_ = new ClickOnlyComboBox(quickControlsCard);
+    orientationCombo_->addItem(QStringLiteral("As published"), QString());
+    orientationCombo_->addItem(QStringLiteral("Portrait"), QStringLiteral("portrait"));
+    orientationCombo_->addItem(QStringLiteral("Landscape"), QStringLiteral("landscape"));
+    orientationCombo_->setToolTip(QStringLiteral(
+        "Turns the resolved canvas on its side. It keeps the size this model publishes and swaps "
+        "width for height -- unlike an Aspect preset, which replaces both."));
+    configureComboBox(orientationCombo_);
+    connect(orientationCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { applyOrientationPreference(); });
+    QWidget *orientationRow = makeStackedField(quickControlsCard, QStringLiteral("Orientation"),
+                                               orientationCombo_);
     samplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Sampler"), sampling_->samplerCombo());
     schedulerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Scheduler"), sampling_->schedulerCombo());
     videoSamplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Video Sampler"), sampling_->videoSamplerCombo());
@@ -1980,6 +2004,7 @@ void ImageGenerationPage::buildUi()
     samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
     samplerSchedulerLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    samplerSchedulerLayout_->addWidget(orientationRow);
     samplerSchedulerLayout_->addWidget(aspectRow);
     samplerSchedulerLayout_->addWidget(samplerRow_);
     samplerSchedulerLayout_->addWidget(schedulerRow_);

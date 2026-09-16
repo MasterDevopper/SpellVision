@@ -143,7 +143,12 @@ public:
     // {ok, family, operating_point, settings:{field:{value,provenance,confidence,n,total}}, warnings}
     // reply; {} until a fetch has landed (or if it failed), which is the cockpit's cue to stay on
     // the family operating point.
-    void setModelDefaultsProvider(std::function<QJsonObject(const QString &modelPath)> provider);
+    // (path, family, mode) -- all three, because the answer depends on all three. A provider given
+    // the path alone answered one question and was asked several: the T2V family bar moving from
+    // Auto (wan) to LTX re-applied wan's frames and wan's sampler.
+    void setModelDefaultsProvider(std::function<QJsonObject(const QString &modelPath,
+                                                            const QString &family,
+                                                            const QString &mode)> provider);
     void setModelDefaultsFetcher(std::function<void(const QString &modelPath,
                                                    const QString &family,
                                                    const QString &mode,
@@ -298,6 +303,10 @@ public:
     bool selectComboValue(QComboBox *combo, const QString &value);
     // A preset PREFERS a sampler; the family's allow-list decides whether it can have it.
     void applyPresetSampling(const QString &preset, const QString &sampler, const QString &scheduler);
+    // Turn the canvas the resolver produced to match the user's stated orientation. Runs at the end
+    // of applyResolvedSettings, so a model's own published pair arrives first and is then oriented
+    // -- the order that lets an intent survive a model change without freezing the numbers.
+    void applyOrientationPreference();
     void showCheckpointPicker();
     void showLoraPicker();
     void setSelectedModel(const QString &value, const QString &display = QString());
@@ -397,12 +406,16 @@ public:
     QString currentOperatingPoint_;          // the selected point's name (sent on the request)
     QStringList operatingPointLoras_;         // accel LoRA values the selector added (so Quality removes only those)
     // W2 per-model defaults. The provider reads MainWindow's keyed cache; the fetcher fills it.
-    std::function<QJsonObject(const QString &)> modelDefaultsProvider_;
+    std::function<QJsonObject(const QString &, const QString &, const QString &)> modelDefaultsProvider_;
     std::function<void(const QString &, const QString &, const QString &, std::function<void()>)>
         modelDefaultsFetcher_;
     // One model change fans out into several updateOperatingPointSelector() calls inside a single
     // event-loop turn; this coalesces that burst into one deferred ask.
     bool modelDefaultsRequestScheduled_ = false;
+    // The family the last ask was made FOR. applyModelDefaults reads the cache with it, so the
+    // answer it applies is an answer to the question that was asked -- the cache is keyed on
+    // (path, family, mode) and a page that looked up a different family would simply miss.
+    QString modelDefaultsFamily_;
 
     // W2 -- "the user typed this".
     //
@@ -420,12 +433,35 @@ public:
     // Cleared when the user deliberately changes the model, and when they re-pick a Speed chip:
     // both are a request for that thing's numbers, and keeping the previous hand-edits over them
     // would be the mirror image of the defect.
-    enum class ResolvedField { Steps, Cfg, Sampler, Scheduler, Shift, Width, Height, Frames, Fps };
+    // SplitSteps is the wan dual-noise high/low/split trio. It is a SEPARATE field from Steps even
+    // though applyResolvedSettings derives its value from Steps, because the user can set the three
+    // of them asymmetrically (20 / 8 for a deliberate MoE handoff) without touching Steps at all --
+    // and with no flag of its own, the Steps guard was open and a Simple/Advanced toggle reset both
+    // spins to 14. Ruling W2-E3 is one flag per field the wave writes; these three were the
+    // exception, and they are exactly the fields where a hand-edit is most deliberate.
+    enum class ResolvedField { Steps, Cfg, Sampler, Scheduler, Shift, Width, Height, Frames, Fps,
+                               SplitSteps };
     void watchForUserEdits();
     bool userEdited(ResolvedField field) const;
     void markUserEdited(ResolvedField field);
+    // The canvas came from the image the user staged. Protected from a model change; dropped when
+    // the staged content itself changes.
+    void markContentDerived(ResolvedField field);
+    void clearContentDerivedFields();
     void clearUserEditedFields();
     QSet<int> userEditedFields_;
+    // "This came from the user's own CONTENT", as distinct from "the user typed it".
+    //
+    // ensureCanvasSizeDefault marks Width/Height when the canvas was taken from a staged image,
+    // with a comment saying a checkpoint picked afterwards must not resize the user's input out
+    // from under them. setSelectedModel then cleared every flag on every model change -- performing
+    // the exact sentence the comment forbids. Both rules are right: a deliberate model change IS a
+    // request for that model's numbers, and a staged keyframe's shape IS the shape the user asked
+    // for. They were never reconciled because there was one set for two different facts.
+    //
+    // Cleared when the content it came from goes (a new or removed input image), not when the model
+    // changes. userEdited() reads both sets.
+    QSet<int> contentDerivedFields_;
     // A depth, not a bool: applyResolvedSettings runs inside applySimpleOperatingPointDefaults,
     // which runs inside restoreSnapshot. A bool would be cleared by the inner scope's exit and the
     // outer scope's remaining writes would then read as the user's own.
@@ -681,6 +717,10 @@ public:
 
         QBoxLayout *stackToolsLayout_ = nullptr;
     QBoxLayout *samplerSchedulerLayout_ = nullptr;
+    // Simple-mode orientation (spec 2.2). "" = as published; "portrait" / "landscape" swap the
+    // RESOLVED pair rather than replacing it with a literal, which is what distinguishes it from
+    // the Aspect preset combo beside it.
+    QComboBox *orientationCombo_ = nullptr;
     QBoxLayout *stepsCfgLayout_ = nullptr;
     QBoxLayout *seedBatchLayout_ = nullptr;
     QBoxLayout *sizeLayout_ = nullptr;

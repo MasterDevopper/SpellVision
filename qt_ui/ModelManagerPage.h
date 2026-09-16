@@ -79,6 +79,11 @@ signals:
     // "Delete…": the selected file, already confirmed by the user on this page. MainWindow sends
     // delete_model and refreshes the inventory on success.
     void deleteModelRequested(const QString &path);
+    // W2: an inventory rescan has started. MainWindow drops its per-model defaults cache on it --
+    // an answer resolved before this scan is a claim about a library state nobody has re-checked,
+    // and until 2026-09-16 nothing ever dropped one, so a sidecar written between two picks of the
+    // same checkpoint could not reach the cockpit without restarting the app.
+    void inventoryRefreshStarted();
 
 public slots:
     void refreshInventory();

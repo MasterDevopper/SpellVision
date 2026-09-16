@@ -244,12 +244,15 @@ private slots:
     void theCaptionNamesTheProvenanceAndTheAgreementCount();
     void aUserTypedCanvasSurvivesAModelDefaultsRefresh();
     void anEmptyReplyLeavesTheWidgetsAlone();
+    void theAnswerIsLookedUpForTheFamilyOnScreen();
+    void aHandSetDualNoiseSplitSurvivesASimpleAdvancedToggle();
+    void orientationSwapsTheResolvedPairRatherThanReplacingIt();
 };
 
 void ModelDefaultsApplyTest::stepsLandInSimpleMode()
 {
     ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
-    page.setModelDefaultsProvider([](const QString &modelPath) -> QJsonObject {
+    page.setModelDefaultsProvider([](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
         if (modelPath.compare(kKrea2Path, Qt::CaseInsensitive) != 0)
             return {};
         return krea2Reply();
@@ -262,12 +265,18 @@ void ModelDefaultsApplyTest::stepsLandInSimpleMode()
     QSpinBox *steps = stepsSpinOf(page);
     QVERIFY2(steps, "steps spin box not found");
     QCOMPARE(steps->value(), 10);
+
+    // A SECOND application, which is what the async reply actually does when it lands after the
+    // family point. An implementation that applies once and then considers the model "done" passed
+    // every case in this file.
+    page.refreshModelDefaults();
+    QCOMPARE(steps->value(), 10);
 }
 
 void ModelDefaultsApplyTest::stepsLandInAdvancedModeToo()
 {
     ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
-    page.setModelDefaultsProvider([](const QString &modelPath) -> QJsonObject {
+    page.setModelDefaultsProvider([](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
         if (modelPath.compare(kKrea2Path, Qt::CaseInsensitive) != 0)
             return {};
         return krea2Reply();
@@ -282,6 +291,9 @@ void ModelDefaultsApplyTest::stepsLandInAdvancedModeToo()
 
     QSpinBox *steps = stepsSpinOf(page);
     QVERIFY2(steps, "steps spin box not found");
+    QCOMPARE(steps->value(), 10);
+
+    page.refreshModelDefaults();
     QCOMPARE(steps->value(), 10);
 }
 
@@ -300,7 +312,7 @@ void ModelDefaultsApplyTest::anUnmentionedSamplerKeepsTheFamilyOperatingPointsSa
     QCOMPARE(sampler->currentData().toString(), QStringLiteral("uni_pc"));
 
     const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v_test.safetensors");
-    page.setModelDefaultsProvider([path](const QString &modelPath) -> QJsonObject {
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
         if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
             return {};
         // This model's own settings say something about steps and DELIBERATELY nothing about
@@ -314,13 +326,25 @@ void ModelDefaultsApplyTest::anUnmentionedSamplerKeepsTheFamilyOperatingPointsSa
     selectVideoCheckpoint(page, path, QStringLiteral("wan test checkpoint"));
     page.refreshModelDefaults();
 
+    // BOTH halves. The sampler assertion alone passed against an EMPTY applyModelDefaults() -- it
+    // only said a value nothing had touched was still there -- so the test that was meant to prove
+    // the overlay writes what it carries and leaves the rest alone was proving the second half of
+    // that sentence and not the first.
+    QCOMPARE(stepsSpinOf(page)->value(), 20);
+    QCOMPARE(sampler->currentData().toString(), QStringLiteral("uni_pc"));
+
+    // Twice. Five of the six cases called this exactly once, so a plant that applies on the FIRST
+    // call and short-circuits afterwards -- the shape of a plausible "don't re-apply" optimisation,
+    // and the shape of the async arrival this whole path exists for -- passed all of them.
+    page.refreshModelDefaults();
+    QCOMPARE(stepsSpinOf(page)->value(), 20);
     QCOMPARE(sampler->currentData().toString(), QStringLiteral("uni_pc"));
 }
 
 void ModelDefaultsApplyTest::theCaptionNamesTheProvenanceAndTheAgreementCount()
 {
     ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
-    page.setModelDefaultsProvider([](const QString &modelPath) -> QJsonObject {
+    page.setModelDefaultsProvider([](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
         if (modelPath.compare(kKrea2Path, Qt::CaseInsensitive) != 0)
             return {};
         return krea2Reply();
@@ -345,7 +369,7 @@ void ModelDefaultsApplyTest::aUserTypedCanvasSurvivesAModelDefaultsRefresh()
     QVERIFY2(spins.width && spins.height, "canvas spin boxes not found");
 
     const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/some_other_model.safetensors");
-    page.setModelDefaultsProvider([path](const QString &modelPath) -> QJsonObject {
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
         if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
             return {};
         QJsonObject settings;
@@ -384,7 +408,7 @@ void ModelDefaultsApplyTest::anEmptyReplyLeavesTheWidgetsAlone()
 
     // The worker is down (or this model has nothing published): the provider has no answer for
     // anything.
-    page.setModelDefaultsProvider([](const QString &) -> QJsonObject { return {}; });
+    page.setModelDefaultsProvider([](const QString &, const QString &, const QString &) -> QJsonObject { return {}; });
 
     const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/unknown_model.safetensors");
     selectVideoCheckpoint(page, path, QStringLiteral("unknown model"));
@@ -401,6 +425,166 @@ void ModelDefaultsApplyTest::anEmptyReplyLeavesTheWidgetsAlone()
     QVERIFY2(caption->fullText().isEmpty(),
              qPrintable(QStringLiteral("caption claims something about a model that answered nothing: %1")
                             .arg(caption->fullText())));
+
+    // Everything above is satisfied by an EMPTY applyModelDefaults(), which is the nature of a
+    // negative test and was the hole: two of six cases passed against a stub. So the same page is
+    // now given a provider that DOES answer, and the answer has to arrive -- the "leaves it alone"
+    // claim only means something once "and otherwise it acts" is proven on the same object.
+    page.setModelDefaultsProvider([](const QString &, const QString &, const QString &) -> QJsonObject {
+        QJsonObject settings;
+        settings.insert(QStringLiteral("steps"), entry(37, QStringLiteral("site:image-meta-mode"), 4, 4));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+    page.refreshModelDefaults();
+    QCOMPARE(steps->value(), 37);
+}
+
+// --- W2 fix wave: the question is (path, family, mode), not path -------------------------------
+
+void ModelDefaultsApplyTest::theAnswerIsLookedUpForTheFamilyOnScreen()
+{
+    // The cache MainWindow keeps behind this provider was keyed on the path alone while the answer
+    // depends on the family too. Switching the T2V family bar from Auto (resolving wan) to LTX with
+    // the same checkpoint re-applied the WAN answer: LTX's own frame count never arrived, for the
+    // rest of the session, with nothing on screen saying so. The page half of that fix is that it
+    // ASKS with the family it is showing -- a provider given only the path cannot answer correctly
+    // however well the cache behind it is keyed.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    QSpinBox *frames = nullptr;
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->toolTip().contains(QStringLiteral("Total frames"), Qt::CaseInsensitive))
+            frames = box;
+    }
+    QVERIFY2(frames, "frame count spin box not found");
+
+    QStringList familiesAsked;
+    QStringList modesAsked;
+    page.setModelDefaultsProvider([&familiesAsked, &modesAsked](const QString &, const QString &family,
+                                                               const QString &mode) -> QJsonObject {
+        familiesAsked << family;
+        modesAsked << mode;
+        QJsonObject settings;
+        settings.insert(QStringLiteral("frames"),
+                        entry(family == QStringLiteral("ltx") ? 49 : 81,
+                              QStringLiteral("table:family-operating-point")));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/shared_checkpoint.safetensors");
+    page.pinVideoFamily(QStringLiteral("wan"));
+    selectVideoCheckpoint(page, path, QStringLiteral("shared checkpoint"));
+    page.refreshModelDefaults();
+    QCOMPARE(frames->value(), 81);
+
+    // The same weight, the family bar moved. This is the exact production sequence: the combo's
+    // handler calls updateOperatingPointSelector(), which asks again for the new family.
+    page.pinVideoFamily(QStringLiteral("ltx"));
+    page.refreshOperatingPointSelector();
+    page.refreshModelDefaults();
+
+    QVERIFY2(familiesAsked.contains(QStringLiteral("ltx")),
+             qPrintable(QStringLiteral("the page never asked about ltx; it asked: %1")
+                            .arg(familiesAsked.join(QStringLiteral(", ")))));
+    QCOMPARE(frames->value(), 49);
+    // And the mode travels with it, for the same reason: the same weight on T2V and on I2V is two
+    // questions, and one cached answer used to serve both.
+    QVERIFY2(modesAsked.contains(QStringLiteral("t2v")),
+             qPrintable(QStringLiteral("modes asked: %1").arg(modesAsked.join(QStringLiteral(", ")))));
+}
+
+void ModelDefaultsApplyTest::aHandSetDualNoiseSplitSurvivesASimpleAdvancedToggle()
+{
+    // Ruling W2-E3 is one user-edit flag per field the wave writes, and the ledger recorded Task 6
+    // as complete against it. applyResolvedSettings writes highNoiseStepsSpin_ / lowNoiseStepsSpin_
+    // / splitStepSpin_ from `steps / 2`, and watchForUserEdits() connected none of the three -- so a
+    // deliberate asymmetric MoE handoff (20 high / 8 low) was reset to 14 / 14 by the next
+    // Simple/Advanced toggle, because `steps` had never been touched and its guard was open.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    page.setOperatingPointsProvider([](const QString &) { return wanOperatingPointTable(); });
+    page.pinVideoFamily(QStringLiteral("wan"));
+
+    // The write under test is gated on usesWanDualNoiseMode(), so the STACK MODE has to be the
+    // dual-noise one or applyResolvedSettings never reaches the three spins at all -- and the first
+    // version of this test passed against the planted defect for exactly that reason: it asserted
+    // that values nothing had touched were unchanged. The Stack Mode combo is the production
+    // control, found by the option it offers rather than by a private pointer.
+    QComboBox *stackMode = comboOffering(page, QStringLiteral("wan_dual_noise"));
+    QVERIFY2(stackMode, "the video Stack Mode combo was not found");
+    stackMode->setCurrentIndex(stackMode->findData(QStringLiteral("wan_dual_noise")));
+    page.updateDisclosure(true);
+
+    // The dual-noise trio: range(1, 511) or (1, 512), which no other spin box on the page uses.
+    QVector<QSpinBox *> split;
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->minimum() == 1 && (box->maximum() == 511 || box->maximum() == 512))
+            split << box;
+    }
+    QVERIFY2(split.size() >= 2, "the dual-noise high/low step spins were not found");
+
+    // The page must actually be writing these before the test can claim it stopped. Without this
+    // the "survives" assertion is satisfied by a code path that never ran.
+    QVERIFY2(split[0]->value() == 14 && split[1]->value() == 14,
+             qPrintable(QStringLiteral("the family's 28 steps did not reach the split spins (%1 / %2); "
+                                       "this case would pass whatever the guard did")
+                            .arg(split[0]->value()).arg(split[1]->value())));
+
+    // A write from outside the page's own ProgrammaticWrite scope is a human typing.
+    for (int i = 0; i < split.size(); ++i)
+        split[i]->setValue(i == 0 ? 20 : 8);
+
+    page.updateDisclosure(false);
+    page.updateDisclosure(true);
+    page.refreshOperatingPointSelector();
+
+    QCOMPARE(split[0]->value(), 20);
+    QCOMPARE(split[1]->value(), 8);
+}
+
+void ModelDefaultsApplyTest::orientationSwapsTheResolvedPairRatherThanReplacingIt()
+{
+    // Spec 2.2 / plan Task 6 Step 3. The distinction the spec insists on: Portrait must SWAP the
+    // pair the model published, not state a literal one. An Aspect preset does the second thing,
+    // which is why it could not stand in for this -- it replaces both numbers and then blocks the
+    // model's own answer for the rest of the session.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const CanvasSpins spins = canvasSpins(page);
+    QVERIFY2(spins.width && spins.height, "canvas spin boxes not found");
+
+    QComboBox *orientation = comboOffering(page, QStringLiteral("portrait"));
+    QVERIFY2(orientation, "the Simple-mode Orientation combo was not found");
+
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan_orientation.safetensors");
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("width"), entry(832, QStringLiteral("table:family-operating-point")));
+        settings.insert(QStringLiteral("height"), entry(480, QStringLiteral("table:family-operating-point")));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    page.updateDisclosure(false); // Simple
+    selectVideoCheckpoint(page, path, QStringLiteral("wan orientation checkpoint"));
+    page.refreshModelDefaults();
+    QCOMPARE(spins.width->value(), 832);
+    QCOMPARE(spins.height->value(), 480);
+
+    orientation->setCurrentIndex(orientation->findData(QStringLiteral("portrait")));
+    QCOMPARE(spins.width->value(), 480);
+    QCOMPARE(spins.height->value(), 832);
+
+    // And the model's answer still arrives -- oriented. A Portrait choice that FROZE the canvas
+    // (by marking it user-edited) would pass the two lines above and fail here, and that is the
+    // difference between an orientation and an aspect preset.
+    page.refreshModelDefaults();
+    QCOMPARE(spins.width->value(), 480);
+    QCOMPARE(spins.height->value(), 832);
+
+    orientation->setCurrentIndex(orientation->findData(QStringLiteral("landscape")));
+    QCOMPARE(spins.width->value(), 832);
+    QCOMPARE(spins.height->value(), 480);
 }
 
 QTEST_MAIN(ModelDefaultsApplyTest)

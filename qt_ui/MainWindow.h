@@ -283,8 +283,14 @@ private:
                                  const QString &family,
                                  const QString &mode,
                                  std::function<void()> completion = {});
-    // Cache-only, exactly like operatingPointsForFamily: {} until a fetch has landed.
-    QJsonObject modelDefaultsFor(const QString &modelPath) const;
+    // Cache-only, exactly like operatingPointsForFamily: {} until a fetch has landed. Keyed on
+    // (path, family, mode) because the answer depends on all three -- see modelDefaultsCacheKey.
+    QJsonObject modelDefaultsFor(const QString &modelPath, const QString &family,
+                                 const QString &mode) const;
+    // Drop every cached answer about one weight (all families, all modes), or the whole cache when
+    // given no path. The Models page calls it on an inventory refresh: a sidecar written between
+    // two picks of the same checkpoint has to be able to reach the cockpit without a restart.
+    void clearModelDefaultsCache(const QString &modelPath = QString());
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();

@@ -246,6 +246,14 @@ void ImageGenerationPage::watchForUserEdits()
     watchSpin(fpsSpin_, ResolvedField::Fps);
     watchDouble(highNoiseShiftSpin_, ResolvedField::Shift);
     watchDouble(lowNoiseShiftSpin_, ResolvedField::Shift);
+    // The dual-noise trio. applyResolvedSettings writes all three from `steps / 2` and they were
+    // watched by nothing, so a deliberate asymmetric split (20 high / 8 low, an MoE handoff the
+    // user chose) was reset to 14 / 14 by the next Simple/Advanced toggle -- `steps` had never been
+    // touched, so its guard was open. The sweep rule `resolved-fields-are-watched` now fails a
+    // build in which applyResolvedSettings writes a spin box this function does not connect.
+    watchSpin(highNoiseStepsSpin_, ResolvedField::SplitSteps);
+    watchSpin(lowNoiseStepsSpin_, ResolvedField::SplitSteps);
+    watchSpin(splitStepSpin_, ResolvedField::SplitSteps);
     if (sampling_)
     {
         watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);
@@ -263,7 +271,11 @@ void ImageGenerationPage::watchForUserEdits()
 
 bool ImageGenerationPage::userEdited(ResolvedField field) const
 {
-    return userEditedFields_.contains(static_cast<int>(field));
+    // Two sets, one question. "The user typed this" is cleared by a deliberate model change; "this
+    // came from the user's own content" is not, because picking a checkpoint is not a request to
+    // resize the keyframe they staged. applyResolvedSettings asks only whether it may write.
+    return userEditedFields_.contains(static_cast<int>(field))
+        || contentDerivedFields_.contains(static_cast<int>(field));
 }
 
 void ImageGenerationPage::markUserEdited(ResolvedField field)
@@ -271,6 +283,19 @@ void ImageGenerationPage::markUserEdited(ResolvedField field)
     if (programmaticWriteDepth_ > 0)
         return;
     userEditedFields_.insert(static_cast<int>(field));
+}
+
+void ImageGenerationPage::markContentDerived(ResolvedField field)
+{
+    // Deliberately NOT gated on programmaticWriteDepth_. The write that produced this value was the
+    // app's (ensureCanvasSizeDefault, inside its own guard); what makes it the user's is the image
+    // they chose, not the keystroke they did not make.
+    contentDerivedFields_.insert(static_cast<int>(field));
+}
+
+void ImageGenerationPage::clearContentDerivedFields()
+{
+    contentDerivedFields_.clear();
 }
 
 void ImageGenerationPage::clearUserEditedFields()
@@ -347,8 +372,8 @@ void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)
     // The dual-noise split boxes are the resolved step count expressed across two experts -- the
     // builder runs the high expert 0->N/2 and the low one N/2->N. They are not a second sampling
     // decision, so they follow the number above instead of carrying one of their own.
-    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && usesWanDualNoiseMode()
-        && resolvedVideoFamilyToken() == QStringLiteral("wan"))
+    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && !userEdited(ResolvedField::SplitSteps)
+        && usesWanDualNoiseMode() && resolvedVideoFamilyToken() == QStringLiteral("wan"))
     {
         const int half = qMax(1, steps.toInt() / 2);
         if (highNoiseStepsSpin_)
@@ -358,6 +383,34 @@ void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)
         if (splitStepSpin_)
             splitStepSpin_->setValue(half);
     }
+
+    // Last, and inside the same guard: whatever pair the resolver produced, the user's stated
+    // orientation decides which way round it is shown. Applying it here rather than making it a
+    // user-edit means a later model's own canvas still arrives -- it simply arrives the right way
+    // up. A Portrait choice that FROZE the canvas would be the Aspect preset's behaviour, and the
+    // reason Aspect cannot serve as the orientation control.
+    applyOrientationPreference();
+}
+
+void ImageGenerationPage::applyOrientationPreference()
+{
+    if (!orientationCombo_ || !widthSpin_ || !heightSpin_)
+        return;
+    const QString wanted = orientationCombo_->currentData().toString();
+    if (wanted.isEmpty())
+        return;  // "As published" -- the resolver's pair, untouched.
+    const int width = widthSpin_->value();
+    const int height = heightSpin_->value();
+    if (width < 64 || height < 64 || width == height)
+        return;
+    const bool isPortrait = height > width;
+    if ((wanted == QStringLiteral("portrait")) == isPortrait)
+        return;
+    // A SWAP, not a new size: the long and short edges the model published are both kept, so the
+    // pixel count, the divisibility the resolver snapped to and the family's own aspect all survive.
+    const ProgrammaticWrite guard(this);
+    widthSpin_->setValue(height);
+    heightSpin_->setValue(width);
 }
 
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
@@ -837,7 +890,8 @@ void ImageGenerationPage::refreshOperatingPointSelector()
     updateOperatingPointSelector();
 }
 
-void ImageGenerationPage::setModelDefaultsProvider(std::function<QJsonObject(const QString &)> provider)
+void ImageGenerationPage::setModelDefaultsProvider(
+    std::function<QJsonObject(const QString &, const QString &, const QString &)> provider)
 {
     // Store only. Unlike setOperatingPointsProvider, this does NOT refresh the selector: the family
     // table is app-wide and worth re-rendering the moment it arrives, while this answers a question
@@ -858,6 +912,11 @@ void ImageGenerationPage::refreshModelDefaults()
 
 void ImageGenerationPage::requestModelDefaults(const QString &family)
 {
+    // Recorded BEFORE the early-outs. applyModelDefaults reads the cache with this family, and the
+    // cache is keyed on it -- so a page that asked for one family and then looked up another would
+    // simply miss its own answer. It is also the fix for the coalescing hazard below: the LAST ask
+    // in an event-loop turn owns the widgets, so it owns the family the lookup uses.
+    modelDefaultsFamily_ = family.trimmed().toLower();
     if (selectedModelPath_.trimmed().isEmpty())
     {
         // No model, nothing to overlay -- but the caption must stop describing the last one.
@@ -869,14 +928,18 @@ void ImageGenerationPage::requestModelDefaults(const QString &family)
 
     modelDefaultsRequestScheduled_ = true;
     const QString path = selectedModelPath_;
-    const QString familyKey = family.trimmed().toLower();
     const QString mode = modeKey();
     // Deferred for exactly the reason setSelectedModel already defers its component resolve, and
     // the comment there is the record of what happens otherwise: a worker round-trip runs a nested
     // event loop, and starting one from inside a combo-change handler re-enters the UI with the
     // popup possibly still open, and crashes. singleShot(0) runs it on a clean stack.
-    QTimer::singleShot(0, this, [this, path, familyKey, mode]() {
+    QTimer::singleShot(0, this, [this, path, mode]() {
         modelDefaultsRequestScheduled_ = false;
+        // The family is read HERE, not captured at schedule time. applyVideoFamilyCheckpointIfNeeded
+        // and the family combo's own handler both fire inside one turn, and capturing the first
+        // ask's family cached whichever ran first -- so the answer the page then applied was an
+        // answer about a family the bar is no longer showing.
+        const QString familyKey = modelDefaultsFamily_;
         if (path.compare(selectedModelPath_, Qt::CaseInsensitive) != 0)
             return; // the user moved on while this was queued; the newer ask owns the widgets
         if (!modelDefaultsFetcher_)
@@ -916,7 +979,7 @@ void ImageGenerationPage::applyModelDefaults()
 {
     QJsonObject reply;
     if (modelDefaultsProvider_ && !selectedModelPath_.trimmed().isEmpty())
-        reply = modelDefaultsProvider_(selectedModelPath_);
+        reply = modelDefaultsProvider_(selectedModelPath_, modelDefaultsFamily_, modeKey());
 
     const QJsonObject settings = reply.value(QStringLiteral("settings")).toObject();
 
@@ -1039,15 +1102,22 @@ void ImageGenerationPage::refreshModelDefaultsCaption(const QJsonObject &reply)
     case DefaultsSource::Table:
     case DefaultsSource::None:
         // Two different situations, and conflating them is what sends a user looking for a setting
-        // that was never published instead of running the refresh that would find it.
+        // that was never published. The difference is worth a sentence -- but neither sentence may
+        // name an action. The first version of this told the user to "run Refresh metadata on
+        // the Models page", and there is no such control: the Models page has "Refresh Models",
+        // which rescans the inventory, and nothing in the UI starts a model_intel_refresh at all.
+        // Sending someone to look for a button that does not exist is worse than saying less.
         caption = noSidecar
-            ? QStringLiteral("Family defaults · run Refresh metadata on the Models page to use "
-                             "this model's own")
+            ? QStringLiteral("Family defaults · SpellVision has no metadata for this model yet")
             : QStringLiteral("Family defaults (this model has no published settings)");
         break;
     }
+    // NOT "reduced to fit VRAM". That states as fact something the code does not know: the cap is a
+    // rough pixels-per-gigabyte heuristic that has never been measured against any family, and the
+    // sentence saying so lives in a `warnings` array this function throws away. The visible string
+    // now claims exactly what was done and on what basis.
     if (capped)
-        caption += QStringLiteral(" · reduced to fit VRAM");
+        caption += QStringLiteral(" · canvas reduced by a rough VRAM estimate");
 
     // setFullText, not setText: the label elides to whatever width the inspector gives it and keeps
     // the full sentence in the tooltip, so no width cuts this mid-word. Shown in BOTH modes.

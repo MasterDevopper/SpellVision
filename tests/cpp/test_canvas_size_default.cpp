@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QLabel>
 #include <QCoreApplication>
 #include <QImage>
 #include <QJsonArray>
@@ -83,6 +84,26 @@ QJsonObject familyTable(int width, int height, int frames, int fps)
     table.insert(QStringLiteral("operating_points"),
                  QJsonArray{point(QStringLiteral("quality"), 28, 4.0), point(QStringLiteral("fast"), 4, 1.0)});
     return table;
+}
+
+// The video "Primary" checkpoint combo, found by the label beside it -- the same identification
+// tests/cpp/test_model_defaults_apply.cpp uses, and for the same reason: its currentIndexChanged
+// handler calls the private setSelectedModel(), so driving it simulates a real checkpoint pick
+// rather than reaching around one. A model CHANGE is the event clearUserEditedFields() runs on, and
+// without it this file's staged-canvas case could not fail however the flags behaved.
+QComboBox *videoPrimaryModelComboOf(ImageGenerationPage &page)
+{
+    for (QLabel *label : page.findChildren<QLabel *>())
+    {
+        if (label->text() != QStringLiteral("Primary"))
+            continue;
+        if (QWidget *cell = label->parentWidget())
+        {
+            if (QComboBox *combo = cell->findChild<QComboBox *>())
+                return combo;
+        }
+    }
+    return nullptr;
 }
 
 QString writePng(const QTemporaryDir &dir, const QString &name, const QSize &size)
@@ -250,10 +271,12 @@ private slots:
 
     void a_simple_mode_aspect_choice_survives_the_same_way()
     {
-        // Orientation in Simple is expressed through the Aspect presets (there is no separate
-        // Portrait/Landscape toggle), and they are still literal pairs. What must hold is that
-        // choosing one is treated as the user stating a size, not as a value the next family
-        // default may quietly replace.
+        // The Aspect presets are literal pairs, and choosing one is the user stating a size -- not
+        // a value the next family default may quietly replace. Orientation is a DIFFERENT control
+        // (added 2026-09-16, spec 2.2): it swaps the resolved pair instead of replacing it, and is
+        // covered by tests/cpp/test_model_defaults_apply.cpp. This comment used to say Aspect was
+        // the only orientation there was, which recorded a missing feature in a place nobody
+        // reading the ledger would find it.
         ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
         const CanvasSpins spins = canvasSpins(page);
         QVERIFY(spins.width && spins.height);
@@ -278,6 +301,79 @@ private slots:
         page.updateDisclosure(false);
         QCOMPARE(spins.width->value(), 768);
         QCOMPARE(spins.height->value(), 1024);
+    }
+
+    void a_canvas_taken_from_the_staged_image_survives_a_model_change()
+    {
+        // ensureCanvasSizeDefault marks the canvas when it came from the image the user staged,
+        // with a comment saying "a checkpoint picked afterwards must not resize their input out
+        // from under them". setSelectedModel then called clearUserEditedFields() on EVERY model
+        // change -- performing the sentence the comment forbids. Stage a 1280x720 keyframe on I2V,
+        // pick a wan checkpoint, and it became 832x480.
+        //
+        // Both rules were right and neither was wrong: a deliberate model change IS a request for
+        // that model's numbers, and a staged keyframe's shape IS the shape the user asked for. What
+        // was missing is that they are two different facts sharing one set.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString keyframe = writePng(dir, QStringLiteral("keyframe.png"), QSize(1280, 720));
+
+        ImageGenerationPage page(ImageGenerationPage::Mode::ImageToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+
+        page.useImageAsInput(keyframe);
+        QCOMPARE(spins.width->value(), 1280);
+        QCOMPARE(spins.height->value(), 720);
+
+        // A REAL model change, through the combo whose handler calls setSelectedModel(). That is
+        // the event clearUserEditedFields() runs on, and it is the whole subject: a version of this
+        // test that only refreshed the operating point passed against the planted defect, because
+        // the flags were never cleared and nothing was ever overwritten.
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(832, 480, 81, 16); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        QComboBox *primary = videoPrimaryModelComboOf(page);
+        QVERIFY2(primary, "primary video model combo not found");
+        const int index = primary->count();
+        primary->addItem(QStringLiteral("wan checkpoint"),
+                         QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v.safetensors"));
+        if (primary->currentIndex() != index)
+            primary->setCurrentIndex(index);
+        page.refreshOperatingPointSelector();
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        page.refreshModelDefaults();
+
+        QCOMPARE(spins.width->value(), 1280);
+        QCOMPARE(spins.height->value(), 720);
+    }
+
+    void staging_a_different_image_does_replace_the_canvas_it_gave()
+    {
+        // The other half, and the reason this is a second SET rather than a flag that is never
+        // cleared: the mark protects a size against a model change, not against the content it came
+        // from being replaced. Without this, the first keyframe's shape would outlive the keyframe.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString first = writePng(dir, QStringLiteral("first.png"), QSize(1280, 720));
+        const QString second = writePng(dir, QStringLiteral("second.png"), QSize(720, 1280));
+
+        ImageGenerationPage page(ImageGenerationPage::Mode::ImageToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+
+        page.useImageAsInput(first);
+        QCOMPARE(spins.width->value(), 1280);
+
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+        page.useImageAsInput(second);
+        QCOMPARE(spins.width->value(), 720);
+        QCOMPARE(spins.height->value(), 1280);
     }
 };
 

@@ -456,6 +456,7 @@ void ModelManagerPage::refreshInventory()
     if (refreshWatcher_->isRunning())
         return;
 
+    emit inventoryRefreshStarted();
     const QString modelsRoot = resolveModelsRoot();
     const QString downloadsRoot = resolveDownloadsRoot();
     const QStringList extra = spellvision::shell::extraModelsRootsFromSettings();

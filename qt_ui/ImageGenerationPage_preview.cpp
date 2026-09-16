@@ -716,6 +716,10 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
         imagePreviewController_->clearCache();
 
     inputImageEdit_->setText(path);
+    // The staged content is changing, so a canvas derived from the PREVIOUS content stops being the
+    // user's shape. Dropped here and only here: this is the event those marks exist to survive
+    // everything else (a model change above all), and the one event they must not survive.
+    clearContentDerivedFields();
     // An unsized i2i / i2v page takes its canvas from the image it was just given.
     if (!path.isEmpty())
         ensureCanvasSizeDefault();

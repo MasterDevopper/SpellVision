@@ -367,6 +367,11 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
         // Picking a different checkpoint is a request for THAT checkpoint's settings. Carrying the
         // previous model's hand-edits across would be the mirror image of the defect the flags
         // exist to stop: the numbers on screen would belong to a model that is no longer selected.
+        //
+        // The CONTENT-derived marks deliberately survive this. A canvas taken from the image the
+        // user staged is not a stale opinion about the old checkpoint; the image is still staged
+        // and its shape is still the shape they asked for. Only clearContentDerivedFields() --
+        // called when that content itself changes -- drops those.
         clearUserEditedFields();
     }
     refreshSelectedModelUi();
@@ -1689,8 +1694,13 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
     }
     if (fromTheUsersImage)
     {
-        markUserEdited(ResolvedField::Width);
-        markUserEdited(ResolvedField::Height);
+        // markContentDerived, NOT markUserEdited -- and the difference is the whole of this
+        // comment being true. Both used to go into one set, and setSelectedModel cleared that set
+        // on every model change: stage a 1280x720 keyframe on I2V, then pick a wan checkpoint, and
+        // 832x480 was written over the shape of the user's own input. The sentence above was in the
+        // tree, describing a protection the next click removed.
+        markContentDerived(ResolvedField::Width);
+        markContentDerived(ResolvedField::Height);
     }
 }
 
