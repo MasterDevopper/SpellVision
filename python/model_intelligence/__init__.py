@@ -1,0 +1,23 @@
+"""Model intelligence: who a local weight is, according to the site that hosts it.
+
+A weight on disk is a filename and some bytes. This package turns it into an identity -- name,
+pictures, trigger words, licence -- and, the part the rest of the app cares about, the settings
+its author actually renders with.
+
+Measured on this box 2026-09-16: a by-hash lookup hit 4 of 4 local files ANONYMOUSLY, and the
+owner's own house checkpoint publishes 10 steps / CFG 1 across 10 of 10 example images while
+SpellVision was rendering it at 52 / 3.5 from the family table. Per-model settings are not a
+convenience here; they are a correctness fix.
+"""
+from __future__ import annotations
+
+from model_intelligence.hashing import HashCache, autov2, file_sha256
+from model_intelligence.readable_roots import readable_models_roots, root_status
+
+__all__ = [
+    "HashCache",
+    "autov2",
+    "file_sha256",
+    "readable_models_roots",
+    "root_status",
+]
