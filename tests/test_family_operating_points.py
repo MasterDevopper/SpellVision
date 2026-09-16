@@ -98,17 +98,28 @@ def test_wan_core_defaults_lifted_verbatim():
 
 def test_wan_wrapper_defaults_lifted_verbatim():
     assert _op("wan_wrapper") == {
-        "steps": 30, "cfg": 6.0, "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
-    }  # no sampler (WanVideoSampler is scheduler-driven)
+        # W2: "sampler": "" recorded honestly (WanVideoSampler is scheduler-driven and has no
+        # sampler_name literal to lift -- an empty string says "no choice to offer", same as the
+        # ltx allowlist's empty schedulers tuple).
+        "steps": 30, "cfg": 6.0, "sampler": "", "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
+    }
 
 
 def test_wan_diffusers_defaults_lifted_verbatim():
-    assert _op("wan_diffusers") == {"steps": 30, "cfg": 5.0}
+    # W2: sampler/scheduler recorded empty -- the diffusers WanPipeline path picks its scheduler
+    # class in code, not by a ComfyUI-style name, so there is no literal to lift.
+    assert _op("wan_diffusers") == {"steps": 30, "cfg": 5.0, "sampler": "", "scheduler": ""}
 
 
 def test_hunyuan_defaults_lifted_verbatim():
     # shift 7.0 recorded for provenance; the builder keeps it hardcoded (not routed).
-    assert _op("hunyuan_video") == {"steps": 20, "cfg": 6.0, "shift": 7.0}
+    # W2: sampler/scheduler added (GROUNDED -- what the builder actually patches into
+    # KSamplerSelect/BasicScheduler); width/height/frames/fps added (the generic video widget
+    # defaults, since applyOptimalVideoSamplingDefaults has no hunyuan branch).
+    assert _op("hunyuan_video") == {
+        "steps": 20, "cfg": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
+        "width": 832, "height": 480, "frames": 81, "fps": 16,
+    }
 
 
 def test_generic_fallback_defaults_retuned():
@@ -125,29 +136,39 @@ def test_generic_fallback_defaults_retuned():
 # --------------------------------------------------------------------------- Phase 2b: image defaults
 
 def test_flux_image_defaults_lifted_verbatim():
+    # W2: width/height added (published canvas, copied from family_seed_table).
     assert _op("flux_image") == {
         "steps": 20, "cfg": 1.0, "guidance_default": 3.5, "sampler": "euler", "scheduler": "simple",
+        "width": 1024, "height": 1024,
     }  # cfg/guidance/sampler grounded (pinned); only steps is routed
 
 
 def test_pixart_image_defaults_lifted_verbatim():
-    assert _op("pixart_image") == {"steps": 20, "cfg": 4.5, "sampler": "euler", "scheduler": "normal"}
+    assert _op("pixart_image") == {
+        "steps": 20, "cfg": 4.5, "sampler": "euler", "scheduler": "normal",
+        "width": 1024, "height": 1024,
+    }
 
 
 def test_lumina_image_defaults_lifted_verbatim():
     assert _op("lumina_image") == {
         "steps": 30, "cfg": 4.0, "shift": 6.0, "sampler": "res_multistep", "scheduler": "normal",
+        "width": 1024, "height": 1024,
     }
 
 
 def test_zimage_image_defaults_lifted_verbatim():
     assert _op("zimage_image") == {
         "steps": 4, "cfg": 1.0, "shift": 3.0, "sampler": "res_multistep", "scheduler": "simple",
+        "width": 1024, "height": 1024,
     }  # official Turbo config -- grounded
 
 
 def test_anima_image_defaults_lifted_verbatim():
-    assert _op("anima_image") == {"steps": 30, "cfg": 4.0, "sampler": "er_sde", "scheduler": "simple"}
+    assert _op("anima_image") == {
+        "steps": 30, "cfg": 4.0, "sampler": "er_sde", "scheduler": "simple",
+        "width": 1024, "height": 1024,
+    }
 
 
 # --------------------------------------------------------------------------- Phase 3a: operating_point validation
@@ -207,7 +228,11 @@ def test_payload_single_point_family():
     p = fop.family_operating_points_payload("hunyuan_video")
     assert p["default_operating_point"] == "default"
     assert [op["name"] for op in p["operating_points"]] == ["default"]
-    assert p["operating_points"][0]["params"] == {"steps": 20, "cfg": 6.0, "shift": 7.0}
+    # W2: params grew sampler/scheduler/width/height/frames/fps alongside steps/cfg/shift.
+    assert p["operating_points"][0]["params"] == {
+        "steps": 20, "cfg": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
+        "width": 832, "height": 480, "frames": 81, "fps": 16,
+    }
     assert p["operating_points"][0]["lora"] == {} and p["operating_points"][0]["acceleration"] == {}
 
 
@@ -286,3 +311,74 @@ def test_image_family_alias_resolves_allowlist():
     snap = fop.family_sampling_snapshot()
     assert "wan" in snap and "sdxl" in snap and "flux" in snap
     assert snap["flux"]["default_sampler"] == "euler"
+
+
+# --------------------------------------------------------------------------- W2: schema growth (canvas + duration)
+
+def test_every_operating_point_carries_a_complete_sampling_set():
+    """A point the cockpit applies must say what to apply.
+
+    Before W2 the video canvas/frames/fps values lived as literals in
+    ImageGenerationPage_video.cpp while steps/cfg/sampler lived here, so the two could disagree
+    and did. This asserts the table alone is sufficient.
+    """
+    from family_operating_points import FAMILY_OPERATING_POINTS, OPERATING_POINT_FIELDS
+
+    required = {"steps", "cfg", "sampler", "scheduler"}
+    for family, block in FAMILY_OPERATING_POINTS.items():
+        for name, point in block["operating_points"].items():
+            missing = required - set(point)
+            assert not missing, f"{family}/{name} is missing {sorted(missing)}"
+            unknown = set(point) - set(OPERATING_POINT_FIELDS)
+            assert not unknown, f"{family}/{name} has unknown fields {sorted(unknown)}"
+
+
+def test_video_families_carry_their_canvas_and_duration():
+    """wan / hunyuan_video / mochi must name frames and fps, because the C++ that used to hold
+    those numbers is being deleted in this wave.
+
+    LTX is checked separately, against FAMILY_SAMPLER_ALLOWLISTS rather than
+    FAMILY_OPERATING_POINTS: this table has NO "ltx" row, on purpose. LTX is template-driven (steps
+    and cfg live in the shipped graph and the builder ignores a cockpit value for the distilled
+    route) and two tests already assert the row's absence deliberately --
+    test_the_operating_point_table_has_no_ltx_row below, and
+    test_family_capability.py::test_ltx_offers_the_cockpit_its_real_samplers, whose own comment
+    says an earlier pass added a row "for parity" and broke both. Re-adding it here to carry
+    width/height/frames/fps would be the same regression a third time, so those fields were
+    declared on the allowlist instead, beside the sampler facts LTX already publishes there.
+    """
+    from family_operating_points import FAMILY_OPERATING_POINTS, FAMILY_SAMPLER_ALLOWLISTS
+
+    for family in ("wan", "hunyuan_video", "mochi"):
+        block = FAMILY_OPERATING_POINTS[family]
+        point = block["operating_points"][block["default_operating_point"]]
+        assert point.get("frames"), f"{family} default point names no frames"
+        assert point.get("fps"), f"{family} default point names no fps"
+        assert point.get("width") and point.get("height"), f"{family} default point names no canvas"
+
+    ltx = FAMILY_SAMPLER_ALLOWLISTS["ltx"]
+    assert ltx.get("frames"), "ltx allowlist names no frames"
+    assert ltx.get("fps"), "ltx allowlist names no fps"
+    assert ltx.get("width") and ltx.get("height"), "ltx allowlist names no canvas"
+
+
+def test_the_operating_point_table_has_no_ltx_row():
+    """LTX is template-driven and stays absent from FAMILY_OPERATING_POINTS on purpose -- see the
+    comment above FAMILY_SAMPLER_ALLOWLISTS["ltx"] and family_capability.TEMPLATE_DRIVEN_FAMILIES.
+    An earlier pass added a row "for parity" and broke this exact assertion plus
+    test_family_capability.py's; both are pinned so a future pass does not repeat it a third time."""
+    from family_operating_points import FAMILY_OPERATING_POINTS
+
+    assert "ltx" not in FAMILY_OPERATING_POINTS
+
+
+def test_the_wan_numbers_that_were_in_cpp_are_now_in_the_table():
+    """The exact values ImageGenerationPage_video.cpp:219-278 applied, so the move is lossless."""
+    from family_operating_points import FAMILY_OPERATING_POINTS
+
+    point = FAMILY_OPERATING_POINTS["wan"]["operating_points"][
+        FAMILY_OPERATING_POINTS["wan"]["default_operating_point"]
+    ]
+    assert point["shift"] == 5.0
+    assert point["width"] == 832 and point["height"] == 480
+    assert point["frames"] == 81 and point["fps"] == 16

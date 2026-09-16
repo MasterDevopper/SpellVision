@@ -84,6 +84,27 @@ def accel_loras_for(params: dict[str, Any] | None, command: Any) -> dict[str, st
     return {k: str(v) for k, v in pair.items() if str(v or "").strip()}
 
 
+# The complete vocabulary of an operating point. `steps/cfg/sampler/scheduler` are required of
+# every point; the rest are optional and present where the family has a published answer.
+#
+# width/height/frames/fps arrived in W2. They were literals inside
+# ImageGenerationPage_video.cpp::applyOptimalVideoSamplingDefaults (and its neighbours --
+# ensureCanvasSizeDefault's generic video canvas, the frame/fps spin-box construction defaults),
+# which meant the cockpit and this table could disagree about the same family -- and did, because
+# each was edited without the other. The numbers below are exactly what that C++ applied (or, where
+# the C++ never branched a family at all, exactly what its generic fallback produced); the C++ keeps
+# only the act of applying them.
+#
+# denoise/guidance_default were already present on some points before W2 (wan_wrapper /
+# native_split_generic / flux_image) but never named in the vocabulary; they are listed here for the
+# same reason width/height/frames/fps are -- so a caller that iterates the field set sees the whole
+# shape, not a guess reconstructed from whichever points happen to set it.
+OPERATING_POINT_FIELDS: tuple[str, ...] = (
+    "steps", "cfg", "guidance", "guidance_default", "sampler", "scheduler", "shift", "denoise",
+    "clip_skip", "width", "height", "frames", "fps", "lora", "acceleration",
+)
+
+
 FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
     "wan": {
         "default_operating_point": "quality",
@@ -98,6 +119,14 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "sampler": "euler",
                 "scheduler": "simple",
                 "shift": 5.0,
+                # W2: lifted verbatim from applyOptimalVideoSamplingDefaults's wan branch (shift)
+                # plus the generic video canvas/duration widgets it inherits unchanged
+                # (ImageGenerationPage_catalog.cpp:929 QSize(832, 480); ImageGenerationPage.cpp
+                # frameCountSpin_/fpsSpin_ construction defaults 81 / 16).
+                "width": 832,
+                "height": 480,
+                "frames": 81,
+                "fps": 16,
                 "lora": {"accel": False},
                 "acceleration": {"type": "teacache", "profile": "balanced"},
             },
@@ -110,6 +139,12 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "sampler": "euler",
                 "scheduler": "simple",
                 "shift": 5.0,
+                # W2: same canvas/duration as "quality" -- the operating point changes sampling
+                # speed, not the requested video's size or length.
+                "width": 832,
+                "height": 480,
+                "frames": 81,
+                "fps": 16,
                 "lora": {"accel": True, **_WAN_LIGHTX2V},
                 "acceleration": {"type": "none"},
             },
@@ -151,7 +186,13 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             # Lifted verbatim from _build_native_wan_split_video_prompt inline literals.
             # NOT validated by render; provenance unknown.
             "default": {
-                "steps": 30, "cfg": 6.0, "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
+                "steps": 30, "cfg": 6.0,
+                # W2: "sampler" added empty -- honest, not invented. WanVideoSampler has no
+                # sampler_name input at all (the comment above already said so); recording "" here
+                # says "this family has no choice to offer" the same way FAMILY_SAMPLER_ALLOWLISTS's
+                # empty ltx schedulers tuple does, rather than silently omitting the required key.
+                "sampler": "",
+                "scheduler": "unipc", "shift": 5.0, "denoise": 1.0,
             },
         },
     },
@@ -162,7 +203,10 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
         "operating_points": {
             # Lifted verbatim from _native_video_kwargs inline literals.
             # NOT validated by render; provenance unknown.
-            "default": {"steps": 30, "cfg": 5.0},
+            # W2: "sampler"/"scheduler" added empty -- honest, not invented. The diffusers
+            # WanPipeline path picks its scheduler class in code, not by a ComfyUI-style name; there
+            # is no literal to lift.
+            "default": {"steps": 30, "cfg": 5.0, "sampler": "", "scheduler": ""},
         },
     },
 
@@ -174,7 +218,22 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
         "operating_points": {
             # Lifted verbatim from _build_native_hunyuan_video_prompt inline literals.
             # NOT validated by render; provenance unknown. shift 7.0 is declarative here (builder keeps it hardcoded).
-            "default": {"steps": 20, "cfg": 6.0, "shift": 7.0},
+            #
+            # W2: sampler/scheduler added -- PINNED / recorded only, GROUNDED. euler/simple is what
+            # the builder patches into KSamplerSelect/BasicScheduler and what the render-proven run
+            # used (Doc 28, frame-0 MAE 5.55); FAMILY_SAMPLER_ALLOWLISTS already names them as this
+            # family's default_sampler/default_scheduler. Not routed here (the builder resolves them
+            # itself via sampling_for), so recording the same values duplicates nothing new.
+            #
+            # W2: width/height/frames/fps added. applyOptimalVideoSamplingDefaults has no hunyuan
+            # branch, so a fresh hunyuan session inherits the generic video widgets verbatim:
+            # ensureCanvasSizeDefault's QSize(832, 480) and the frameCountSpin_/fpsSpin_ construction
+            # defaults 81 / 16 (ImageGenerationPage_catalog.cpp:929; ImageGenerationPage.cpp:1787-1812).
+            "default": {
+                "steps": 20, "cfg": 6.0, "shift": 7.0,
+                "sampler": "euler", "scheduler": "simple",
+                "width": 832, "height": 480, "frames": 81, "fps": 16,
+            },
         },
     },
 
@@ -189,9 +248,22 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 4.5,                # routed -- GROUNDED (Mochi real-cfg sweet spot); NOT pinned
                 "sampler": "euler",        # PINNED / recorded only -- GROUNDED
                 "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+                # W2: width/height/frames/fps added. applyOptimalVideoSamplingDefaults has no mochi
+                # branch either, so these are the same inherited generic video widget defaults as
+                # hunyuan_video above (832x480 / 81 / 16), not a mochi-specific literal.
+                "width": 832, "height": 480, "frames": 81, "fps": 16,
             },
         },
     },
+
+    # LTX-2.3 deliberately has NO row here. See FAMILY_SAMPLER_ALLOWLISTS["ltx"] below for why, and
+    # for where its W2 canvas/duration fields (width/height/frames/fps) actually live: steps/cfg
+    # live in the shipped template graph, a cockpit value is ignored for the distilled route (the
+    # builder warns and pins the guiders at 1), and `family_capability.TEMPLATE_DRIVEN_FAMILIES`
+    # plus two tests (this module's own reachability suite and test_family_capability.py) assert
+    # this absence on purpose -- an earlier pass added a row "for parity" and broke both. Putting
+    # canvas/duration here would resurrect exactly that regression, so it is declared on the
+    # allowlist instead, alongside the sampler facts LTX already declares there.
 
     # _build_native_split_video_prompt -- the UNKNOWN-FAMILY CATCH-ALL fallback (any family that isn't
     # wan/hunyuan/ltx inherits this). Keyed by config identity, not a real family.
@@ -236,6 +308,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "guidance_default": 3.5,   # recorded only -- GROUNDED (_flux_guidance_from_request fallback, Flux sweet spot)
                 "sampler": "euler",        # PINNED / recorded only -- GROUNDED
                 "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["flux"]
             },
         },
     },
@@ -249,6 +322,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 4.5,                # routed -- lifted verbatim (provenance unknown); real CFG
                 "sampler": "euler",        # PINNED / recorded only
                 "scheduler": "normal",     # PINNED / recorded only
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["pixart"]
             },
         },
     },
@@ -264,6 +338,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "shift": 6.0,              # PINNED / recorded only -- GROUNDED (official sigma shift, render-proven at shift 6 / res_multistep)
                 "sampler": "res_multistep",# PINNED / recorded only -- GROUNDED
                 "scheduler": "normal",     # PINNED / recorded only
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["lumina"]
             },
         },
     },
@@ -280,6 +355,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "shift": 3.0,              # PINNED / recorded only -- GROUNDED (render-proven clean)
                 "sampler": "res_multistep",# PINNED / recorded only -- GROUNDED
                 "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["z_image"]
             },
         },
     },
@@ -294,6 +370,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 4.0,                # routed -- lifted verbatim (provenance unknown); mapped, NOT pinned
                 "sampler": "er_sde",       # PINNED / recorded only
                 "scheduler": "simple",     # PINNED / recorded only
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["anima"]
             },
         },
     },
@@ -314,6 +391,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 5.45,
                 "sampler": "euler",
                 "scheduler": "sgm_uniform",
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["sd3"]
             },
         },
     },
@@ -339,6 +417,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 3.5,
                 "sampler": "er_sde",
                 "scheduler": "simple",
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["krea2"]
                 "lora": {"accel": False},
             },
             # Official turbo snap: 8 / CFG 1. Owner 2026-08-18: CFG 0 is not
@@ -352,6 +431,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
                 "cfg": 1.0,
                 "sampler": "er_sde",
                 "scheduler": "simple",
+                "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["krea2:turbo"]
                 "lora": {"accel": False},
             },
         },
@@ -426,6 +506,24 @@ FAMILY_SAMPLER_ALLOWLISTS: dict[str, dict[str, tuple[str, ...]]] = {
         # is declared here: it is the stage-1 patch default in
         # native_video_graphs._build_native_ltx_two_stage_prompt (node 4831).
         "default_sampler": "euler_ancestral_cfg_pp",
+        # W2 canvas/duration. Declared HERE, not as a FAMILY_OPERATING_POINTS row -- that row is
+        # deliberately absent for this family (see the comment beside "mochi" above in
+        # FAMILY_OPERATING_POINTS and family_capability.TEMPLATE_DRIVEN_FAMILIES; two tests assert
+        # the absence on purpose and an earlier pass broke both by adding one "for parity"). This
+        # allowlist entry already declares what the cockpit may offer LTX without implying an
+        # editable operating point, so its canvas/duration facts belong beside the sampler facts.
+        #
+        # width/height: applyOptimalVideoSamplingDefaults's ltx branch never overrides canvas, so a
+        # fresh LTX session shows ensureCanvasSizeDefault's generic video default verbatim
+        # (ImageGenerationPage_catalog.cpp:929: QSize(832, 480)).
+        "width": 832,
+        "height": 480,
+        # frames: the ONE ltx-specific literal in the branch -- the (N*8)+1 floor
+        # (ImageGenerationPage_video.cpp:255-257: `if (f < 49) frameCountSpin_->setValue(49)`).
+        "frames": 49,
+        # fps: never overridden by the ltx branch -- the generic fpsSpin_ construction default
+        # (ImageGenerationPage.cpp:994-997).
+        "fps": 16,
     },
     "flux_image": {
         "samplers": ("euler", "euler_ancestral"),
