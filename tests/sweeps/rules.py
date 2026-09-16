@@ -727,15 +727,29 @@ def _module_name(path: Path) -> str:
     return name[: -len(".__init__")] if name.endswith(".__init__") else name
 
 
-def _import_edges(name: str, tree: ast.Module) -> set[str]:
+def _import_edges(name: str, tree: ast.Module, *, is_package: bool = False) -> set[str]:
     """Every module this one imports, with RELATIVE imports resolved.
 
     Resolving them is the whole correctness of this rule. The first version of this sweep skipped
     `node.level` and reported `video_adapters/ltx_adapter.py` as unreachable -- a live adapter,
     reached only by `from .ltx_adapter import LtxVideoAdapter` in its sibling registry, and one
     deletion away from being removed on the strength of a green sweep.
+
+    A second version got `node.level` right and the CALLER wrong. `_module_name` reduces
+    `model_intelligence/__init__.py` to `"model_intelligence"` -- a name with no dot in it -- so
+    `name.rsplit(".", 1)[0] if "." in name else ""` fell to the empty-string branch and treated a
+    package's own `__init__.py` as having no package. `level == 1` inside `pkg/__init__.py` means
+    THE PACKAGE ITSELF (`from .hashing import x` -> `pkg.hashing`), not its parent -- the same rule
+    that already applied correctly to `pkg/mod.py` (where `level == 1` means the CONTAINING
+    package). Passing `pkg=""` turned `from .hashing import thing` into the edge `.hashing`, a
+    leading-dot string that matches no module in the graph, and the edge was silently dropped. A
+    module reached ONLY through a relative import from its package's `__init__.py` read as
+    unreachable -- and the rule's "N modules reachable" count was never the true count, because an
+    entire import form (relative-from-`__init__`) was invisible to it while it kept reporting
+    green. `is_package` is how the caller tells this function the fact `_module_name` had already
+    thrown away, rather than trying to re-derive it from a name that no longer carries it.
     """
-    pkg = name.rsplit(".", 1)[0] if "." in name else ""
+    pkg = name if is_package else (name.rsplit(".", 1)[0] if "." in name else "")
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -756,11 +770,19 @@ def _import_edges(name: str, tree: ast.Module) -> set[str]:
 def _reachable_modules() -> set[str]:
     """Computed once for the whole tree; the per-file check just asks whether it is in the set."""
     trees: dict[str, ast.Module] = {}
+    # Which names are a package's own __init__.py -- `_module_name` already stripped the literal
+    # ".__init__" off these, so this is the only place that fact survives. `_import_edges` needs it
+    # to resolve `level == 1` correctly (see its docstring).
+    packages: set[str] = set()
     for path in sources.python_sources():
         try:
-            trees[_module_name(path)] = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, SyntaxError):
             continue
+        name = _module_name(path)
+        trees[name] = tree
+        if path.stem == "__init__":
+            packages.add(name)
 
     # A module named in an IMPORT STATEMENT of a test or script is an entry too. Matched as an
     # import rather than as a bare word: `base` and `registry` appear in ordinary prose, and a
@@ -788,7 +810,7 @@ def _reachable_modules() -> set[str]:
         if cur in seen or cur not in trees:
             continue
         seen.add(cur)
-        for dep in _import_edges(cur, trees[cur]):
+        for dep in _import_edges(cur, trees[cur], is_package=cur in packages):
             parts = dep.split(".")
             for i in range(len(parts), 0, -1):
                 cand = ".".join(parts[:i])

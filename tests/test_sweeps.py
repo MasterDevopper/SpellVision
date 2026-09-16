@@ -13,6 +13,7 @@ legitimately different carries a REASON rather than being silently out of scope.
 """
 from __future__ import annotations
 
+import ast
 import collections
 import sys
 from pathlib import Path
@@ -369,6 +370,38 @@ def test_the_blocking_wait_rule_reports_at_the_planted_line():
     ])
     caught = [v.line for v in rules._check_blocking_wait(Path("qt_ui/Probe.cpp"), probe)]
     assert caught == [1, 2, 3, 4, 5], caught
+
+
+def test_reachability_resolves_a_relative_import_from_a_packages_own_init():
+    """`_import_edges` got `node.level` right and its caller wrong.
+
+    `_module_name` reduces `model_intelligence/__init__.py` to `"model_intelligence"` -- a name
+    with NO DOT in it. `_import_edges` used to derive the owning package with
+    `name.rsplit(".", 1)[0] if "." in name else ""`, which fell to the empty-string branch for
+    exactly that name. `level == 1` inside a package's own `__init__.py` means the package
+    ITSELF (`from .hashing import x` -> `pkg.hashing`), not its parent, so `pkg=""` turned the
+    edge into `.hashing` -- a leading-dot string matching no module in the graph -- and the real
+    target was silently dropped. A module reached only through a relative import from its
+    package's `__init__.py` read as unreachable, and the rule's count was never the true count:
+    an entire import form was invisible to it while it kept reporting green.
+
+    Two trees, same source text (`from .hashing import thing`), told apart only by `is_package`
+    -- the fact `_module_name` already threw away and the caller now has to hand back in:
+    `pkg/__init__.py`'s edge must land on `pkg.hashing`, and `pkg/mod.py`'s edge (the case the
+    first fix already got right) must still land on `pkg.hashing` too, not on `pkg.mod`'s own
+    non-existent sibling package.
+    """
+    tree = ast.parse("from .hashing import thing\n")
+
+    init_edges = rules._import_edges("model_intelligence", tree, is_package=True)
+    assert "model_intelligence.hashing" in init_edges, init_edges
+    assert not any(e.startswith(".") for e in init_edges), init_edges
+
+    sibling_edges = rules._import_edges("model_intelligence.other", tree, is_package=False)
+    assert "model_intelligence.hashing" in sibling_edges, sibling_edges
+
+    nested_init_edges = rules._import_edges("model_intelligence.sub", tree, is_package=True)
+    assert "model_intelligence.sub.hashing" in nested_init_edges, nested_init_edges
 
 
 def test_the_progress_floor_rule_reports_at_the_planted_line():
