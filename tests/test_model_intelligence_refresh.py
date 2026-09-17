@@ -25,13 +25,22 @@ from model_intelligence import refresh, sidecar
 class FakeClient:
     """Answers by-hash for weights whose bytes we planted, misses for everything else."""
 
-    def __init__(self, known):
+    def __init__(self, known, parents=None):
         self.known = known
+        self.parents = parents or {}
         self.asked = []
+        self.parents_asked = []
 
     def by_hash(self, digest):
         self.asked.append(digest)
         return self.known.get(digest)
+
+    def model(self, model_id):
+        # The PARENT fetch, which the refresh makes for every hit -- creator and licence live
+        # nowhere else. A fake without it would leave `_parent` recording an AttributeError on
+        # every identified weight, so the fake would be testing the failure path by accident.
+        self.parents_asked.append(int(model_id))
+        return self.parents.get(int(model_id))
 
 
 def _write(root: Path, name: str, size: int) -> Path:

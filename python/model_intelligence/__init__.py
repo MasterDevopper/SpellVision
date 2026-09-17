@@ -11,6 +11,10 @@ convenience here; they are a correctness fix.
 """
 from __future__ import annotations
 
+from model_intelligence.backfill import BackfillJob
+from model_intelligence.backfill import apply_to_payload as backfill_licence_into
+from model_intelligence.backfill import civitai_model_id
+from model_intelligence.backfill import sidecar_files
 from model_intelligence.civitai_lookup import (
     ALLOWED_HOSTS,
     DEFAULT_HOST,
@@ -19,6 +23,9 @@ from model_intelligence.civitai_lookup import (
 )
 from model_intelligence.family_seed_table import SEED_TABLE, seed_for
 from model_intelligence.hashing import HashCache, autov2, file_sha256, hash_and_cache
+from model_intelligence.hf_candidates import RepoIndex as HfRepoIndex
+from model_intelligence.hf_candidates import identify as hf_identify
+from model_intelligence.hf_candidates import search_queries as hf_search_queries
 from model_intelligence.hf_lookup import HfClient, card_identity, settings_from_readme, sha256_index
 from model_intelligence.jobs import cancel_check as cancel_check_refresh_job
 from model_intelligence.jobs import cancel as cancel_refresh_job
@@ -45,6 +52,8 @@ from model_intelligence.sidecar import write as write_sidecar
 __all__ = [
     "ALLOWED_HOSTS",
     "autov2",
+    "backfill_licence_into",
+    "BackfillJob",
     "build",
     "build_sidecar_payload",
     "cancel_check_refresh_job",
@@ -52,6 +61,7 @@ __all__ = [
     "card_identity",
     "carry_forward_sidecar",
     "CivitaiClient",
+    "civitai_model_id",
     "CivitaiThrottled",
     "cover_path",
     "DEFAULT_HOST",
@@ -60,7 +70,10 @@ __all__ = [
     "file_sha256",
     "hash_and_cache",
     "HashCache",
+    "hf_identify",
+    "hf_search_queries",
     "HfClient",
+    "HfRepoIndex",
     "KIND_SUBDIRS",
     "KIND_VOCABULARY",
     "KINDS",
@@ -85,6 +98,7 @@ __all__ = [
     "set_user_picture",
     "settings_from_readme",
     "sha256_index",
+    "sidecar_files",
     "sidecar_path",
     "SIDECAR_SCHEMA",
     "sidecar_user_values",

@@ -21,6 +21,13 @@ Two rules about failure, both learned the expensive way:
     CivitAI-supplied preview URL raising `ValueError: unknown url type` aborted the whole
     79-minute run: out of `run()`, out of the command handler, out of the TCP dispatcher, leaving
     the caller with a dropped connection and a timeout rather than an error.
+
+TWO arms, in order. CivitAI answers by hash. A weight it does not know goes to HuggingFace, which
+has no by-hash endpoint at all -- `hf_candidates` guesses a repo from the filename and the folder
+and CONFIRMS it by sha256, so a wrong guess costs a request and can never mislabel a file. That
+arm is skipped entirely when no `hf` client is given, and it only ever sees a real MISS: a lookup
+that FAILED is not evidence that CivitAI lacks the weight. Until 2026-09-17 there was no second
+arm, and the summary's `no_match: 79, lookup_failed: 0` read as "both sites were asked".
 """
 from __future__ import annotations
 
@@ -29,7 +36,16 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from model_intelligence import hashing, kinds, previews, readable_roots, recommended, sidecar
+from model_intelligence import (
+    hashing,
+    hf_candidates,
+    hf_lookup,
+    kinds,
+    previews,
+    readable_roots,
+    recommended,
+    sidecar,
+)
 from model_intelligence.civitai_lookup import CivitaiClient, CivitaiThrottled
 
 log = logging.getLogger(__name__)
@@ -91,6 +107,10 @@ class RefreshJob:
         self.progress = progress
         self.cancel = cancel
         self.force = force
+        # Shared across the whole run on purpose: a repackaged bundle holds a transformer, a VAE
+        # and a text encoder that share no searchable name, so confirming one hands us the rest
+        # for free (`hf_candidates.RepoIndex`).
+        self._hf_index = hf_candidates.RepoIndex(self.hf)
 
     def _kind_and_family(self, path: Path) -> tuple[str, str | None]:
         if classify_model is None:
@@ -118,6 +138,54 @@ class RefreshJob:
             errors.append({"path": str(path), "error": str(exc)})
         return None, True
 
+    def _parent(self, version: Any, path: Path, errors: list[dict[str, str]]) -> Any:
+        """The parent model behind a matched version -- the ONLY source of creator and licence.
+
+        Kept separate from `_lookup` because its failure is cheaper: a weight with no parent is
+        still identified, still named, still has its pictures and its settings. So a 404, a
+        throttle or a dropped connection here records an error and writes nulls, and
+        `sidecar.merge` declines to let those nulls erase what an earlier run established.
+
+        `CivitaiClient.model` memoises by id, so this is one request per DISTINCT model id across
+        a whole run, not one per weight -- 532 ids behind 680 identified weights on this box.
+        """
+        model_id = (version or {}).get("modelId")
+        if not model_id:
+            return None
+        try:
+            return self.client.model(model_id)
+        except Exception as exc:  # noqa: BLE001 -- a missing licence never costs an identity
+            errors.append({"path": str(path), "error": f"parent model {model_id}: {exc}"})
+            return None
+
+    def _hf(self, digest: str, path: Path, errors: list[dict[str, str]]) -> tuple[Any, Any]:
+        """The second arm: ask HuggingFace about a weight CivitAI does not know.
+
+        Only reached on a real MISS -- a CivitAI hit is already an identity, and a lookup that
+        FAILED must not be treated as "CivitAI does not have it". Before this existed the summary
+        said `no_match: 79, lookup_failed: 0`, which reads as "both sites were asked". One was.
+
+        Returns (card, source). `card` is the block `build_payload(hf=...)` wants; `source` is the
+        confirmed repo/path. Both None when nothing confirmed, which is the common answer and
+        costs only searches.
+        """
+        if self.hf is None or not digest:
+            return None, None
+        try:
+            found = hf_candidates.identify(
+                self.hf, weight=path, sha256=digest, index=self._hf_index,
+            )
+            if not found:
+                return None, None
+            info = self._hf_index.info.get(found["repo"])
+            card = dict(hf_lookup.card_identity(info))
+            card.update({"repo": found["repo"], "path": found["path"]})
+            settings = hf_lookup.settings_from_readme(self.hf.readme(found["repo"]))
+            return card, settings
+        except Exception as exc:  # noqa: BLE001 -- a per-file failure never aborts the run
+            errors.append({"path": str(path), "error": f"huggingface: {exc}"})
+            return None, None
+
     def run(self) -> dict[str, Any]:
         statuses = [readable_roots.root_status(root) for root in self.roots]
         skipped = [status["path"] for status in statuses if not status["readable"]]
@@ -125,7 +193,7 @@ class RefreshJob:
         files = list(self.files) if self.files is not None else plan(self.roots)
         cache = hashing.HashCache(self.cache_path)
         total = len(files)
-        examined = identified = no_match = lookup_failed = 0
+        examined = identified = no_match = lookup_failed = identified_hf = 0
         cancelled = False
         errors: list[dict[str, str]] = []
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
@@ -152,6 +220,7 @@ class RefreshJob:
             version, failed = self._lookup(digest, path, errors)
             kind, family = self._kind_and_family(path)
             existing = sidecar.read(path)
+            card: Any = None  # the HuggingFace card, when the second arm confirmed a repo
 
             if failed:
                 # We could not ask. Carry forward everything a previous successful run learned
@@ -173,16 +242,18 @@ class RefreshJob:
                         )
                     except Exception as exc:  # noqa: BLE001 -- pictures never cost an identity
                         errors.append({"path": str(path), "error": f"previews: {exc}"})
+                parent = self._parent(version, path, errors) if version else None
+                card, card_settings = (None, None) if version else self._hf(digest, path, errors)
                 block = recommended.build(
                     civitai_version=version,
-                    card_settings=None,
+                    card_settings=card_settings,
                     family=family,
                     existing_user=sidecar.user_values(existing),
                 )
                 payload = sidecar.merge(existing, sidecar.build_payload(
                     weight=path, sha256=digest, kind=kind, family=family,
-                    civitai_version=version, hf=None, recommended=block,
-                    images=images, fetched_at=now,
+                    civitai_version=version, hf=card, recommended=block,
+                    images=images, fetched_at=now, civitai_model=parent,
                 ))
 
             try:
@@ -195,6 +266,12 @@ class RefreshJob:
                 lookup_failed += 1
             elif version:
                 identified += 1
+            elif card:
+                # Identified, by the OTHER site. Counted separately as well as in `identified`,
+                # because "CivitAI knows this" and "a HuggingFace repo holds these exact bytes"
+                # are different facts and a single total hides which arm is working.
+                identified += 1
+                identified_hf += 1
             else:
                 no_match += 1
             if self.progress is not None:
@@ -207,6 +284,7 @@ class RefreshJob:
             "ok": True,
             "examined": examined,
             "identified": identified,
+            "identified_hf": identified_hf,
             "no_match": no_match,
             "lookup_failed": lookup_failed,
             "cancelled": cancelled,
