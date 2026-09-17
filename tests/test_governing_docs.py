@@ -220,6 +220,28 @@ def test_the_published_artifact_states_the_current_counts() -> None:
         )
 
 
+def test_architecture_states_the_live_cpp_test_count() -> None:
+    """`ARCHITECTURE.md` tells a newcomer how many C++ tests guard the tree. It said "24 of them"
+    while CMakeLists registered 44 -- and unlike the artifact's block, nothing held that number, so
+    it drifted for twenty passes without a single failure.
+
+    The lesson this file already records applies to itself: a prose count that no ratchet holds goes
+    stale the moment after it is corrected. Correcting the word was never the fix; holding it is.
+    """
+    ctest_targets = len(
+        re.findall(r"add_test\(NAME", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"))
+    )
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    # Matched WITH the words around it, for the reason the artifact block's loop records: a bare
+    # value search is satisfied by any other sentence that happens to share the number.
+    pattern = rf"\*\*C\+\+ tests\*\* are real tests, run by ctest: (?<!\d){ctest_targets}(?!\d) of them"
+    assert re.search(pattern, architecture), (
+        f"ARCHITECTURE.md does not state the live C++ ctest target count ({ctest_targets}) "
+        "in the sentence that names it. Update the 'C++ tests are real tests' line."
+    )
+
+
 def test_the_safety_net_entry_points_the_map_names_are_real() -> None:
     """`ARCHITECTURE.md` tells a newcomer how the guarantees run. Those two files are the whole
     answer -- one for the machine, one for the commit -- and a map that names a lane which is not
