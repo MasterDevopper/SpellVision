@@ -257,3 +257,38 @@ def test_no_missing_classes_means_no_subprocess(monkeypatch, tmp_path):
         ndr.build_node_install_plan(dirty, comfy_root=str(tmp_path), node_catalog=NODE_CATALOG,
                                     search_undeclared=False)
     assert calls == ["called"]
+
+
+def test_the_installed_node_snapshot_is_taken_once_per_comfy_not_once_per_question(monkeypatch):
+    """One cm-cli subprocess per ComfyUI, not one per caller.
+
+    The snapshot is asked for by the import path and again by the readiness pass, in the same
+    second, about the same unchanged set of packs -- and each ask is a subprocess that measured
+    132.6 s on this machine. Caching it turns a four-minute drop into a two-minute one; the
+    invalidation is what keeps the cache honest when something is actually installed.
+    """
+    import comfy_manager_bridge as bridge
+
+    calls: list[str] = []
+
+    def _fake_cm(comfy_root, args, **kwargs):
+        calls.append(" ".join(args))
+        return (bridge.ComfyManagerPaths(comfy_root=str(comfy_root), custom_nodes_root="",
+                                         manager_root="", cm_cli_path="", exists=True),
+                bridge.CommandResult(ok=True, cmd=[], stdout=""))
+
+    monkeypatch.setattr(bridge, "run_cm_cli", _fake_cm)
+    bridge.invalidate_installed_nodes_cache("test setup")
+
+    bridge.list_installed_nodes("C:/sv_comfynext_v034/ComfyUI", python_executable="py")
+    bridge.list_installed_nodes("C:/sv_comfynext_v034/ComfyUI", python_executable="py")
+    assert len(calls) == 1, "the second ask must not shell out again"
+
+    # A different ComfyUI is a different answer.
+    bridge.list_installed_nodes("C:/sv_comfynext/ComfyUI", python_executable="py")
+    assert len(calls) == 2
+
+    # And installing something makes the answer stale, so the cache must not survive it.
+    bridge.invalidate_installed_nodes_cache("a pack was installed")
+    bridge.list_installed_nodes("C:/sv_comfynext_v034/ComfyUI", python_executable="py")
+    assert len(calls) == 3, "an install has to invalidate the snapshot"

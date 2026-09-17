@@ -134,6 +134,15 @@
       text-transform: uppercase;
     }
     .st { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; }
+    /* The document has carried <p class="warn"> since its first pass with no rule behind it, so
+       every warning in it rendered as an ordinary paragraph. */
+    .warn {
+      border-left: 3px solid var(--warn);
+      background: rgba(232, 178, 58, 0.07);
+      padding: 14px 18px;
+      margin: 20px 0 8px;
+      color: var(--ink);
+    }
     .open { color: var(--warn); }
     .shut { color: var(--ready); }
     .block { color: var(--bad); }
@@ -233,7 +242,7 @@
           <tbody>
             <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character, Comic, Concept, Dataset dests pictured. Owner: every page × every family, or S is impossible. T1–T6 still not green.</td></tr>
             <tr><td>T1 Train</td><td class="st shut">PARKED 1.1</td><td>External Sohya launcher hidden from v1 rail (`kV1HiddenModes`). In-app trainer is 1.1. `SPELLVISION_SHOW_ALL_MODES=1` still shows it.</td></tr>
-            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Owner Pro Grade v17 imported 2026-09-12 (<code>krea2-pro-grade-v17</code>, 313 nodes, 15 pack installs, 4 unresolved LC Bypasser). Civitai 2726952. Drop dialog not photographed.</td></tr>
+            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>2026-09-17, W4: dropped on the title bar, the rail and Flows; routed to T2I / I2I by classification; cockpit populated from the graph; <strong>dest generated</strong> from a dropped workflow; Download dialog and the v2v refusal photographed; <code>safe_to_submit</code> plant-and-revert proven live. <strong>5 of 90</strong> owner workflows drop-tested, no video, and a first import with missing node packs still times out at 120 s. See T2.</td></tr>
             <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Library pictured 2026-09-12 (759 assets). Not Stage-2 LoRA Manager.</td></tr>
             <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
             <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>Simple pictured 2026-09-12 on T2V LTX: Frames 81 / FPS 16, Steps/CFG hidden (distilled). Full family×page Simple=OP matrix not proven.</td></tr>
@@ -410,20 +419,84 @@
 
       <section id="t2">
         <h2>T2 — workflow drop</h2>
-        <p>Drop path no longer auto-submits. Missing node classes and missing models share one dialog. Nothing fetches until <strong>Download</strong>. Keys prompt only when the store is empty; create-key URLs are in the same dialog. Retry stamps <code>civitai_api_key</code> and <code>hf_token</code>. Worker now forwards <code>hf_token</code> (<code>ed673a4</code>).</p>
+        <p>The owner's ask was one sentence: <em>&ldquo;T2 should allow dropping a workflow into the window, load it, then auto-populate it on the correct page.&rdquo;</em> Before W4 none of those three verbs happened. A <code>.json</code> dropped anywhere but a cockpit found no drop target and vanished in silence; one dropped on a cockpit stayed on whatever page the mouse was over; and the draft it produced carried file paths and a warning, with <code>safe_to_submit</code> hard-coded <code>false</code>. W4 landed the window-level drop target, one mode resolver, the draft builder, the coordinator that chains import &rarr; classify &rarr; compile &rarr; draft, and the launch-readiness verdict on the import reply.</p>
+        <p class="muted">This pass drove the built <code>SpellVision.exe</code> through real OLE drag-and-drop (<code>scripts/dev/uia/svdrop.ps1</code> &mdash; a real drag-source window, a real button press, <code>DoDragDrop</code>, and the cursor walked onto the target), against the live worker on :8765 and ComfyUI v0.34.0 on :8188. Every picture below is the window, at 1:1, on this machine, 2026-09-17.</p>
+
+        <h3>Dropped where there is no cockpit</h3>
         <figure>
-          <img src="55_t7_assets/session_flows.png" alt="Flows workflow library 84 imported graphs">
-          <figcaption>2026-09-12 · Flows library · 84 imported · 23 Ready. Not a live drop of an owner workflow JSON.</figcaption>
+          <img src="55_t7_assets/t2_drop_overlay_home.png" alt="Drag-enter overlay over the Home page while the cursor is on the title bar">
+          <figcaption>Home &middot; cursor on the <strong>title bar</strong> &middot; <code>krea2 compact t2i v10.json</code>. &ldquo;Drop to load &hellip; &mdash; SpellVision opens it on the page its graph belongs to.&rdquo; Captured DURING the drag; the overlay does not exist a frame later.</figcaption>
         </figure>
         <figure>
-          <img src="55_t7_assets/session_t2_prograde.png" alt="krea2-pro-grade-v17 in Flows after import">
-          <figcaption>2026-09-12 23:02 · filter krea2-pro · <code>krea2-pro-grade-v17</code> selected · I2I · Missing dependencies · 62 missing nodes · library 85 workflows. Civitai 2726952. Auto-install off. Canvas drop dialog still not photographed.</figcaption>
+          <img src="55_t7_assets/t2_drop_landed_t2i_krea2compact.png" alt="krea2 compact t2i v10 landed on T2I with prompt, checkpoint and LoRA filled in">
+          <figcaption>Landed on <strong>T2I</strong> from a title-bar drop. Prompt, checkpoint <code>loxsUtopicWorldKrea2_v20Quants</code>, LoRA <code>krea2_turbo_lora_rank_64_bf16</code> @ 0.95, 1024&times;1024, 8 steps, cfg 1.0, seed 999999999 &mdash; all out of the owner's graph. Generate is <strong>closed</strong>: readiness found 3 of its 4 models absent.</figcaption>
         </figure>
-        <p class="muted">Owner graph imported 2026-09-12 via <code>import_workflow</code> (same command the T2I drop uses): <code>krea2ProGradeWImageEditStyleTransfer_v17Overhaul.json</code> → slug <code>krea2-pro-grade-v17</code>. 313 nodes. Classified i2i. Node plan: 15 pack install actions, 4 unresolved (<code>LC Bypasser</code>, <code>LC Bypasser Panel</code>, <code>LC Groups Bypasser</code>, <code>LCBypassRelay</code>). Auto-install off. Civitai 2726952. Canvas drop dialog not photographed.</p>
-        <p class="muted">Also imported 2026-09-12: <code>krea2-compact-t2i-v10</code> (Civitai 2773170) — 2 packs installed (<code>D2-nodes-ComfyUI</code>, <code>ComfyUI-Krea2T-Enhancer</code>), classes live after Comfy restart. Remapped house UNET/CLIP/LoRA to this library (<code>krea2_turbo_fp8_scaled</code>, <code>qwen3vl_4b_fp8_scaled</code>, <code>krea2_turbo_lora_rank_64_bf16</code>). <strong>Launch dest landed</strong> ~71s. <code>krea2-character-forge-sheet</code> (Civitai 2877997) imported; 0 missing node classes. Pro Grade run stays 1.1.</p>
         <figure>
-          <img src="55_t7_assets/session_compact_t2i_dest.png" alt="Compact T2I v10 dest after local model remap">
-          <figcaption>2026-09-12 · imported Compact T2I v10 · queue_4ad008770c33 · ~71s · remapped to local turbo krea2 + qwen3vl. Dest exists. Canvas drop dialog still not photographed.</figcaption>
+          <img src="55_t7_assets/t2_drop_overlay_rail.png" alt="Drag-enter overlay over the T2I cockpit while the cursor is on the rail">
+          <figcaption>T2I cockpit &middot; cursor on the <strong>activity rail</strong>, below Prefs, on no button at all &middot; <code>krea2 character forge sheet.json</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_landed_i2i_forgesheet.png" alt="Character forge sheet landed on I2I">
+          <figcaption>Dropped on the rail from T2I, landed on <strong>I2I</strong> &mdash; routed by the graph's classification, not by the page in front. Prompt and checkpoint filled; Generate closed on the i2i gate (&ldquo;Add an input image to generate&rdquo;), which is the page's own requirement, not readiness.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_overlay_flows.png" alt="Drag-enter overlay over the Flows workflow library">
+          <figcaption>Flows &middot; cursor over the workflow library itself &middot; <code>asteral.json</code>. 90 workflows, 24 Ready.</figcaption>
+        </figure>
+
+        <h3>A ready workflow, and a dest</h3>
+        <figure>
+          <img src="55_t7_assets/t2_drop_landed_t2i_asteral_ready.png" alt="asteral landed on T2I with four LoRAs and Generate enabled">
+          <figcaption>Dropped on Flows, landed on <strong>T2I</strong>. Checkpoint <code>nova3DCGXL_ilV70</code>, <strong>four</strong> LoRAs with their weights (2.00 / 2.00 / 1.00 / 0.50), 1080&times;1920, 30 steps, cfg 4.0. Readiness said 5/5 models present, so <strong>Generate is open</strong> and the strip reads &ldquo;Ready to generate.&rdquo; This is the state that did not exist before W4.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_dest_asteral.png" alt="Dest rendered from the dropped workflow">
+          <figcaption>Generate clicked with nothing typed &mdash; the dropped graph's own values. Dest in 23 s, on canvas and in the session strip. The image is a blown-out smear <em>because those are the graph's values</em> (four LoRAs, two at 2.00, cfg 4.0): the draft is faithful, including to choices that make a poor picture. Fidelity proven; quality is the graph's business.</figcaption>
+        </figure>
+
+        <h3>When it needs something, and when it refuses</h3>
+        <figure>
+          <img src="55_t7_assets/t2_drop_download_dialog.png" alt="Download missing dialog listing four LC Bypasser node classes">
+          <figcaption><code>krea2 pro grade v17.json</code> (313 nodes) &middot; &ldquo;Nothing is downloaded until you click Download.&rdquo; &middot; the four <code>LC Bypasser</code> classes this machine does not have. First photograph of this dialog from a real drop &mdash; Doc 55 has said &ldquo;canvas drop dialog not photographed&rdquo; since 2026-09-12.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_declined_landed_i2i.png" alt="Pro Grade v17 opened on I2I after declining the download">
+          <figcaption><strong>Not now</strong> still opens the workflow, on <strong>I2I</strong>, for review. Checkpoint carried. <strong>But the draft is thin</strong>: no prompt, 100&times;100, cfg 0.0 &mdash; the extractor found this graph's checkpoint and nothing else. Landing on the right page with the right model and an empty prompt is not the same as auto-population, and Pro Grade is the owner's headline graph.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_refusal_v2v.png" alt="Refusal naming v2v as having no generation page">
+          <figcaption><code>rife interp.json</code> dropped on the rail. &ldquo;This workflow is classified as v2v, which has no generation page in SpellVision. It can be inspected in Flows, but not opened as a draft.&rdquo; The old Home resolver would have matched the filename and put it on T2I.</figcaption>
+        </figure>
+
+        <h3>The plant: <code>safe_to_submit</code> is the worker's verdict, not a literal</h3>
+        <p>Forced <code>ready = False</code> in <code>_write_recheck_into_profile</code> &mdash; the one function both the import reply and <code>check_workflow_launch_readiness</code> answer from &mdash; restarted the worker, and dropped the workflow that had been Ready twenty minutes earlier. Nothing else changed: same file, same machine, same build.</p>
+        <figure>
+          <img src="55_t7_assets/t2_drop_plant_notready.png" alt="Same workflow with a planted not-ready verdict: Generate greyed">
+          <figcaption>PLANTED &middot; the drop still <strong>lands</strong> and still <strong>populates</strong> &mdash; that is the point, a state you cannot inspect is worse than one you cannot run &mdash; and Generate is grey beside a &ldquo;Resolve workfl&hellip;&rdquo; button, with &ldquo;Readiness &mdash; Resolve workflow draft review items.&rdquo; Clicking Generate queued nothing: Queue stayed 0, status stayed Idle.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_plant_reverted_ready.png" alt="Reverted: the same drop is ready to generate again">
+          <figcaption>REVERTED &middot; worker restarted, same file dropped again &middot; Generate open, &ldquo;Ready to generate.&rdquo; &middot; and the click queued a job (Queue: 1 | Running). The gate tracks the verdict in both directions.</figcaption>
+        </figure>
+
+        <h3>What this does NOT prove</h3>
+        <p class="warn">
+          <strong>T2 is not green.</strong> Five of the owner's ninety imported workflows were drop-tested:
+          <code>krea2-compact-t2i-v10</code>, <code>krea2-character-forge-sheet</code>, <code>krea2-pro-grade-v17</code>,
+          <code>asteral-json</code> and <code>rife-interp-json</code> (plus <code>ltx-api-json</code> as a second refusal).
+          The owner's bar is their real workflows drop-tested, and eighty-four of them have not been.
+        </p>
+        <ul class="tight">
+          <li><strong>A first-ever import of a workflow with missing node classes times out in the UI.</strong> The installed-node snapshot shells out to ComfyUI-Manager's <code>cm-cli</code>, measured <strong>128.0 s</strong> cold on this machine against a 120 s request timeout; the drop comes back as &ldquo;the worker did not complete the import.&rdquo; W4 cut two of the three calls (skipped when there is nothing to resolve, cached per ComfyUI &mdash; 0.00 s afterwards), so the <em>second</em> drop of the same workflow works &mdash; which is exactly how the Download dialog above was photographed. The first one still does not. Pictured: <code>t2_drop_import_timeout.png</code>.</li>
+          <li><strong>The Download dialog cannot see a UI graph's missing models.</strong> It is driven by the import's own model plan, and a UI-graph export hides model names in positional <code>widgets_values</code>, so that plan is empty. Readiness now compiles in memory and <em>does</em> see them (that is why krea2-compact's Generate is closed above) &mdash; but the user is told, not offered the download. Only an API-prompt graph reaches the model half of that dialog.</li>
+          <li><strong>A file that is not a workflow at all is not recognised as one.</strong> A hand-written two-key JSON is treated as an API-prompt graph, goes through full dependency resolution, and comes back as the same 120 s timeout rather than &ldquo;this is not a ComfyUI graph.&rdquo; The refusal is honest but it names the wrong cause.</li>
+          <li><strong>Pro Grade v17's draft is a checkpoint and nothing else</strong> (above). The 313-node graph's prompt and sampler are not where the extractor looks.</li>
+          <li><strong>Video was not drop-tested.</strong> Every landing here is t2i or i2i. T2V/I2V routing is asserted in <code>tests/test_workflow_drop_contract.py</code> against <code>wan-simple-t2v-json</code> and <code>wan-simple-i2v-json</code>, not driven in the app.</li>
+          <li><strong>UIA reports Generate as enabled while the app refuses the click.</strong> Under the plant, <code>IsEnabled</code> was <code>True</code> and the click queued nothing. A rig that asserted on that property rather than on the outcome would have read a working gate as broken, or a broken one as working.</li>
+        </ul>
+        <figure>
+          <img src="55_t7_assets/t2_drop_import_timeout.png" alt="Refusal dialog reading the worker did not complete the import">
+          <figcaption>The first-import timeout, in its own words. This is what a drop of an unseen workflow with missing node packs looks like today: 120 s, then &ldquo;This workflow could not be imported: the worker did not complete the import.&rdquo; Honest, and not good enough.</figcaption>
         </figure>
       </section>
 

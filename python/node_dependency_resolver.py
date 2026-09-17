@@ -24,6 +24,7 @@ from comfy_manager_bridge import (
     detect_manager_paths,
     ensure_manager_installed,
     install_registered_nodes,
+    invalidate_installed_nodes_cache,
     list_installed_nodes,
 )
 from node_pack_installer import install_node_pack
@@ -314,6 +315,10 @@ def apply_node_install_plan(
         results.append(outcome)
         if not outcome.get("ok"):
             errors.append(outcome.get("message") or f"Failed to install {package_name or repo_url}")
+
+    # install_node_pack writes straight into custom_nodes/ without going through the bridge, so the
+    # bridge cannot invalidate for it. The plan that applied the installs knows, and says so.
+    invalidate_installed_nodes_cache("apply_node_install_plan")
 
     return NodeApplyResult(
         ok=not errors,

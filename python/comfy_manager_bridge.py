@@ -141,12 +141,36 @@ def run_cm_cli(
     return paths, result
 
 
+# One cm-cli subprocess per ComfyUI, not one per question. The snapshot below shells out to
+# ComfyUI-Manager and measured **132.6 s** on this machine -- and it is asked for once by the import
+# path and again by the readiness pass, for the same unchanged set of installed packs, in the same
+# second. What it describes changes only when something is installed or removed, so it is cached and
+# the install paths invalidate it. The TTL is a backstop for a pack installed from outside this
+# process (ComfyUI's own Manager UI), not the mechanism.
+_INSTALLED_NODES_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_INSTALLED_NODES_TTL_SEC = 300.0
+
+
+def invalidate_installed_nodes_cache(reason: str = "") -> None:
+    """Forget the installed-node snapshot. Called by every path that installs or clones a pack."""
+    _INSTALLED_NODES_CACHE.clear()
+
+
 def list_installed_nodes(
     comfy_root: str | Path,
     *,
     python_executable: str = "python",
     timeout_sec: int = 300,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
+    import time
+
+    key = (str(comfy_root), str(python_executable))
+    if not force_refresh:
+        entry = _INSTALLED_NODES_CACHE.get(key)
+        if entry and (time.monotonic() - entry[0]) < _INSTALLED_NODES_TTL_SEC:
+            return entry[1]
+
     paths, result = run_cm_cli(
         comfy_root,
         ["simple-show", "installed", "--mode", "cache"],
@@ -162,12 +186,14 @@ def list_installed_nodes(
             if item.is_dir() and not item.name.startswith(".") and item.name not in {"__pycache__"}:
                 names.add(item.name)
 
-    return {
+    snapshot = {
         "manager_present": paths.exists,
         "paths": paths.to_dict(),
         "names": sorted(names),
         "command_result": result.to_dict(),
     }
+    _INSTALLED_NODES_CACHE[key] = (time.monotonic(), snapshot)
+    return snapshot
 
 
 def install_registered_nodes(
@@ -201,6 +227,9 @@ def install_registered_nodes(
                 message=None if result.ok else (result.stderr or result.stdout or "manager install failed"),
             )
         )
+    # Something may now be installed that was not: the snapshot describing what IS installed is
+    # stale by construction.
+    invalidate_installed_nodes_cache("install_registered_nodes")
     return outcomes
 
 
@@ -264,6 +293,7 @@ def clone_custom_node_repo(
     # that reaches here has run at least the clone, so require that explicitly rather than relying
     # on the list being non-empty.
     ok = bool(command_results) and all(item.get("ok", False) for item in command_results)
+    invalidate_installed_nodes_cache("clone_custom_node_repo")
     return NodeInstallOutcome(
         ok=ok,
         action="git_clone",
