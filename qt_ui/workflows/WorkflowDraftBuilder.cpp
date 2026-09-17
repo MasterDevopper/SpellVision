@@ -11,6 +11,9 @@
 #include <QList>
 #include <QSet>
 #include <QStringList>
+#include <QVariant>
+
+#include <optional>
 
 namespace spellvision::workflows
 {
@@ -55,8 +58,15 @@ QString nodeInputRefId(const QJsonValue &value)
 // O(nodes) work, cycle-safe. Semantics are preserved -- passthrough keys are explored in their
 // original order (reverse-pushed so LIFO yields the same pre-order), the first non-empty CLIPTextEncode
 // text wins, and empty encode nodes are skipped exactly as the recursive version's callers did.
-QString textFromClipEncode(const QJsonObject &prompt, const QString &startNodeId)
+//
+// `reachedEncode` separates "the graph says the prompt is empty" from "the prompt is not readable
+// from here". Both return an empty string, and the draft must not treat them the same: the first is
+// a value, the second is a field the user has to be told was not carried over.
+QString textFromClipEncode(const QJsonObject &prompt, const QString &startNodeId, bool *reachedEncode = nullptr)
 {
+    if (reachedEncode)
+        *reachedEncode = false;
+
     static const QStringList passthroughKeys = {
         QStringLiteral("text"),
         QStringLiteral("conditioning"),
@@ -88,6 +98,8 @@ QString textFromClipEncode(const QJsonObject &prompt, const QString &startNodeId
 
         if (classType == QStringLiteral("CLIPTextEncode"))
         {
+            if (reachedEncode)
+                *reachedEncode = true;
             const QString text = inputs.value(QStringLiteral("text")).toString().trimmed();
             if (!text.isEmpty())
                 return text;
@@ -272,6 +284,335 @@ QString extractImageInputFromInputs(const QString &classType, const QJsonObject 
 
     return {};
 }
+
+// --- the modern custom-sampler chain -------------------------------------------------------------
+//
+// KSampler is not how a current graph samples. Flux, SD3, Qwen and Krea graphs build the same job
+// out of SamplerCustomAdvanced + a guider + a noise source + a sampler selector + a sigma schedule.
+// Those are CORE ComfyUI classes, so reading only KSampler / KSamplerAdvanced was not a gap for one
+// owner workflow -- it was a gap for the whole present-day vocabulary, and the builder answered it
+// with zero-initialised fields that then read on the page as if the workflow had asked for cfg 0.
+//
+// The values are not on the sampler node. Every one of them arrives over a link, so each has to be
+// walked to. The walk follows a link exactly ONE hop to a node that carries a literal of the right
+// type. Two hops is where reading stops and guessing starts: a number behind a math node, an
+// expression or a custom author's pipe is not in the graph AS a number, and inventing one is the
+// defect this exists to remove. Every walk carries a visited-set -- a ComfyUI graph can contain
+// cycles, and this file has already been bitten by one (see textFromClipEncode above).
+
+QJsonObject nodeInputsFor(const QJsonObject &prompt, const QString &nodeId)
+{
+    if (nodeId.trimmed().isEmpty())
+        return {};
+    return prompt.value(nodeId).toObject().value(QStringLiteral("inputs")).toObject();
+}
+
+QString nodeClassFor(const QJsonObject &prompt, const QString &nodeId)
+{
+    if (nodeId.trimmed().isEmpty())
+        return {};
+    return prompt.value(nodeId).toObject().value(QStringLiteral("class_type")).toString().trimmed();
+}
+
+// A prompt input is either a literal or a ["nodeId", slot] link. Resolve a literal number: the input
+// itself when it is one, otherwise one hop past the link -- preferring the SAME input name on the far
+// node (a passthrough keeps the name) and otherwise accepting the far node's ONLY numeric literal,
+// which is what a PrimitiveInt / PrimitiveFloat / rgthree Seed node is. More than one candidate is
+// ambiguous, and an ambiguous pick is a guess, so it refuses instead.
+std::optional<QJsonValue> resolveNumericInput(const QJsonObject &prompt,
+                                              const QJsonObject &inputs,
+                                              const QString &key)
+{
+    const QJsonValue direct = inputs.value(key);
+    if (direct.isDouble())
+        return direct;
+
+    const QJsonObject farInputs = nodeInputsFor(prompt, nodeInputRefId(direct));
+    if (farInputs.isEmpty())
+        return std::nullopt;
+
+    const QJsonValue sameName = farInputs.value(key);
+    if (sameName.isDouble())
+        return sameName;
+
+    std::optional<QJsonValue> only;
+    for (auto it = farInputs.constBegin(); it != farInputs.constEnd(); ++it)
+    {
+        if (!it.value().isDouble())
+            continue;
+        if (only.has_value())
+            return std::nullopt;
+        only = it.value();
+    }
+    return only;
+}
+
+QString resolveStringInput(const QJsonObject &prompt, const QJsonObject &inputs, const QString &key)
+{
+    const QJsonValue direct = inputs.value(key);
+    if (direct.isString())
+        return direct.toString().trimmed();
+
+    const QJsonObject farInputs = nodeInputsFor(prompt, nodeInputRefId(direct));
+    if (farInputs.isEmpty())
+        return {};
+
+    const QJsonValue sameName = farInputs.value(key);
+    if (sameName.isString())
+        return sameName.toString().trimmed();
+
+    QString only;
+    bool ambiguous = false;
+    for (auto it = farInputs.constBegin(); it != farInputs.constEnd(); ++it)
+    {
+        if (!it.value().isString())
+            continue;
+        if (!only.isEmpty())
+        {
+            ambiguous = true;
+            break;
+        }
+        only = it.value().toString().trimmed();
+    }
+    return ambiguous ? QString() : only;
+}
+
+// What a graph says about sampling, with "did not say" kept distinct from "said zero".
+struct SamplingFacts
+{
+    // A sampler node of some kind was located. Without this, NOTHING below was read, and the draft
+    // must carry no sampling fields at all rather than a row of zeroes.
+    bool found = false;
+    std::optional<int> steps;
+    std::optional<double> cfg;
+    std::optional<qlonglong> seed;
+    // DisableNoise / add_noise=false: there IS no seed here, which is not a failure to read one.
+    bool seedDisabledByDesign = false;
+    // A BasicGuider is unguided -- no negative conditioning and no cfg exist in this graph to read.
+    bool negativeSlotAbsent = false;
+    bool cfgSlotAbsent = false;
+    QString sampler;
+    QString scheduler;
+    QString positiveRef;
+    QString negativeRef;
+    QString latentRef;
+};
+
+void recoverGuiderFacts(const QJsonObject &prompt, const QString &guiderRef, SamplingFacts *facts)
+{
+    const QString classType = nodeClassFor(prompt, guiderRef);
+    const QJsonObject inputs = nodeInputsFor(prompt, guiderRef);
+    if (inputs.isEmpty() && classType.isEmpty())
+        return;
+
+    if (classType == QStringLiteral("CFGGuider"))
+    {
+        facts->positiveRef = nodeInputRefId(inputs.value(QStringLiteral("positive")));
+        facts->negativeRef = nodeInputRefId(inputs.value(QStringLiteral("negative")));
+        const auto cfg = resolveNumericInput(prompt, inputs, QStringLiteral("cfg"));
+        if (cfg)
+            facts->cfg = cfg->toDouble();
+    }
+    else if (classType == QStringLiteral("DualCFGGuider"))
+    {
+        facts->positiveRef = nodeInputRefId(inputs.value(QStringLiteral("cond1")));
+        facts->negativeRef = nodeInputRefId(inputs.value(QStringLiteral("negative")));
+        const auto cfg = resolveNumericInput(prompt, inputs, QStringLiteral("cfg_conds"));
+        if (cfg)
+            facts->cfg = cfg->toDouble();
+    }
+    else if (classType == QStringLiteral("BasicGuider"))
+    {
+        facts->positiveRef = nodeInputRefId(inputs.value(QStringLiteral("conditioning")));
+        facts->negativeSlotAbsent = true;
+        facts->cfgSlotAbsent = true;
+    }
+}
+
+void recoverNoiseFacts(const QJsonObject &prompt, const QString &noiseRef, SamplingFacts *facts)
+{
+    if (nodeClassFor(prompt, noiseRef) == QStringLiteral("DisableNoise"))
+    {
+        facts->seedDisabledByDesign = true;
+        return;
+    }
+
+    const auto seed = resolveNumericInput(prompt, nodeInputsFor(prompt, noiseRef), QStringLiteral("noise_seed"));
+    if (seed)
+        facts->seed = seed->toVariant().toLongLong();
+}
+
+// Sigmas are a chain, not a node: a scheduler produces them and splitters/modifiers pass them on.
+// Walk it for the first steps count and the first named schedule.
+void recoverSigmaFacts(const QJsonObject &prompt, const QString &sigmasRef, SamplingFacts *facts)
+{
+    static const QStringList sigmaPassthroughKeys = {
+        QStringLiteral("sigmas"),
+        QStringLiteral("sigmas_1"),
+        QStringLiteral("sigmas_2")
+    };
+
+    QStringList pending;
+    if (!sigmasRef.trimmed().isEmpty())
+        pending.push_back(sigmasRef);
+
+    QSet<QString> visited;
+    while (!pending.isEmpty())
+    {
+        const QString nodeId = pending.takeLast();
+        if (nodeId.trimmed().isEmpty() || visited.contains(nodeId))
+            continue;
+        visited.insert(nodeId);
+
+        const QString classType = nodeClassFor(prompt, nodeId);
+        const QJsonObject inputs = nodeInputsFor(prompt, nodeId);
+
+        if (!facts->steps.has_value())
+        {
+            const auto steps = resolveNumericInput(prompt, inputs, QStringLiteral("steps"));
+            if (steps)
+                facts->steps = steps->toVariant().toInt();
+        }
+
+        if (facts->scheduler.isEmpty())
+        {
+            const QString named = resolveStringInput(prompt, inputs, QStringLiteral("scheduler"));
+            if (!named.isEmpty())
+                facts->scheduler = named;
+            // BetaSamplingScheduler carries no `scheduler` input because the class IS the schedule,
+            // and "beta" is the name core's own scheduler list gives it -- so this is reading the
+            // core vocabulary, not inventing a name for it.
+            else if (classType == QStringLiteral("BetaSamplingScheduler"))
+                facts->scheduler = QStringLiteral("beta");
+        }
+
+        if (facts->steps.has_value() && !facts->scheduler.isEmpty())
+            return;
+
+        for (int i = sigmaPassthroughKeys.size() - 1; i >= 0; --i)
+        {
+            const QString next = nodeInputRefId(inputs.value(sigmaPassthroughKeys.at(i)));
+            if (!next.trimmed().isEmpty())
+                pending.push_back(next);
+        }
+    }
+}
+
+SamplingFacts recoverFromCustomSampler(const QJsonObject &prompt)
+{
+    SamplingFacts facts;
+
+    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
+    {
+        const QJsonObject node = it.value().toObject();
+        const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
+        if (classType != QStringLiteral("SamplerCustomAdvanced") && classType != QStringLiteral("SamplerCustom"))
+            continue;
+
+        const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
+        facts.found = true;
+        facts.latentRef = nodeInputRefId(inputs.value(QStringLiteral("latent_image")));
+
+        if (classType == QStringLiteral("SamplerCustom"))
+        {
+            // The older of the two: conditioning, cfg and the seed sit on the sampler itself.
+            facts.positiveRef = nodeInputRefId(inputs.value(QStringLiteral("positive")));
+            facts.negativeRef = nodeInputRefId(inputs.value(QStringLiteral("negative")));
+            const auto cfg = resolveNumericInput(prompt, inputs, QStringLiteral("cfg"));
+            if (cfg)
+                facts.cfg = cfg->toDouble();
+            if (!inputs.value(QStringLiteral("add_noise")).toBool(true))
+                facts.seedDisabledByDesign = true;
+            else
+            {
+                const auto seed = resolveNumericInput(prompt, inputs, QStringLiteral("noise_seed"));
+                if (seed)
+                    facts.seed = seed->toVariant().toLongLong();
+            }
+        }
+        else
+        {
+            recoverGuiderFacts(prompt, nodeInputRefId(inputs.value(QStringLiteral("guider"))), &facts);
+            recoverNoiseFacts(prompt, nodeInputRefId(inputs.value(QStringLiteral("noise"))), &facts);
+        }
+
+        // KSamplerSelect is the core one, but the sampler slot is an interface: any node that names
+        // a sampler does it through a `sampler_name` input, so read the INPUT rather than keep a
+        // list of classes that would be stale the next time somebody publishes a selector.
+        facts.sampler = resolveStringInput(prompt,
+                                           nodeInputsFor(prompt, nodeInputRefId(inputs.value(QStringLiteral("sampler")))),
+                                           QStringLiteral("sampler_name"));
+        recoverSigmaFacts(prompt, nodeInputRefId(inputs.value(QStringLiteral("sigmas"))), &facts);
+
+        // First wins, which is the rule the KSampler path has always used.
+        break;
+    }
+
+    return facts;
+}
+
+// The canvas is the size of the latent the sampler samples -- so find it by walking there, not by
+// taking the first `width` input in the graph. That scan is how Pro Grade v17 reported 100x100: the
+// first node in key order with a literal `width` was an LCImageCrop, a node with nothing to do with
+// the output size. Measured over the 83 imported workflows that have a compiled prompt, this walk
+// agrees with the old scan on 60, corrects 1 (it took a later ImageScale over the sampler's own
+// latent), and honestly reports nothing on 4 where the old answer came from a node that was not on
+// the latent path at all -- including that 100x100.
+struct CanvasSize
+{
+    std::optional<int> width;
+    std::optional<int> height;
+};
+
+CanvasSize canvasFromLatent(const QJsonObject &prompt, const QString &latentRef)
+{
+    static const QStringList latentPassthroughKeys = {
+        QStringLiteral("samples"),
+        QStringLiteral("latent"),
+        QStringLiteral("latent_image"),
+        QStringLiteral("pixels"),
+        QStringLiteral("image")
+    };
+
+    QStringList pending;
+    if (!latentRef.trimmed().isEmpty())
+        pending.push_back(latentRef);
+
+    QSet<QString> visited;
+    while (!pending.isEmpty())
+    {
+        const QString nodeId = pending.takeLast();
+        if (nodeId.trimmed().isEmpty() || visited.contains(nodeId))
+            continue;
+        visited.insert(nodeId);
+
+        const QJsonObject inputs = nodeInputsFor(prompt, nodeId);
+        const auto width = resolveNumericInput(prompt, inputs, QStringLiteral("width"));
+        const auto height = resolveNumericInput(prompt, inputs, QStringLiteral("height"));
+        if (width && height && width->toVariant().toInt() > 0 && height->toVariant().toInt() > 0)
+        {
+            CanvasSize size;
+            size.width = width->toVariant().toInt();
+            size.height = height->toVariant().toInt();
+            return size;
+        }
+
+        for (int i = latentPassthroughKeys.size() - 1; i >= 0; --i)
+        {
+            const QString next = nodeInputRefId(inputs.value(latentPassthroughKeys.at(i)));
+            if (!next.trimmed().isEmpty())
+                pending.push_back(next);
+        }
+    }
+
+    return {};
+}
+
+// One sentence shape for every field the graph did not yield, so the list reads as a list.
+QString couldNotRead(const QString &field)
+{
+    return QStringLiteral("%1 could not be read from this workflow, so the page keeps its own.").arg(field);
+}
 } // namespace
 
 bool WorkflowDraftBuilder::isVideoMode(const QString &modeId, const QString &mediaType)
@@ -386,17 +727,9 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
     QStringList loraNames;
     QList<double> loraStrengths;
     QSet<QString> seenLoras;
-    QString samplerName;
-    QString schedulerName;
-    int steps = 0;
-    double cfg = 0.0;
-    qlonglong seed = 0;
-    int width = 0;
-    int height = 0;
+    SamplingFacts facts;
     int frames = 0;
     int fps = 0;
-    QString positivePrompt;
-    QString negativePrompt;
     QString inputImage;
 
     for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
@@ -424,21 +757,35 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
             }
         }
 
-        if ((classType == QStringLiteral("KSampler") || classType == QStringLiteral("KSamplerAdvanced")) && steps <= 0)
+        // Unchanged in behaviour: the same two classes, the same first-non-zero-steps-wins rule. What
+        // changed is that a value the node does not literally carry now stays UNSET instead of
+        // becoming 0 -- and that a graph with no KSampler at all is no longer the end of the road.
+        if ((classType == QStringLiteral("KSampler") || classType == QStringLiteral("KSamplerAdvanced"))
+            && facts.steps.value_or(0) <= 0)
         {
-            samplerName = inputs.value(QStringLiteral("sampler_name")).toString().trimmed();
-            schedulerName = inputs.value(QStringLiteral("scheduler")).toString().trimmed();
-            steps = inputs.value(QStringLiteral("steps")).toInt(0);
-            cfg = inputs.value(QStringLiteral("cfg")).toDouble(0.0);
-            seed = inputs.value(classType == QStringLiteral("KSampler") ? QStringLiteral("seed") : QStringLiteral("noise_seed")).toVariant().toLongLong();
-            positivePrompt = textFromClipEncode(prompt, nodeInputRefId(inputs.value(QStringLiteral("positive"))));
-            negativePrompt = textFromClipEncode(prompt, nodeInputRefId(inputs.value(QStringLiteral("negative"))));
+            facts.found = true;
+            facts.sampler = resolveStringInput(prompt, inputs, QStringLiteral("sampler_name"));
+            facts.scheduler = resolveStringInput(prompt, inputs, QStringLiteral("scheduler"));
+            facts.steps.reset();
+            facts.cfg.reset();
+            facts.seed.reset();
+            const auto resolvedSteps = resolveNumericInput(prompt, inputs, QStringLiteral("steps"));
+            if (resolvedSteps)
+                facts.steps = resolvedSteps->toVariant().toInt();
+            const auto resolvedCfg = resolveNumericInput(prompt, inputs, QStringLiteral("cfg"));
+            if (resolvedCfg)
+                facts.cfg = resolvedCfg->toDouble();
+            const auto resolvedSeed = resolveNumericInput(
+                prompt,
+                inputs,
+                classType == QStringLiteral("KSampler") ? QStringLiteral("seed") : QStringLiteral("noise_seed"));
+            if (resolvedSeed)
+                facts.seed = resolvedSeed->toVariant().toLongLong();
+            facts.positiveRef = nodeInputRefId(inputs.value(QStringLiteral("positive")));
+            facts.negativeRef = nodeInputRefId(inputs.value(QStringLiteral("negative")));
+            facts.latentRef = nodeInputRefId(inputs.value(QStringLiteral("latent_image")));
         }
 
-        if (width <= 0)
-            width = inputs.value(QStringLiteral("width")).toInt(width);
-        if (height <= 0)
-            height = inputs.value(QStringLiteral("height")).toInt(height);
         if (frames <= 0)
             frames = inputs.value(QStringLiteral("num_frames")).toInt(
                 inputs.value(QStringLiteral("frames")).toInt(
@@ -455,6 +802,32 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
         }
     }
 
+    // No KSampler in the graph does not mean no sampling in the graph.
+    if (!facts.found)
+        facts = recoverFromCustomSampler(prompt);
+
+    std::optional<QString> positivePrompt;
+    std::optional<QString> negativePrompt;
+    if (facts.found)
+    {
+        bool reachedEncode = false;
+        const QString positive = textFromClipEncode(prompt, facts.positiveRef, &reachedEncode);
+        if (reachedEncode)
+            positivePrompt = positive;
+
+        if (facts.negativeSlotAbsent)
+            negativePrompt = QString();
+        else
+        {
+            reachedEncode = false;
+            const QString negative = textFromClipEncode(prompt, facts.negativeRef, &reachedEncode);
+            if (reachedEncode)
+                negativePrompt = negative;
+        }
+    }
+
+    const CanvasSize canvas = canvasFromLatent(prompt, facts.latentRef);
+
     QJsonObject draft;
     draft.insert(QStringLiteral("source_name"), source.displayName);
     draft.insert(QStringLiteral("source_profile_path"), source.profilePath);
@@ -463,17 +836,32 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
     draft.insert(QStringLiteral("mode_id"), WorkflowLaunchController::normalizeModeId(source.modeId));
     draft.insert(QStringLiteral("media_type"), source.mediaType);
     draft.insert(QStringLiteral("backend"), source.backend);
-    draft.insert(QStringLiteral("prompt"), positivePrompt);
-    draft.insert(QStringLiteral("negative_prompt"), negativePrompt);
+    // A field the graph did not yield is ABSENT, not zero. A key carrying 0 / 0.0 / 100 reaches the
+    // cockpit as a value the workflow asked for, and the page cannot tell it from one it did: that is
+    // how a graph with no readable settings came up as "cfg 0.0" rather than as the page's own
+    // default. Absent means the page keeps what it had, and the warnings below say which fields
+    // those were. `checkpoint` stays unconditional because an empty one is already a stated
+    // outcome here -- video graphs carry no standalone checkpoint and warn about it by name.
+    if (positivePrompt)
+        draft.insert(QStringLiteral("prompt"), *positivePrompt);
+    if (negativePrompt)
+        draft.insert(QStringLiteral("negative_prompt"), *negativePrompt);
     draft.insert(QStringLiteral("checkpoint"), checkpointName);
     draft.insert(QStringLiteral("checkpoint_display"), compactBaseName(checkpointName));
-    draft.insert(QStringLiteral("sampler"), samplerName);
-    draft.insert(QStringLiteral("scheduler"), schedulerName);
-    draft.insert(QStringLiteral("steps"), steps);
-    draft.insert(QStringLiteral("cfg"), cfg);
-    draft.insert(QStringLiteral("seed"), QString::number(seed));
-    draft.insert(QStringLiteral("width"), width);
-    draft.insert(QStringLiteral("height"), height);
+    if (!facts.sampler.isEmpty())
+        draft.insert(QStringLiteral("sampler"), facts.sampler);
+    if (!facts.scheduler.isEmpty())
+        draft.insert(QStringLiteral("scheduler"), facts.scheduler);
+    if (facts.steps)
+        draft.insert(QStringLiteral("steps"), *facts.steps);
+    if (facts.cfg)
+        draft.insert(QStringLiteral("cfg"), *facts.cfg);
+    if (facts.seed)
+        draft.insert(QStringLiteral("seed"), QString::number(*facts.seed));
+    if (canvas.width)
+        draft.insert(QStringLiteral("width"), *canvas.width);
+    if (canvas.height)
+        draft.insert(QStringLiteral("height"), *canvas.height);
     if (frames > 0)
         draft.insert(QStringLiteral("frames"), frames);
     if (fps > 0)
@@ -503,6 +891,27 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
     {
         draftWarnings.push_back(QStringLiteral("No standalone checkpoint was inferred. The video workflow may carry its own model stack through the compiled prompt."));
     }
+
+    // Name every field that was not carried over, in the words a user would use for it. Silence here
+    // is what made the empty draft read as a broken page rather than as a workflow whose settings
+    // live somewhere this build cannot follow.
+    if (!positivePrompt)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The prompt text")));
+    if (!negativePrompt)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The negative prompt")));
+    if (!facts.steps)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The step count")));
+    if (!facts.cfg && !facts.cfgSlotAbsent)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The guidance scale (CFG)")));
+    if (facts.sampler.isEmpty())
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The sampler")));
+    if (facts.scheduler.isEmpty())
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The scheduler")));
+    if (!facts.seed && !facts.seedDisabledByDesign)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The seed")));
+    if (!canvas.width || !canvas.height)
+        draftWarnings.push_back(couldNotRead(QStringLiteral("The output size")));
+
     if (loraNames.size() > 1)
     {
         draftWarnings.push_back(QStringLiteral("This workflow uses %1 LoRAs. Review the imported stack before generating.").arg(loraNames.size()));

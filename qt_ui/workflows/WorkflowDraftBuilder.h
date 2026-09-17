@@ -17,6 +17,17 @@ namespace spellvision::workflows
 // checkpoint, the LoRA stack, the sampler, the scheduler, steps, cfg, seed, width, height, frames,
 // fps and the input image on the way past.
 //
+// It reads the CURRENT sampling vocabulary, not just KSampler. A Flux / SD3 / Qwen / Krea graph
+// samples through SamplerCustomAdvanced + CFGGuider + KSamplerSelect + a sigma schedule -- all core
+// ComfyUI classes -- and none of those values sit on the sampler node, so each is walked to across
+// one link hop. Two hops is guessing, and it refuses instead.
+//
+// AND IT OMITS WHAT IT COULD NOT READ. Every value in the draft is a value the graph actually
+// carried; a field that could not be recovered is ABSENT from the draft and named in `warnings`, so
+// the page keeps its own default rather than adopting a zero that reads like the workflow's choice.
+// Callers must therefore test for the KEY, not for a sentinel: `steps` absent means unknown, and
+// `steps` present means the workflow said so, including when it said 0.
+//
 // This is that function, moved rather than reimplemented. Two extractors that disagree about what a
 // graph says is the shape of defect this wave keeps finding one level up -- three classifiers that
 // disagreed about what a graph IS -- and a second one written for the drop path would have started

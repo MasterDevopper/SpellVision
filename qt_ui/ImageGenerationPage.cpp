@@ -671,9 +671,13 @@ void ImageGenerationPage::applyWorkflowDraft(const QJsonObject &draft)
     workflowDraftWarnings_.clear();
     workflowDraftBlocking_ = false;
 
-    if (promptEdit_)
+    // Test for the KEY. An absent prompt means the draft could not read one, and blanking the box
+    // would present that failure as "this workflow has no prompt" -- the same fabrication as cfg 0.0,
+    // one field over. A key that IS there and empty is a real empty prompt (Inspiration sends one
+    // deliberately when the user cleared the box) and still clears.
+    if (promptEdit_ && draft.contains(QStringLiteral("prompt")))
         promptEdit_->setPlainText(draft.value(QStringLiteral("prompt")).toString());
-    if (negativePromptEdit_)
+    if (negativePromptEdit_ && draft.contains(QStringLiteral("negative_prompt")))
         negativePromptEdit_->setPlainText(draft.value(QStringLiteral("negative_prompt")).toString());
 
     if (presetCombo_)
