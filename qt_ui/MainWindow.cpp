@@ -14,6 +14,7 @@
 #include "shell/TelemetryPresenter.h"
 #include "workflows/CivitaiVariantDialog.h"
 #include "workflows/WorkflowDownloadDialog.h"
+#include "workflows/WorkflowDropCoordinator.h"
 #include "ModePage.h"
 #include "InspirationPage.h"
 #include "Gen3DPage.h"
@@ -1098,7 +1099,7 @@ MainWindow::MainWindow(QWidget *parent)
     windowDropTarget_->setOverlayHost(this);
     windowDropTarget_->installOn(qApp);
     connect(windowDropTarget_, &spellvision::shell::WindowDropTarget::workflowDropped, this,
-            [this](const QString &path) { importDroppedWorkflow(path, currentModeId_); });
+            [this](const QString &path) { importDroppedWorkflow(path); });
 
     ctorTrace("ctor before end");
     {
@@ -2660,227 +2661,115 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
         appendLogLine(spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
 }
 
-// The workflow-drop import, lifted out of a 186-line lambda inside connectGenerationPage.
+// One dropped workflow, asked of the worker in full, wherever it was dropped.
 //
-// It has TWO callers now. The cockpit's own model-stack drop zone (and its Browse / Run buttons) is
-// the old one; WindowDropTarget is the new one, and it catches every workflow dropped anywhere ELSE
-// in the window -- the rail, the title bar, Flows, Home, History, Settings, a studio, the dataset
-// page. Those drops used to be discarded by Qt with no message at all, because no widget in the
-// chain accepted them and MainWindow had no drop handling of its own.
+// The 186-line lambda that used to live here imported the workflow and then abandoned it. It read
+// none of the three answers the app already had -- the importer's classification, a compiled prompt,
+// and launch readiness -- so the workflow landed on whatever page the mouse happened to be over with
+// nothing filled in, and `safe_to_submit` was the literal false. The sequence lives in
+// WorkflowDropCoordinator now; what stays here is the shell's half of it, the parts that need a
+// window: a dialog, the credential store, and switchToMode.
 //
-// `preferredModeId` is WHERE YOU DROPPED IT, and it is deliberately not a guess: when the drop lands
-// on a page that is not a cockpit at all, this does NOT pick one. A fallback to t2i would be the same
-// defect the Home resolver had -- a graph opened on a page it was never classified for -- so instead
-// the import is reported and the workflow stays in Flows. Asking the importer's own classification is
-// task 3, and it is the answer this is refusing to invent.
-void MainWindow::importDroppedWorkflow(const QString &path, const QString &preferredModeId)
+// Built on first use rather than in the constructor, so a session that never drops a workflow never
+// pays for it.
+void MainWindow::importDroppedWorkflow(const QString &path)
 {
-    const QString modeId = preferredModeId;
-    ImageGenerationPage *page = nullptr;
-    if (isGenerationMode(modeId))
+    if (!workflowDropCoordinator_)
     {
-        ensureGenerationPageBuilt(modeId);
-        page = generationPageForMode(modeId);
+        workflowDropCoordinator_ = new spellvision::workflows::WorkflowDropCoordinator(this);
+
+        spellvision::workflows::WorkflowDropCoordinator::Bindings bindings;
+
+        bindings.sendRequestAsync =
+            [this](const QJsonObject &request,
+                   spellvision::workflows::WorkflowDropCoordinator::RequestCompletion completion) {
+                sendWorkerRequestAsync(request, std::move(completion));
+            };
+
+        bindings.appendLogLine = [this](const QString &text) { appendLogLine(text); };
+
+        // A PURE predicate, not generationPageForMode() != nullptr: pages are lazy, so a valid but
+        // not-yet-built target reads as null and would be wrongly refused.
+        bindings.isModeAvailable = [this](const QString &modeId) { return isGenerationMode(modeId); };
+
+        // The one dialog. missing_custom_nodes is an /object_info gap, so packs whose dependency_plan
+        // action is already_installed must not open it; the coordinator has already filtered those.
+        // Whether to ASK for a key is decided here, because only the shell knows what is stored.
+        bindings.requestDownloads = [this](const QStringList &missingNodes,
+                                           const QStringList &missingModels,
+                                           bool needsCivitai,
+                                           bool needsHf) {
+            const bool askCivitaiKey =
+                needsCivitai && !SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
+            const bool askHfToken =
+                needsHf && !SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
+            WorkflowDownloadDialog downloadDialog(missingNodes, missingModels,
+                                                  askCivitaiKey, askHfToken, this);
+            if (downloadDialog.exec() != QDialog::Accepted)
+                return false;
+            const QString typedCivitai = downloadDialog.typedCivitaiKey();
+            if (!typedCivitai.isEmpty())
+                SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), typedCivitai);
+            const QString typedHf = downloadDialog.typedHfToken();
+            if (!typedHf.isEmpty())
+                SecureCredentialStore::setCredential(QStringLiteral("hf_token"), typedHf);
+            return true;
+        };
+
+        bindings.downloadCredentials = [this]() {
+            QJsonObject credentials;
+            const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
+            if (!civitaiKey.isEmpty())
+                credentials.insert(QStringLiteral("civitai_api_key"), civitaiKey);
+            const QString hfToken = SecureCredentialStore::credential(QStringLiteral("hf_token"));
+            if (!hfToken.isEmpty())
+                credentials.insert(QStringLiteral("hf_token"), hfToken);
+            return credentials;
+        };
+
+        bindings.showRefusal = [this](const QString &title, const QString &message) {
+            QMessageBox::warning(this, title, message);
+        };
+
+        bindings.openDraftOnMode = [this](const QString &modeId, const QJsonObject &draft) {
+            ensureGenerationPageBuilt(modeId);
+            ImageGenerationPage *page = generationPageForMode(modeId);
+            if (!page)
+            {
+                QMessageBox::warning(this,
+                                     QStringLiteral("Workflow Drop"),
+                                     QStringLiteral("This workflow is a %1 workflow and that page could "
+                                                    "not be opened in this build.")
+                                         .arg(modeId.toUpper()));
+                return;
+            }
+            page->applyWorkflowDraft(draft);
+            switchToMode(modeId);
+            appendLogLine(
+                spellvision::workflows::WorkflowLaunchController::draftOpenedLogLine(draft, modeId));
+            if (!page->workflowDraftCanSubmit())
+                appendLogLine(
+                    spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
+        };
+
+        bindings.setBusy = [this](bool busy, const QString &message) {
+            // Whatever cockpit is in front of the user, if any. A drop made on Flows or the rail has
+            // no page to show a spinner on, and the log line is the feedback there.
+            if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
+                page->setBusy(busy, message);
+        };
+
+        bindings.refreshWorkflowLibrary = [this]() {
+            if (workflowsPage_)
+                workflowsPage_->refreshLibrary();
+        };
+
+        workflowDropCoordinator_->bind(bindings);
     }
 
-        // Import through the worker, then open as editable draft on this cockpit.
-        // If import already exists / succeeds, also offer a direct launch profile.
-        QJsonObject request;
-        request.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
-        request.insert(QStringLiteral("source"), path);
-        request.insert(QStringLiteral("auto_apply_node_deps"), false);
-        request.insert(QStringLiteral("auto_apply_model_deps"), false);
-        const QPointer<ImageGenerationPage> pageGuard(page);
-        const bool hadPage = page != nullptr;
-        if (page)
-            page->setBusy(true, QStringLiteral("Importing workflow…"));
-        sendWorkerRequestAsync(
-            request,
-            [this, pageGuard, hadPage, modeId, path](
-                const QJsonObject &response, const QString &stderrText, bool startedOk) {
-        if (hadPage && !pageGuard)
-            return; // the cockpit went away mid-import; there is nothing left to apply the draft to
-        if (pageGuard)
-            pageGuard->setBusy(false, QString());
-        if (!stderrText.trimmed().isEmpty())
-            appendLogLine(stderrText.trimmed());
-        if (!startedOk || response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false)) {
-            const QString err = response.value(QStringLiteral("error")).toString(
-                QStringLiteral("Workflow import failed"));
-            appendLogLine(QStringLiteral("Workflow drop import failed: %1").arg(err));
-            // Still try to open a lightweight draft from the raw path so the user can edit
-            // prompts against the graph once assets resolve.
-            QJsonObject draft;
-            draft.insert(QStringLiteral("source_name"), QFileInfo(path).fileName());
-            draft.insert(QStringLiteral("source_workflow_path"), path);
-            draft.insert(QStringLiteral("workflow_path"), path);
-            draft.insert(QStringLiteral("safe_to_submit"), false);
-            draft.insert(QStringLiteral("warnings"),
-                         QJsonArray{QStringLiteral("Import incomplete — review models/nodes in Flows.")});
-            if (pageGuard)
-                pageGuard->applyWorkflowDraft(draft);
-            else
-                showWorkflowImportResult(response, stderrText);
-            return;
-        }
-
-        // Build the draft from the response the worker ACTUALLY sends.
-        //
-        // This previously read response["draft"] and response["result"], neither of which
-        // handle_import_workflow_command emits -- it returns a FLAT WorkflowImportResult
-        // (ok / import_slug / artifacts / missing_custom_nodes / warnings). Every lookup therefore
-        // resolved empty and `safe_to_submit` fell through to .toBool(true) on an absent object, so
-        // a dropped workflow was ALWAYS treated as ready and queue-launched unconditionally --
-        // including workflows whose nodes or models are missing.
-        const QJsonObject artifacts = response.value(QStringLiteral("artifacts")).toObject();
-        const QJsonArray missingNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
-
-        QJsonObject draft;
-        draft.insert(QStringLiteral("source_name"),
-                     response.value(QStringLiteral("import_slug")).toString(QFileInfo(path).fileName()));
-        draft.insert(QStringLiteral("source_profile_path"),
-                     artifacts.value(QStringLiteral("profile_path")).toString());
-        draft.insert(QStringLiteral("source_workflow_path"),
-                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
-        draft.insert(QStringLiteral("workflow_path"),
-                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
-        // The importer reports no launch readiness, so there is nothing here that could justify
-        // auto-submitting. Default CLOSED and let the user press Generate. Drop-and-run returns
-        // once readiness is real and the worker sends it (plan A8).
-        draft.insert(QStringLiteral("safe_to_submit"), false);
-        QStringList missingNodeNames;
-        const QJsonArray nodeDeps =
-            response.value(QStringLiteral("dependency_plan")).toObject()
-                .value(QStringLiteral("node_plan")).toObject()
-                .value(QStringLiteral("dependencies")).toArray();
-        if (!nodeDeps.isEmpty())
-        {
-            // missing_custom_nodes is an object_info gap. Packs already on disk
-            // (action=already_installed) must not open Download.
-            for (const QJsonValue &value : nodeDeps)
-            {
-                const QJsonObject dep = value.toObject();
-                const QString action = dep.value(QStringLiteral("action")).toString();
-                if (action == QStringLiteral("already_installed")
-                    || action == QStringLiteral("already_present"))
-                    continue;
-                const QString name = dep.value(QStringLiteral("class_name")).toString().trimmed();
-                if (!name.isEmpty())
-                    missingNodeNames << name;
-            }
-        }
-        else
-        {
-            for (const QJsonValue &value : missingNodes)
-            {
-                const QString name = value.toString().trimmed();
-                if (!name.isEmpty())
-                    missingNodeNames << name;
-            }
-        }
-        QStringList missingModels;
-        bool needsCivitai = false;
-        bool needsHf = false;
-        const QJsonArray installActions =
-            response.value(QStringLiteral("dependency_plan")).toObject()
-                .value(QStringLiteral("model_plan")).toObject()
-                .value(QStringLiteral("install_actions")).toArray();
-        for (const QJsonValue &value : installActions)
-        {
-            const QJsonObject action = value.toObject();
-            if (action.value(QStringLiteral("kind")).toString() == QStringLiteral("already_present"))
-                continue;
-            const QString name = action.value(QStringLiteral("source_value")).toString().trimmed();
-            if (!name.isEmpty())
-                missingModels << name;
-            QString blob = name;
-            for (const QJsonValue &note : action.value(QStringLiteral("notes")).toArray())
-                blob += note.toString();
-            const QJsonObject materialized = action.value(QStringLiteral("materialized")).toObject();
-            blob += materialized.value(QStringLiteral("url")).toString();
-            blob += materialized.value(QStringLiteral("kind")).toString();
-            blob += materialized.value(QStringLiteral("value")).toString();
-            if (blob.contains(QStringLiteral("civitai"), Qt::CaseInsensitive))
-                needsCivitai = true;
-            if (blob.contains(QStringLiteral("huggingface"), Qt::CaseInsensitive)
-                || blob.contains(QStringLiteral("hf.co"), Qt::CaseInsensitive))
-                needsHf = true;
-        }
-        if (!missingNodeNames.isEmpty() || !missingModels.isEmpty()) {
-            draft.insert(QStringLiteral("warnings"),
-                         QJsonArray{QStringLiteral("Imported with unresolved nodes/models — check Flows.")});
-            const bool askCivitaiKey = needsCivitai
-                && !SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
-            const bool askHfToken = needsHf
-                && !SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
-            WorkflowDownloadDialog downloadDialog(missingNodeNames, missingModels,
-                                                  askCivitaiKey, askHfToken, this);
-            if (downloadDialog.exec() == QDialog::Accepted)
-            {
-                const QString typedCivitai = downloadDialog.typedCivitaiKey();
-                if (!typedCivitai.isEmpty())
-                    SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), typedCivitai);
-                const QString typedHf = downloadDialog.typedHfToken();
-                if (!typedHf.isEmpty())
-                    SecureCredentialStore::setCredential(QStringLiteral("hf_token"), typedHf);
-                QJsonObject retry;
-                retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
-                retry.insert(QStringLiteral("source"), path);
-                retry.insert(QStringLiteral("auto_apply_node_deps"), !missingNodeNames.isEmpty());
-                retry.insert(QStringLiteral("auto_apply_model_deps"), !missingModels.isEmpty());
-                const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
-                if (!civitaiKey.isEmpty())
-                    retry.insert(QStringLiteral("civitai_api_key"), civitaiKey);
-                const QString hfToken = SecureCredentialStore::credential(QStringLiteral("hf_token"));
-                if (!hfToken.isEmpty())
-                    retry.insert(QStringLiteral("hf_token"), hfToken);
-                appendLogLine(QStringLiteral("Download requested for missing workflow files."));
-                sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
-                    if (!retryErr.trimmed().isEmpty())
-                        appendLogLine(retryErr.trimmed());
-                    if (!retryOk || !retryResponse.value(QStringLiteral("ok")).toBool(false))
-                        appendLogLine(QStringLiteral("Workflow download did not complete."));
-                    if (workflowsPage_)
-                        workflowsPage_->refreshLibrary();
-                });
-            }
-        }
-        if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
-            draft.insert(QStringLiteral("source_workflow_path"), path);
-        if (pageGuard)
-            pageGuard->applyWorkflowDraft(draft);
-        else
-            // Dropped somewhere that is not a cockpit. The import is real and the user is told what
-            // it produced; what is missing is the page to open it on, and that is task 3's job.
-            showWorkflowImportResult(response, stderrText);
-        appendLogLine((pageGuard ? QStringLiteral("Workflow loaded into cockpit: %1")
-                                 : QStringLiteral("Workflow imported (no cockpit was open to load it into): %1"))
-                          .arg(draft.value(QStringLiteral("source_name")).toString(QFileInfo(path).fileName())));
-
-        // If ready, also queue-launch with cockpit model overrides (drop-and-run).
-        // Default CLOSED: an absent or malformed readiness signal must never mean "go".
-        if (pageGuard && draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
-            QJsonObject profile;
-            profile.insert(QStringLiteral("profile_name"),
-                           draft.value(QStringLiteral("source_name")).toString());
-            profile.insert(QStringLiteral("name"), draft.value(QStringLiteral("source_name")).toString());
-            profile.insert(QStringLiteral("task_command"), modeId);
-            profile.insert(QStringLiteral("profile_path"),
-                           draft.value(QStringLiteral("source_profile_path")).toString());
-            profile.insert(QStringLiteral("workflow_path"),
-                           draft.value(QStringLiteral("workflow_path")).toString(
-                               draft.value(QStringLiteral("source_workflow_path")).toString(path)));
-            profile.insert(QStringLiteral("compiled_prompt_path"),
-                           draft.value(QStringLiteral("compiled_prompt_path")).toString());
-            const QString model = pageGuard->selectedModelValue();
-            const QString lora = pageGuard->selectedLoraValue();
-            launchWorkflowProfileWithModel(profile, model, lora, /*hasExplicitOverride=*/true);
-        }
-
-        if (workflowsPage_)
-            workflowsPage_->refreshLibrary();
-            });
+    workflowDropCoordinator_->handleDroppedWorkflow(path);
 }
+
 
 void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
 {
@@ -2892,7 +2781,7 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
     connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
             { switchToMode(QStringLiteral("workflows")); });
     connect(page, &ImageGenerationPage::workflowFileDropped, this,
-            [this, modeId](const QString &path) { importDroppedWorkflow(path, modeId); });
+            [this](const QString &path) { importDroppedWorkflow(path); });
     connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
         // Send-to-I2I from another page: the I2I page may not be built yet under lazy
         // construction. Build it on demand so the image lands instead of silently

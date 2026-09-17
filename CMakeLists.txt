@@ -251,6 +251,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workflows/WorkflowDownloadDialog.h
     qt_ui/workflows/WorkflowDraftBuilder.cpp
     qt_ui/workflows/WorkflowDraftBuilder.h
+    qt_ui/workflows/WorkflowDropCoordinator.cpp
+    qt_ui/workflows/WorkflowDropCoordinator.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp
@@ -669,6 +671,16 @@ qt_add_executable(test_workflow_draft_builder tests/cpp/test_workflow_draft_buil
 target_link_libraries(test_workflow_draft_builder PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME workflow_draft_builder COMMAND test_workflow_draft_builder)
 
+# W4 Task 3: the drop asks for everything the worker already knows. import_workflow -> the Download
+# dialog when something is missing -> compile_workflow_prompt -> check_workflow_launch_readiness ->
+# the draft -> the resolved page. Every step existed; none of them were chained, and safe_to_submit
+# was a hardcoded false, which is why a dropped workflow could not run. Driven by a fake worker that
+# answers each command in turn: no socket, no ComfyUI. The case that matters most is the one where
+# readiness is ABSENT -- it must read as unknown and keep submission closed, not fall through to yes.
+qt_add_executable(test_workflow_drop_coordinator tests/cpp/test_workflow_drop_coordinator.cpp)
+target_link_libraries(test_workflow_drop_coordinator PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_drop_coordinator COMMAND test_workflow_drop_coordinator)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -688,7 +700,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
-                      test_workflow_draft_builder
+                      test_workflow_draft_builder test_workflow_drop_coordinator
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
