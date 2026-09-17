@@ -606,9 +606,74 @@ writer, and each exists because a published number on this project violated it:
 
 ------------------------------------------------------------------------
 
+## Workflow Import
+
+A dropped or pasted ComfyUI workflow is imported with one request.
+
+``` json
+{
+  "command": "import_workflow",
+  "source": "D:/drops/asteral.json",
+  "auto_apply_node_deps": false,
+  "auto_apply_model_deps": false
+}
+```
+
+`source` takes a file path, inline JSON, or a URL. Both `auto_apply_*` default **closed**: nothing
+is fetched until the user has seen what would be fetched and agreed to it, and the UI re-sends the
+same request with them true after consent.
+
+The reply is flat, with the on-disk paths under `artifacts`, and it answers two separate questions.
+What the graph **is** (`inferred_task_command`, `inferred_media_type`, `capability_report`,
+`supported_modes`, `classification_confidence`) and whether it **can run here**:
+
+``` json
+{
+  "type": "workflow_import_result",
+  "ok": true,
+  "import_slug": "asteral-json",
+  "inferred_task_command": "t2i",
+  "artifacts": { "import_root": "...", "profile_path": "...", "workflow_path": "..." },
+  "launch_readiness": {
+    "ready": true,
+    "readiness_determined": true,
+    "undetermined_reason": "",
+    "summary": "Re-checked against live ComfyUI: nodes 0/0 already installed, ... models 5/5 present, 0 missing.",
+    "missing_node_classes": [],
+    "missing_runtime_assets": [],
+    "node_counts": { "checked": 0, "already_installed": 0, "installable": 0, "unresolved": 0 },
+    "model_counts": { "checked": 5, "already_present": 5, "missing": 0, "ambiguous": 0 }
+  }
+}
+```
+
+`launch_readiness` is present on **every** import reply, including a failed one, and is computed by
+the same function `check_workflow_launch_readiness` returns -- so the two replies cannot disagree
+about the same workflow.
+
+### `ready` is a tri-state and must be read as one
+
+| value | meaning |
+|---|---|
+| `true` | every node class and every model this graph names is present on this machine |
+| `false` | something is genuinely missing; `missing_node_classes` / `missing_runtime_assets` say what |
+| `null` | **the verdict could not be established.** Not ready, not unready |
+
+`null` is not a formality. A UI-graph export keeps its model names in positional `widgets_values`,
+so a scan of the raw graph returns no model references at all -- and zero references read as "no
+models missing" and carried the whole verdict to `ready`. That shipped: an imported workflow stored
+`"ok": true` beside `models 0/0 present`, a green badge over checkpoints nobody had looked at. The
+readiness pass now compiles a UI graph in memory against the live `/object_info` so it can see them,
+and when there is no live schema to compile against it says `null` rather than guessing.
+
+A client that collapses `null` into either bool is wrong in one direction or the other. Treat it the
+way the drop path does: open the workflow for review, keep submission closed, and say why.
+
+------------------------------------------------------------------------
+
 ## Command Coverage
 
-**This document details 11 of 135 commands.** The two examples above the Model Intelligence
+**This document details 12 of 135 commands.** The two examples above the Model Intelligence
 Commands section are the shape every command follows, not the set of commands that exist -- and
 the difference matters, because a reader who took the old "Future Request Types" list at face
 value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and

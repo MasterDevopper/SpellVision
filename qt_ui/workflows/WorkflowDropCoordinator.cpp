@@ -210,6 +210,24 @@ bool WorkflowDropCoordinator::needsHuggingFaceCredential(const QJsonObject &impo
 
 // --- readiness -----------------------------------------------------------------------------------
 
+QJsonObject WorkflowDropCoordinator::launchReadinessOf(const QJsonObject &importReply)
+{
+    return importReply.value(QStringLiteral("launch_readiness")).toObject();
+}
+
+WorkflowDropCoordinator::Readiness WorkflowDropCoordinator::readinessOfImportReply(const QJsonObject &importReply)
+{
+    const QJsonObject block = launchReadinessOf(importReply);
+    if (block.isEmpty())
+        return Readiness::Unknown;
+    const QJsonValue ready = block.value(QStringLiteral("ready"));
+    // JSON null is the worker's own third answer: it looked and could not tell. Same rule as the
+    // command reply, deliberately -- one vocabulary for one question.
+    if (!ready.isBool())
+        return Readiness::Unknown;
+    return ready.toBool() ? Readiness::Ready : Readiness::NotReady;
+}
+
 WorkflowDropCoordinator::Readiness WorkflowDropCoordinator::readinessOf(const QJsonObject &readinessReply)
 {
     // ABSENT means unknown. Not ready, not unready. The readiness command answers with a bool named
@@ -435,6 +453,25 @@ void WorkflowDropCoordinator::onCompileReply(DropContext context, const QJsonObj
         log(QStringLiteral("Compiled with %1 node class(es) missing from the live schema.")
                 .arg(missingClasses.size()));
 
+    // The import already answered this. Asking a second time inside one drop is not a second
+    // opinion -- it is the same function run twice, and two answers to one question is the defect
+    // this wave spent task 1 removing one level up. The command survives only for a worker whose
+    // import reply does not carry the block at all.
+    const QJsonObject readinessBlock = launchReadinessOf(context.importReply);
+    if (!readinessBlock.isEmpty())
+    {
+        QStringList missingAssets;
+        for (const QJsonValue &value : readinessBlock.value(QStringLiteral("missing_runtime_assets")).toArray())
+        {
+            const QString name = value.toString().trimmed();
+            if (!name.isEmpty())
+                missingAssets << name;
+        }
+        finish(context, readinessOfImportReply(context.importReply),
+               readinessBlock.value(QStringLiteral("summary")).toString(), missingAssets);
+        return;
+    }
+
     const QPointer<WorkflowDropCoordinator> guard(this);
     setBusy(true, QStringLiteral("Checking launch readiness…"));
     send(buildReadinessRequest(context.importReply, context.modeId),
@@ -448,16 +485,24 @@ void WorkflowDropCoordinator::onCompileReply(DropContext context, const QJsonObj
 
 void WorkflowDropCoordinator::onReadinessReply(DropContext context, const QJsonObject &reply)
 {
-    const Readiness readiness = readinessOf(reply);
-
-    WorkflowDraftBuilder::Source source =
-        draftSourceFor(context.importReply, context.compiledPromptPath, context.modeId);
+    QStringList missingAssets;
     for (const QJsonValue &value : reply.value(QStringLiteral("missing_runtime_assets")).toArray())
     {
         const QString name = value.toString().trimmed();
         if (!name.isEmpty())
-            source.missingRuntimeAssets << name;
+            missingAssets << name;
     }
+    finish(context, readinessOf(reply), reply.value(QStringLiteral("summary")).toString(), missingAssets);
+}
+
+void WorkflowDropCoordinator::finish(const DropContext &context,
+                                      Readiness readiness,
+                                      const QString &summary,
+                                      const QStringList &missingRuntimeAssets)
+{
+    WorkflowDraftBuilder::Source source =
+        draftSourceFor(context.importReply, context.compiledPromptPath, context.modeId);
+    source.missingRuntimeAssets << missingRuntimeAssets;
 
     const auto built = WorkflowDraftBuilder::build(source);
     if (!built.present)
@@ -468,8 +513,7 @@ void WorkflowDropCoordinator::onReadinessReply(DropContext context, const QJsonO
         return;
     }
 
-    QJsonObject draft = finalizeDraft(built.draft, readiness,
-                                      reply.value(QStringLiteral("summary")).toString());
+    QJsonObject draft = finalizeDraft(built.draft, readiness, summary);
 
     setBusy(false, QString());
     if (bindings_.openDraftOnMode)

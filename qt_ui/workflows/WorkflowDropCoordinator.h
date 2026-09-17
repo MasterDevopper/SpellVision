@@ -24,13 +24,18 @@ namespace spellvision::workflows
 // So the workflow landed on whatever page the mouse happened to be over, with nothing filled in, and
 // could not be run. Three answers the app already had, thrown away at the point of use.
 //
-//     import_workflow
+//     import_workflow                        -- now ALSO answers "can this run here"
 //       -> missing nodes or models?          -> the Download dialog, then re-import with consent
 //       -> WorkflowLaunchController          -> which page, or a refusal with a reason
 //       -> compile_workflow_prompt           -> the API prompt, against the LIVE schema
-//       -> check_workflow_launch_readiness   -> can this actually run here
 //       -> WorkflowDraftBuilder              -> the cockpit's values
 //       -> open on the resolved page
+//
+// The readiness verdict rides on the import reply (`launch_readiness`). It used to be a separate
+// command that only Flows sent, so this path asked for it a third time; one drop now has ONE author
+// for "can this run here", and two workers cannot disagree about the same workflow inside one
+// sequence. `check_workflow_launch_readiness` is still sent when the import reply does not carry the
+// block -- a worker older than this field -- and that is the only remaining case for it here.
 //
 // It is a separate unit because MainWindow is a god file and this was a 186-line lambda inside it;
 // it is bindings-driven for the same reason WorkerQueueController is -- the decisions can then be
@@ -95,6 +100,13 @@ public:
     static bool needsHuggingFaceCredential(const QJsonObject &importReply);
 
     static Readiness readinessOf(const QJsonObject &readinessReply);
+    // The readiness block on the import reply, empty when the worker does not send one.
+    static QJsonObject launchReadinessOf(const QJsonObject &importReply);
+    // `ready` inside that block, as the same three-state. A block whose `ready` is JSON null -- the
+    // worker saying it could not measure the models -- is UNKNOWN, not false and emphatically not
+    // true: a UI graph whose model names live in positional widget values once reported READY over
+    // `models 0/0 present`, which is a green badge on a workflow nobody had checked.
+    static Readiness readinessOfImportReply(const QJsonObject &importReply);
     static QString compiledPromptPathFor(const QJsonObject &compileReply, const QJsonObject &importReply);
     static WorkflowDraftBuilder::Source draftSourceFor(const QJsonObject &importReply,
                                                        const QString &compiledPromptPath,
@@ -129,6 +141,8 @@ private:
     void continueWithImport(DropContext context);
     void onCompileReply(DropContext context, const QJsonObject &reply);
     void onReadinessReply(DropContext context, const QJsonObject &reply);
+    void finish(const DropContext &context, Readiness readiness, const QString &summary,
+                const QStringList &missingRuntimeAssets);
 
     Bindings bindings_;
 };

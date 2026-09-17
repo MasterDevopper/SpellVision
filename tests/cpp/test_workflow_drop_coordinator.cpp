@@ -67,6 +67,19 @@ QJsonObject importReplyFor(const QString &slug, const QString &task, const QStri
     return reply;
 }
 
+// The readiness block the worker now puts on the import reply. `ready` is a tri-state on the wire:
+// true, false, or JSON null when the worker looked and could not tell.
+QJsonObject withReadiness(QJsonObject importReply, const QJsonValue &ready, const QString &summary = QString())
+{
+    QJsonObject block;
+    block.insert(QStringLiteral("ready"), ready);
+    block.insert(QStringLiteral("readiness_determined"), ready.isBool());
+    if (!summary.isEmpty())
+        block.insert(QStringLiteral("summary"), summary);
+    importReply.insert(QStringLiteral("launch_readiness"), block);
+    return importReply;
+}
+
 QJsonObject compileReplyFor(const QString &slug)
 {
     QJsonObject reply;
@@ -176,6 +189,7 @@ private slots:
     void theDropAsksEveryCommandInOrderAndLandsOnTheClassifiedPage();
     void safeToSubmitTracksTheReadinessVerdict();
     void anAbsentReadinessSignalReadsAsUnknownAndKeepsSubmissionClosed();
+    void aWorkerThatSendsNoReadinessBlockIsStillAskedForOne();
     void aWorkflowThatIsNotRoutableRefusesWithTheResolversReasonAndOpensNoPage();
     void aWorkflowNeedingNodesOffersTheDownloadDialogBeforeAnythingIsFetched();
     void decliningTheDownloadStillOpensTheWorkflowAsItIs();
@@ -198,10 +212,9 @@ void WorkflowDropCoordinatorTest::initTestCase()
 void WorkflowDropCoordinatorTest::theDropAsksEveryCommandInOrderAndLandsOnTheClassifiedPage()
 {
     FakeWorker worker;
-    worker.replies[QStringLiteral("import_workflow")] =
-        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
     worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-    worker.replies[QStringLiteral("check_workflow_launch_readiness")] = readinessReply(true);
 
     Shell shell;
     WorkflowDropCoordinator coordinator;
@@ -210,10 +223,11 @@ void WorkflowDropCoordinatorTest::theDropAsksEveryCommandInOrderAndLandsOnTheCla
 
     coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
 
-    // The two commands the drop path never sent are in the transcript now.
+    // compile_workflow_prompt -- the command the drop path never sent -- is in the transcript, and
+    // check_workflow_launch_readiness is NOT: the import reply already carried that verdict, and one
+    // drop asks one worker one time for one answer.
     QCOMPARE(worker.commands, (QStringList{QStringLiteral("import_workflow"),
-                                           QStringLiteral("compile_workflow_prompt"),
-                                           QStringLiteral("check_workflow_launch_readiness")}));
+                                           QStringLiteral("compile_workflow_prompt")}));
 
     // Nothing is fetched on the first import: consent comes first, every time.
     QCOMPARE(worker.requests.at(0).value(QStringLiteral("auto_apply_node_deps")).toBool(), false);
@@ -242,11 +256,10 @@ void WorkflowDropCoordinatorTest::safeToSubmitTracksTheReadinessVerdict()
     for (const bool ready : {true, false})
     {
         FakeWorker worker;
-        worker.replies[QStringLiteral("import_workflow")] =
-            importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
+        worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+            importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), ready,
+            ready ? QString() : QStringLiteral("2 node classes are missing."));
         worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-        worker.replies[QStringLiteral("check_workflow_launch_readiness")] =
-            readinessReply(ready, ready ? QString() : QStringLiteral("2 node classes are missing."));
 
         Shell shell;
         WorkflowDropCoordinator coordinator;
@@ -273,9 +286,7 @@ void WorkflowDropCoordinatorTest::safeToSubmitTracksTheReadinessVerdict()
 
 void WorkflowDropCoordinatorTest::anAbsentReadinessSignalReadsAsUnknownAndKeepsSubmissionClosed()
 {
-    // Three ways the signal can be absent, and not one of them may read as "go". Until a later task
-    // puts readiness on the import reply, unknown is the COMMON case, and the behaviour it has to
-    // produce is exactly today's: opened, not submittable.
+    // Three ways the signal can be absent, and not one of them may read as "go".
     QCOMPARE(WorkflowDropCoordinator::readinessOf(QJsonObject()), Readiness::Unknown);
 
     QJsonObject okButSilent;
@@ -293,11 +304,28 @@ void WorkflowDropCoordinatorTest::anAbsentReadinessSignalReadsAsUnknownAndKeepsS
     wrongType.insert(QStringLiteral("ready"), QStringLiteral("yes"));
     QCOMPARE(WorkflowDropCoordinator::readinessOf(wrongType), Readiness::Unknown);
 
+    // And the same three-state on the IMPORT reply's block. An import reply with no block is a
+    // worker older than the field; a block whose `ready` is JSON null is the worker saying it looked
+    // and could not tell -- which is the answer a UI graph with no live schema produces, and the
+    // answer that used to be silently reported as READY over `models 0/0 present`.
+    QCOMPARE(WorkflowDropCoordinator::readinessOfImportReply(QJsonObject()), Readiness::Unknown);
+    QCOMPARE(WorkflowDropCoordinator::readinessOfImportReply(
+                 importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"))),
+             Readiness::Unknown);
+    QCOMPARE(WorkflowDropCoordinator::readinessOfImportReply(withReadiness(
+                 importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), QJsonValue())),
+             Readiness::Unknown);
+    QCOMPARE(WorkflowDropCoordinator::readinessOfImportReply(withReadiness(
+                 importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true)),
+             Readiness::Ready);
+    QCOMPARE(WorkflowDropCoordinator::readinessOfImportReply(withReadiness(
+                 importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), false)),
+             Readiness::NotReady);
+
     FakeWorker worker;
-    worker.replies[QStringLiteral("import_workflow")] =
-        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), QJsonValue());
     worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-    // No readiness reply at all: the fake returns an empty object for that command.
 
     Shell shell;
     WorkflowDropCoordinator coordinator;
@@ -318,6 +346,31 @@ void WorkflowDropCoordinatorTest::anAbsentReadinessSignalReadsAsUnknownAndKeepsS
     const QJsonObject finalized =
         WorkflowDropCoordinator::finalizeDraft(unsafeDraft, Readiness::Ready, QString());
     QCOMPARE(finalized.value(QStringLiteral("safe_to_submit")).toBool(), false);
+}
+
+// --- 3b: the fallback for a worker older than the field -------------------------------------------
+
+void WorkflowDropCoordinatorTest::aWorkerThatSendsNoReadinessBlockIsStillAskedForOne()
+{
+    // The command is not deleted, it is demoted. A worker whose import reply predates
+    // `launch_readiness` still gets asked, and its answer still decides submission -- otherwise this
+    // change would have turned a known verdict into an unknown one on every older worker.
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] =
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
+    worker.replies[QStringLiteral("check_workflow_launch_readiness")] = readinessReply(true);
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(worker.commands, (QStringList{QStringLiteral("import_workflow"),
+                                           QStringLiteral("compile_workflow_prompt"),
+                                           QStringLiteral("check_workflow_launch_readiness")}));
+    QCOMPARE(shell.opens, 1);
+    QCOMPARE(shell.openedDraft.value(QStringLiteral("safe_to_submit")).toBool(), true);
 }
 
 // --- 4: not routable ------------------------------------------------------------------------------
@@ -374,9 +427,8 @@ void WorkflowDropCoordinatorTest::aWorkflowNeedingNodesOffersTheDownloadDialogBe
     import.insert(QStringLiteral("dependency_plan"), plan);
 
     FakeWorker worker;
-    worker.replies[QStringLiteral("import_workflow")] = import;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(import, true);
     worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-    worker.replies[QStringLiteral("check_workflow_launch_readiness")] = readinessReply(true);
 
     Shell shell;
     shell.acceptDownloads = false;
@@ -406,10 +458,9 @@ void WorkflowDropCoordinatorTest::decliningTheDownloadStillOpensTheWorkflowAsItI
     import.insert(QStringLiteral("dependency_plan"), plan);
 
     FakeWorker worker;
-    worker.replies[QStringLiteral("import_workflow")] = import;
+    worker.replies[QStringLiteral("import_workflow")] =
+        withReadiness(import, false, QStringLiteral("1 node class is missing."));
     worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-    worker.replies[QStringLiteral("check_workflow_launch_readiness")] =
-        readinessReply(false, QStringLiteral("1 node class is missing."));
 
     Shell shell;
     shell.acceptDownloads = false;
@@ -438,9 +489,8 @@ void WorkflowDropCoordinatorTest::acceptingTheDownloadReimportsWithConsentAndUse
     firstImport.insert(QStringLiteral("dependency_plan"), plan);
 
     FakeWorker worker;
-    worker.replies[QStringLiteral("import_workflow")] = firstImport;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(firstImport, false);
     worker.replies[QStringLiteral("compile_workflow_prompt")] = compileReplyFor(slug_);
-    worker.replies[QStringLiteral("check_workflow_launch_readiness")] = readinessReply(true);
 
     Shell shell;
     shell.acceptDownloads = true;
@@ -451,7 +501,8 @@ void WorkflowDropCoordinatorTest::acceptingTheDownloadReimportsWithConsentAndUse
     // then threw its reply away, so a successful download still left the draft describing the
     // pre-download world.
     bool served = false;
-    QJsonObject afterDownload = importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
+    QJsonObject afterDownload = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
     WorkflowDropCoordinator::Bindings bindings = bindingsFor(worker, shell);
     bindings.sendRequestAsync = [&](const QJsonObject &request,
                                     WorkflowDropCoordinator::RequestCompletion completion) {
@@ -478,6 +529,10 @@ void WorkflowDropCoordinatorTest::acceptingTheDownloadReimportsWithConsentAndUse
     // The dialog is offered once, not again on the re-import.
     QCOMPARE(shell.downloadPrompts, 1);
     QCOMPARE(shell.opens, 1);
+    // ... and the RETRY's readiness is the one that reaches the draft: the first import said not
+    // ready because the pack was missing, the download installed it, and the re-import said ready.
+    // Carrying the first answer forward would describe the pre-download world.
+    QCOMPARE(shell.openedDraft.value(QStringLiteral("safe_to_submit")).toBool(), true);
 }
 
 // --- 6: the import that fails ---------------------------------------------------------------------
