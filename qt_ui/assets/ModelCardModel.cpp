@@ -78,6 +78,16 @@ QVariant ModelCardModel::data(const QModelIndex &index, int role) const
         return card.modelValue;
     case FavoriteRole:
         return card.favorite;
+    case SiteBadgeRole:
+        return card.siteBadge;
+    case QuantisationRole:
+        return card.quantisation;
+    case IdentificationRole:
+        return static_cast<int>(card.identification);
+    case IdentificationCaptionRole:
+        return identificationCaption(card.identification);
+    case BlurPreviewRole:
+        return card.blurPreview;
     default:
         return {};
     }

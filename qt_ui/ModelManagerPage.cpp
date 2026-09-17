@@ -210,6 +210,11 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
         {QStringLiteral("metadataPath"), entry.metadataPath},
         {QStringLiteral("sha256"), entry.sha256},
         {QStringLiteral("baseModel"), entry.baseModel},
+        {QStringLiteral("siteBadge"), entry.siteBadge},
+        {QStringLiteral("quantisation"), entry.quantisation},
+        {QStringLiteral("coverPath"), entry.coverPath},
+        {QStringLiteral("previewNsfwLevel"), entry.previewNsfwLevel},
+        {QStringLiteral("identification"), entry.identification},
     };
 }
 
@@ -234,6 +239,11 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
     entry.metadataPath = object.value(QStringLiteral("metadataPath")).toString();
     entry.sha256 = object.value(QStringLiteral("sha256")).toString();
     entry.baseModel = object.value(QStringLiteral("baseModel")).toString();
+    entry.siteBadge = object.value(QStringLiteral("siteBadge")).toString();
+    entry.quantisation = object.value(QStringLiteral("quantisation")).toString();
+    entry.coverPath = object.value(QStringLiteral("coverPath")).toString();
+    entry.previewNsfwLevel = object.value(QStringLiteral("previewNsfwLevel")).toInt();
+    entry.identification = object.value(QStringLiteral("identification")).toInt();
     return entry;
 }
 
@@ -386,9 +396,35 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
 
         ModelEntry entry;
         entry.name = info.fileName();
-        entry.kind = kindForWeight(path);
+
+        // W5: ONE read of `<stem>.spellvision.json` per weight. The kind, the name the site gave
+        // the file, the site badge, the quantisation and the cover all come out of the same
+        // document -- reading it twice would let two answers about one file diverge.
+        const spellvision::assets::ModelIntel intel = spellvision::assets::readModelIntel(path);
+        entry.kind = intel.present && !intel.kind.isEmpty()
+            ? intel.kind
+            : spellvision::assets::ModelKindTabs::kindFromPath(path);
         entry.type = spellvision::assets::ModelKindTabs::kindLabel(entry.kind);
         entry.family = detectFamily(path);
+        entry.identification = static_cast<int>(intel.identification());
+        if (intel.identified())
+        {
+            // The display name goes on the PAGE. Nothing here touches the file.
+            if (!intel.displayName.isEmpty())
+                entry.displayName = intel.displayName;
+            entry.siteBadge = intel.primarySource().siteLabel();
+        }
+        entry.quantisation = intel.quantisation;
+        if (!intel.family.isEmpty())
+            entry.family = intel.family;
+        if (!intel.sha256.isEmpty())
+            entry.sha256 = intel.sha256;
+        const spellvision::assets::ModelIntelImage cover = intel.coverImage();
+        if (!cover.localPath.isEmpty() && QFileInfo::exists(cover.localPath))
+        {
+            entry.coverPath = cover.localPath;
+            entry.previewNsfwLevel = cover.nsfwLevel;
+        }
         entry.sizeText = humanSize(info.size());
         entry.status = QStringLiteral("Installed");
         entry.path = QDir::toNativeSeparators(path);
@@ -407,13 +443,18 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
         {
             ++result.metadataCount;
             const spellvision::assets::ModelMetadata meta = spellvision::assets::parseModelMetadata(sidecars.metadataPath);
-            entry.sha256 = meta.sha256;
+            if (entry.sha256.isEmpty())
+                entry.sha256 = meta.sha256;
             entry.baseModel = meta.baseModel;
-            entry.displayName = meta.modelName.trimmed();
+            // The import sidecar's model_name only fills a gap now: `<stem>.spellvision.json` is
+            // the identity document, and a name it established must not be overwritten by the
+            // older, thinner one.
+            if (entry.displayName.trimmed().isEmpty())
+                entry.displayName = meta.modelName.trimmed();
             // base_model is authoritative for family when present (fixes flat-folder Wan LoRAs; adds
             // the SDXL/Pony/Illustrious/Flux distinction). Path heuristic remains the fallback.
             const QString famFromBase = familyFromBaseModel(meta.baseModel);
-            if (!famFromBase.isEmpty())
+            if (!famFromBase.isEmpty() && !intel.present)
                 entry.family = famFromBase;
         }
 
@@ -584,13 +625,20 @@ void ModelManagerPage::populateGridFromEntries()
                                       QStringLiteral(".pth"), QStringLiteral(".bin"),
                                       QStringLiteral(".onnx")};
 
+    // Read the setting ONCE per rebuild rather than per card: a QSettings hit inside a loop over
+    // 759 weights is the kind of cost that only shows up on the owner's library.
+    const int nsfwCeiling = spellvision::assets::nsfwPreviewCeiling();
+
     QVector<spellvision::assets::ModelCardModel::Card> cards;
     cards.reserve(entries_.size());
     for (const ModelEntry &e : entries_)
     {
         spellvision::assets::ModelCardModel::Card c;
-        c.fullName = e.displayName.trimmed().isEmpty() ? e.name : e.displayName;
-        QString stripped = c.fullName;
+        // The tooltip is the FILE. The card prints the display name when the site gave one --
+        // the site's own title rather than loxsUtopicWorldKrea2_v20Quants.safetensors --
+        // and the file on disk keeps its name, which is an explicit owner requirement.
+        c.fullName = e.name;
+        QString stripped = e.name;
         for (const QString &ext : kExts)
         {
             if (stripped.endsWith(ext, Qt::CaseInsensitive))
@@ -599,11 +647,18 @@ void ModelManagerPage::populateGridFromEntries()
                 break;
             }
         }
-        c.strippedName = stripped;
+        c.strippedName = e.displayName.trimmed().isEmpty() ? stripped : e.displayName.trimmed();
         c.type = e.type;
         c.kind = e.kind;
         c.family = e.family;
-        c.previewPath = e.imagePreviewPath; // image sidecar; mp4 hover-play is S4
+        // The sidecar's cover first (the picture the site publishes for this weight), then the
+        // hand-placed `<stem>.png` the old S0 scan resolved. mp4 hover-play is S4.
+        c.previewPath = e.coverPath.isEmpty() ? e.imagePreviewPath : e.coverPath;
+        c.siteBadge = e.siteBadge;
+        c.quantisation = e.quantisation;
+        c.identification = static_cast<spellvision::assets::ModelIdentification>(e.identification);
+        c.previewNsfwLevel = e.previewNsfwLevel;
+        c.blurPreview = spellvision::assets::previewShouldBlur(e.previewNsfwLevel, nsfwCeiling);
         c.nativePath = e.path;
         c.sha256 = e.sha256;
         c.modelValue = e.name;

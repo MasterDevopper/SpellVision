@@ -39,6 +39,29 @@ struct ModelIntelSource
     QString siteLabel() const;
 };
 
+// One entry of `display.images[]`. `localPath` is the file the previews pass downloaded under
+// `<models root>/.spellvision/previews/<sha256>/`; `userOverride` marks the picture the USER
+// chose, which no refresh may disturb.
+struct ModelIntelImage
+{
+    QString originUrl;
+    QString localPath;
+    int width = 0;
+    int height = 0;
+    int nsfwLevel = 0;
+    bool isCover = false;
+    bool userOverride = false;
+};
+
+// The three states the page has to keep apart. Collapsing the last two is what would stop a user
+// telling "we asked the site and it does not know this file" from "nothing has ever looked".
+enum class ModelIdentification
+{
+    NeverAsked,       // no sidecar at all
+    NothingFound,     // a sidecar, no sources: the lookup ran and matched nothing
+    Identified,       // a site knows this hash
+};
+
 struct ModelIntel
 {
     bool present = false; // a `<stem>.spellvision.json` existed and parsed
@@ -55,13 +78,40 @@ struct ModelIntel
     qint64 size = 0;
     QVector<ModelIntelSource> sources;
 
+    // --- display: what the site says, and what the user overrode ---
+    QString displayName; // `display.name.value`; the FILE is never renamed
+    bool displayNameIsUserOverride = false;
+    QString descriptionHtml;
+    QString creator;
+    QString licenseName;
+    int nsfwLevel = -1; // -1 == the sidecar said nothing
+    QStringList triggerWords;
+    bool triggerWordsAreUserOverride = false;
+    QVector<ModelIntelImage> images;
+
     // True when a lookup actually matched something on a site. An identified model with no
     // pictures and no description is still identified, and must not render like one nobody asked
     // about.
     bool identified() const { return present && !sources.isEmpty(); }
     // The first source, or an empty one. The card badges this.
     ModelIntelSource primarySource() const;
+
+    ModelIdentification identification() const;
+    // The picture the card shows: the user's own if they set one, else the cover the site gave,
+    // else the first image. Empty when there is nothing to show.
+    ModelIntelImage coverImage() const;
+    QString coverPath() const { return coverImage().localPath; }
 };
+
+// The caption under an un-identified card. Two different absences, two different sentences.
+QString identificationCaption(ModelIdentification state);
+
+// The highest `nsfw_level` a preview may carry before the page blurs it. From QSettings
+// (`models/nsfwPreviewLevel`), defaulting to 2 -- the same ceiling
+// `model_intelligence.previews.download_previews` fetches at, so the default setting never blurs
+// a picture the refresh was willing to download.
+int nsfwPreviewCeiling();
+bool previewShouldBlur(int imageNsfwLevel, int ceiling);
 
 // `<dir>/<stem>.spellvision.json` for a weight path. Pure string work; touches no disk.
 QString modelIntelSidecarPath(const QString &modelPath);

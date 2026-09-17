@@ -4,6 +4,8 @@
 // Card per model; the delegate reads it, the thumbnail cache feeds it. noteThumbnailReady() maps a
 // finished thumbnail (keyed by preview path) back to its row so exactly one card repaints.
 
+#include "ModelIntelSidecar.h"
+
 #include <QAbstractListModel>
 #include <QHash>
 #include <QSortFilterProxyModel>
@@ -28,7 +30,13 @@ public:
         NativePathRole,                      // the model file path
         Sha256Role,                          // identity (overlay key)
         ModelValueRole,                      // value the cockpit expects (filename)
-        FavoriteRole                         // SpellVision-owned overlay (S5)
+        FavoriteRole,                        // SpellVision-owned overlay (S5)
+        // W5 Task 2: what the SITE says about this weight.
+        SiteBadgeRole,        // "CivitAI" / "HuggingFace" / "" -- where the metadata came from
+        QuantisationRole,     // nvfp4 / int8 / fp8 / bf16 -- four Lox variants differ only by this
+        IdentificationRole,   // ModelIdentification as an int
+        IdentificationCaptionRole, // "" when identified; two different sentences when not
+        BlurPreviewRole       // the preview's nsfw level exceeds the setting
     };
 
     struct Card
@@ -46,6 +54,15 @@ public:
         QString sha256;
         QString modelValue;
         bool favorite = false;
+
+        // W5 Task 2. `strippedName` above is what the card PRINTS -- the site's display name when
+        // there is one -- and `fullName` stays the filename on disk, because the file is never
+        // renamed and the tooltip is where a user checks what a card actually points at.
+        QString siteBadge;
+        QString quantisation;
+        ModelIdentification identification = ModelIdentification::NeverAsked;
+        int previewNsfwLevel = 0;
+        bool blurPreview = false;
 
         // Overlay identity: sha256 when present (survives moves), else the path (doc 22 §2.4).
         QString overlayKey() const { return sha256.isEmpty() ? nativePath : sha256; }

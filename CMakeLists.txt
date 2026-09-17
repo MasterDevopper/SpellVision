@@ -696,6 +696,17 @@ qt_add_executable(test_model_kind_tabs tests/cpp/test_model_kind_tabs.cpp)
 target_link_libraries(test_model_kind_tabs PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME model_kind_tabs COMMAND test_model_kind_tabs)
 
+# W5 Task 2: the card shows what the SITE says -- the title, the cover picture, the site badge and
+# the quantisation, all of which `<stem>.spellvision.json` has carried since the intelligence pass
+# ran and none of which the page read. Two rules here are not about layout: the display name
+# replaces the filename ON THE PAGE ONLY (the file is never renamed -- an owner requirement), and a
+# model with no sidecar must not render like one that was identified and had nothing to say. The
+# second is the one that would go quietly wrong: every FIELD of the two looks the same, and only
+# the sidecar's existence tells them apart. Driven by real sidecars from the F: library.
+qt_add_executable(test_model_card_sidecar tests/cpp/test_model_card_sidecar.cpp)
+target_link_libraries(test_model_card_sidecar PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_card_sidecar COMMAND test_model_card_sidecar)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -716,7 +727,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       test_workflow_draft_builder test_workflow_drop_coordinator
-                      test_model_kind_tabs
+                      test_model_kind_tabs test_model_card_sidecar
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

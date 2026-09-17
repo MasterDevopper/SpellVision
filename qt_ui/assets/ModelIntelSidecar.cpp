@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QSettings>
 
 namespace spellvision::assets
 {
@@ -40,6 +41,63 @@ QString ModelIntelSource::siteLabel() const
 ModelIntelSource ModelIntel::primarySource() const
 {
     return sources.isEmpty() ? ModelIntelSource{} : sources.first();
+}
+
+ModelIdentification ModelIntel::identification() const
+{
+    if (!present)
+        return ModelIdentification::NeverAsked;
+    return sources.isEmpty() ? ModelIdentification::NothingFound : ModelIdentification::Identified;
+}
+
+ModelIntelImage ModelIntel::coverImage() const
+{
+    // The user's own picture outranks the site's cover -- that is the whole point of setting one,
+    // and a later refresh that reorders the gallery must not quietly demote it.
+    for (const ModelIntelImage &image : images)
+    {
+        if (image.userOverride)
+            return image;
+    }
+    for (const ModelIntelImage &image : images)
+    {
+        if (image.isCover)
+            return image;
+    }
+    return images.isEmpty() ? ModelIntelImage{} : images.first();
+}
+
+QString identificationCaption(ModelIdentification state)
+{
+    switch (state)
+    {
+    case ModelIdentification::Identified:
+        return QString();
+    case ModelIdentification::NothingFound:
+        // We asked. The site does not have this file. That is a finished answer, and refreshing
+        // again will not change it.
+        return QStringLiteral("No match on any site");
+    case ModelIdentification::NeverAsked:
+        break;
+    }
+    // Nothing has ever looked. There is an action here, and the caption names it.
+    return QStringLiteral("Not identified yet");
+}
+
+int nsfwPreviewCeiling()
+{
+    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+    bool ok = false;
+    const int configured = settings.value(QStringLiteral("models/nsfwPreviewLevel"), 2).toInt(&ok);
+    return ok ? configured : 2;
+}
+
+bool previewShouldBlur(int imageNsfwLevel, int ceiling)
+{
+    // A level of 0 is CivitAI's "not rated", not "safe". Treating an unrated picture as safe is
+    // the failure mode with a cost, so only a positive level that exceeds the ceiling blurs -- and
+    // a ceiling below zero (a user who wants everything blurred) still catches it.
+    return imageNsfwLevel > ceiling;
 }
 
 QString modelIntelSidecarPath(const QString &modelPath)
@@ -94,6 +152,48 @@ ModelIntel parseModelIntelDocument(const QByteArray &json, const QString &sideca
     intel.family = ModelKindTabs::normaliseFamily(identity.value(QStringLiteral("family")).toString());
     intel.baseModel = identity.value(QStringLiteral("base_model")).toString().trimmed();
     intel.quantisation = identity.value(QStringLiteral("quantisation")).toString().trimmed();
+
+    const QJsonObject display = root.value(QStringLiteral("display")).toObject();
+    const QJsonObject name = display.value(QStringLiteral("name")).toObject();
+    intel.displayName = name.value(QStringLiteral("value")).toString().trimmed();
+    intel.displayNameIsUserOverride = name.value(QStringLiteral("user_override")).toBool();
+    intel.descriptionHtml = display.value(QStringLiteral("description_html")).toObject()
+                                .value(QStringLiteral("value")).toString();
+    intel.creator = display.value(QStringLiteral("creator")).toString().trimmed();
+    intel.licenseName = display.value(QStringLiteral("license")).toObject()
+                            .value(QStringLiteral("name")).toString().trimmed();
+    const QJsonValue nsfw = display.value(QStringLiteral("nsfw_level"));
+    intel.nsfwLevel = nsfw.isDouble() ? nsfw.toInt() : -1;
+
+    const QJsonObject triggers = display.value(QStringLiteral("trigger_words")).toObject();
+    intel.triggerWordsAreUserOverride = triggers.value(QStringLiteral("user_override")).toBool();
+    for (const QJsonValue &value : triggers.value(QStringLiteral("value")).toArray())
+    {
+        const QString word = value.toString().trimmed();
+        if (!word.isEmpty())
+            intel.triggerWords << word;
+    }
+
+    for (const QJsonValue &value : display.value(QStringLiteral("images")).toArray())
+    {
+        if (!value.isObject())
+            continue;
+        const QJsonObject object = value.toObject();
+        ModelIntelImage image;
+        image.originUrl = object.value(QStringLiteral("origin_url")).toString();
+        // Written by Python as a native Windows path. Normalising here means every consumer --
+        // QPixmap, the thumbnail cache, QFileInfo -- gets one spelling.
+        image.localPath = QDir::fromNativeSeparators(
+            object.value(QStringLiteral("local_path")).toString());
+        image.width = object.value(QStringLiteral("width")).toInt();
+        image.height = object.value(QStringLiteral("height")).toInt();
+        image.nsfwLevel = object.value(QStringLiteral("nsfw_level")).toInt();
+        image.isCover = object.value(QStringLiteral("is_cover")).toBool();
+        image.userOverride = object.value(QStringLiteral("user_override")).toBool();
+        if (image.localPath.isEmpty() && image.originUrl.isEmpty())
+            continue;
+        intel.images.push_back(image);
+    }
 
     for (const QJsonValue &value : identity.value(QStringLiteral("sources")).toArray())
     {

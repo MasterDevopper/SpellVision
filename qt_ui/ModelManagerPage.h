@@ -131,6 +131,14 @@ private:
         QString metadataPath;
         QString sha256;    // identity — thumbnail-cache / overlay key
         QString baseModel; // "" or "Unknown" when absent
+        // W5 Task 2: what `<stem>.spellvision.json` says. `displayName` above already carried the
+        // import sidecar's model_name; the intel name wins over it when both exist.
+        QString siteBadge;      // "CivitAI" / "HuggingFace" / ""
+        QString quantisation;   // nvfp4 / int8 / fp8 / bf16 / ""
+        QString coverPath;      // the sidecar's cover picture ("" -> fall back to the old sidecars)
+        int previewNsfwLevel = 0;
+        // NeverAsked / NothingFound / Identified, stored as an int so the cache round-trips it.
+        int identification = 0;
     };
 
     struct RefreshResult
