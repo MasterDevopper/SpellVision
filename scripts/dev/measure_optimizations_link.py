@@ -79,7 +79,15 @@ def restart_into_arm(arm: dict[str, Any] | None, **kwargs) -> dict[str, Any]:
     is to check that the arm took, and it cannot do that from a boolean.
     """
     payload: dict[str, Any] = {"command": "restart_comfy_runtime", "startup_timeout_sec": 180}
-    payload.update(arm or {})
+    if arm:
+        payload.update(arm)
+    elif arm is not None:
+        # An explicitly EMPTY arm means "launch the environment default". The flat keys cannot say
+        # that: with none of them present the worker reads "no arm named" and reuses the arm the
+        # session was last launched with (comfy_session_arm). The nested form distinguishes the
+        # two, and restore relies on it -- _closest_arm returns {} when the starting state carried
+        # no distinguishing flags at all.
+        payload["arm"] = {}
     for message in request(payload, **kwargs):
         if message.get("type") == "comfy_runtime_ack":
             return message

@@ -281,6 +281,7 @@ def build_launch_command(
     probe_attention: bool = True,
     vram_headroom: Any = None,
     arm: dict[str, Any] | None = None,
+    arm_source: str = "arm",
 ) -> list[str]:
     root = Path(comfy_root) if comfy_root else default_comfy_root()
     entry = detect_comfy_entrypoint(root)
@@ -297,8 +298,12 @@ def build_launch_command(
     # `arm=None` (the default) must walk the exact branch this function walked before `arm` existed,
     # byte for byte, because every launch in this repo that is not an explicit A/B goes through this
     # path. A wave about measuring optimizations must not change what it measures.
+    #
+    # `arm_source` only names the arm in the log lines -- a remembered arm and a freshly requested
+    # one emit identical flags, and the stderr log is the only record that a backend changed.
     if arm is not None:
-        command.extend(comfy_launch_policy.arm_args(arm, python_path, probe=probe_attention))
+        command.extend(comfy_launch_policy.arm_args(
+            arm, python_path, probe=probe_attention, source=arm_source))
     elif apply_launch_policy:
         command.extend(comfy_launch_policy.launch_args(
             python_path, probe=probe_attention, vram_headroom=vram_headroom))
@@ -318,6 +323,7 @@ def bootstrap_comfy_runtime(
     probe_attention: bool = True,
     vram_headroom: Any = None,
     arm: dict[str, Any] | None = None,
+    arm_source: str = "arm",
 ) -> dict[str, Any]:
     root = Path(comfy_root) if comfy_root else default_comfy_root()
     layout = ensure_runtime_layout(root) if create_dirs else {
@@ -342,7 +348,7 @@ def bootstrap_comfy_runtime(
     launch_cmd = build_launch_command(
         root, python_executable=resolved_python, host=host, port=port,
         apply_launch_policy=apply_launch_policy, probe_attention=probe_attention,
-        vram_headroom=vram_headroom, arm=arm,
+        vram_headroom=vram_headroom, arm=arm, arm_source=arm_source,
     )
     models_root = root / "models"
     input_root = root / "input"

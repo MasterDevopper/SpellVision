@@ -336,6 +336,7 @@ def arm_args(
     python_executable: str | Path | None = None,
     *,
     probe: bool = True,
+    source: str = "arm",
 ) -> list[str]:
     """The launch arguments for one named arm of an A/B run.
 
@@ -351,13 +352,18 @@ def arm_args(
     Missing sageattention when the arm explicitly names ``sage`` still raises, via the same
     ``resolve_attention_backend`` contract ``launch_args()`` uses -- an A/B run downgrading its own
     "sage" arm to SDPA would produce a labelled row that is not what it claims to be.
+
+    ``source`` is what the two log lines below call this arm. It exists because a REMEMBERED arm
+    (``comfy_session_arm``) and a freshly requested one produce identical flags and are not the
+    same event: a silent restart re-applying the session's arm has to be readable as that in the
+    stderr log, since those lines are the only place a backend change is recorded at all.
     """
     arm = arm or {}
     args: list[str] = []
 
     explicit_attention = arm.get("attention")
     backend, reason = resolve_attention_backend(python_executable, explicit=explicit_attention, probe=probe)
-    log.warning("ComfyUI attention backend (arm): %s -- %s", backend, reason)
+    log.warning("ComfyUI attention backend (%s): %s -- %s", source, backend, reason)
     if explicit_attention is not None:
         args.append(SAGE_FLAG if backend == SAGE else PYTORCH_ATTENTION_FLAG)
     else:
@@ -372,7 +378,7 @@ def arm_args(
         args.append(DISABLE_DYNAMIC_VRAM_FLAG)
 
     headroom, headroom_reason = resolve_vram_headroom(arm.get("vram_headroom"))
-    log.warning("ComfyUI VRAM headroom (arm): %s", headroom_reason)
+    log.warning("ComfyUI VRAM headroom (%s): %s", source, headroom_reason)
     args.extend(vram_args(headroom))
 
     return args

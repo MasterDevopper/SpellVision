@@ -492,6 +492,18 @@ passing `true`, leaves DynamicVRAM on (this core's own default). `vram_headroom`
 to reserve for the OS via `--reserve-vram`; omitted or `null` means "ComfyUI's own OS-dependent
 reservation", which is not the same as reserving nothing.
 
+An arm is **remembered for the session**. Naming no arm key does not mean "launch the environment
+default" -- it means "keep whatever this session was last launched with", so a restart performed for
+some other reason cannot silently replace the configuration a caller asked for. (It did: a rewritten
+`extra_model_paths.yaml` restarts ComfyUI, and that restart used to re-resolve attention from the
+environment, turning an explicitly requested `sdpa` session into a `sage` one with nothing in the
+reply saying so.) The environment is the fallback only for the first launch of a session.
+
+To go back to the environment, send a nested empty arm -- `{"command": "restart_comfy_runtime",
+"arm": {}}`. The flat keys alone cannot express it, because "named no arm key" and "named an empty
+arm" look identical in that form; a nested `arm` object may also carry the same four keys, and wins
+over the flat ones when both are present.
+
 #### Response
 
 ``` json

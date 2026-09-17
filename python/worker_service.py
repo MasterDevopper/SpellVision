@@ -1622,6 +1622,12 @@ def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> di
     timeout = bounded_option(req, "startup_timeout_sec", 60.0)
     # Comfy reads extra_model_paths.yaml at startup. A yaml rewrite while it is
     # already running leaves F: companions invisible (krea2 unet_raw / qwen3vl).
+    #
+    # This restart passes no arm ON PURPOSE, and that now means "keep the arm the session was
+    # launched with" rather than "re-resolve from the environment" (comfy_session_arm). It used to
+    # mean the latter, and a live run caught it replacing an explicitly requested SDPA with sage
+    # because sageattention is installed on this box -- a library added mid-session silently
+    # changed the attention backend, so renders before and after it were not comparable.
     if yaml_changed:
         payload = manager.restart(timeout_sec=timeout)
         invalidate_comfy_object_info("extra_model_paths.yaml changed")
@@ -1659,8 +1665,17 @@ def _arm_from_request(req: dict[str, Any]) -> dict[str, Any] | None:
 
     ``None`` has to reach ``ComfyRuntimeManager.restart``/``start`` unchanged: that is the whole
     byte-for-byte-default contract this wave is built on (see ``build_launch_command``'s docstring
-    note). A restart request that names no arm key must launch exactly as it always did.
+    note). A restart request that names no arm key must launch exactly as it always did -- which
+    now means "whatever arm the session was launched with", not "the environment default" (see
+    ``comfy_session_arm``).
+
+    The flat keys alone cannot say "go back to the environment": an empty selection from them is
+    indistinguishable from naming no key at all. A nested ``arm`` object can, and wins when present,
+    so ``{"arm": {}}`` clears the session's memory and ``{"arm": {"attention": "sage"}}`` sets it.
     """
+    nested = req.get("arm")
+    if isinstance(nested, dict):
+        return {str(key): value for key, value in nested.items()}
     arm = {key: req[key] for key in _ARM_KEYS if key in req}
     return arm or None
 

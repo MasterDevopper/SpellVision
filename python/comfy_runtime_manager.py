@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import comfy_launch_policy
+import comfy_session_arm
 
 from comfy_bootstrap import (
     bootstrap_comfy_runtime,
@@ -23,6 +25,8 @@ try:
     import psutil  # type: ignore
 except Exception:  # pragma: no cover
     psutil = None  # type: ignore
+
+log = logging.getLogger(__name__)
 
 
 class ComfyRuntimeManager:
@@ -270,6 +274,19 @@ class ComfyRuntimeManager:
                 return existing
 
             self.python_executable = resolve_managed_comfy_python(self.comfy_root, self.python_executable)
+            # What arm this launch runs, and why. `arm=None` means "nobody named one", which is NOT
+            # the same as "launch the environment default": a restart triggered by something else
+            # entirely -- a rewritten extra_model_paths.yaml, most of all -- must not quietly
+            # replace the backend the session was explicitly started with. See comfy_session_arm.
+            launch_arm, arm_source = comfy_session_arm.resolve_launch_arm(arm)
+            # Logged on EVERY launch, remembered ones included. The attention/VRAM lines the policy
+            # writes are the only record anywhere that a backend changed; a restart that re-applies
+            # a remembered arm has to be readable as one, and a restart that fell back to the
+            # environment has to be readable as that.
+            log.warning(
+                "ComfyUI launch arm: %s -- %s",
+                launch_arm if launch_arm is not None else "none", arm_source,
+            )
             bootstrap = bootstrap_comfy_runtime(
                 self.comfy_root,
                 python_executable=self.python_executable,
@@ -281,10 +298,12 @@ class ComfyRuntimeManager:
                 # NOT: it runs on a poll loop, and probing there both costs a subprocess per poll
                 # and floods a stderr pipe the test harness drains only at teardown.
                 apply_launch_policy=True,
-                # `arm=None` (the default) must walk the exact branch this call always walked --
-                # see build_launch_command's docstring note. Only an explicit A/B request changes
-                # what gets launched.
-                arm=arm,
+                # `launch_arm=None` must walk the exact branch this call always walked -- see
+                # build_launch_command's docstring note. resolve_launch_arm returns None both when
+                # nothing was ever named and when a caller explicitly asked for the default arm, so
+                # that branch stays byte-for-byte identical in either case.
+                arm=launch_arm,
+                arm_source=arm_source,
             )
             command = list(bootstrap.get("recommended_command") or [])
             if not command:
@@ -443,6 +462,13 @@ class ComfyRuntimeManager:
             return payload
 
     def restart(self, timeout_sec: float | None = None, *, arm: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stop and start again, in ``arm``.
+
+        ``arm=None`` reuses the arm the session was last launched with (``comfy_session_arm``); an
+        empty ``arm`` goes back to the environment. Every caller that restarts for a reason of its
+        own -- a rewritten ``extra_model_paths.yaml`` above all -- passes ``None``, and must not be
+        the thing that changes which attention backend the session is running.
+        """
         with self.lock:
             status = self.status()
             if status.get("state") == "ready_external":

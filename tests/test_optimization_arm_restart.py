@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 import comfy_launch_policy as policy  # noqa: E402
 import comfy_runtime_manager  # noqa: E402
+import comfy_session_arm  # noqa: E402
 import worker_service as ws  # noqa: E402
 
 
@@ -45,8 +46,14 @@ def _clean(monkeypatch):
     monkeypatch.delenv(policy.ATTENTION_ENV_VAR, raising=False)
     monkeypatch.delenv(policy.VRAM_HEADROOM_ENV_VAR, raising=False)
     policy._PROBE_CACHE.clear()
+    # The session arm is process-wide by design (comfy_session_arm), so an arm one test launches
+    # with is still remembered by the next -- which is the whole point in the worker and a
+    # cross-test leak here. `test_arm_none_never_emits_an_arm_only_flag` is about the FIRST launch
+    # of a session, and it read a previous test's sdpa arm until this line existed.
+    comfy_session_arm.forget_arm()
     yield
     policy._PROBE_CACHE.clear()
+    comfy_session_arm.forget_arm()
 
 
 class _FakeProc:
