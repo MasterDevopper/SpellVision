@@ -130,6 +130,26 @@ def test_an_api_shaped_workflow_needs_no_object_info(tmp_path):
     assert source == "workflow.json"
 
 
+def test_a_compiled_prompt_with_dangling_ids_is_stale(tmp_path):
+    """Staleness has two shapes and this only ever checked one.
+
+    The other is a compile written by the silent-drop behaviour: nodes omitted for want of a schema,
+    every link into them kept. Its loaders still carry their inputs, so the old guard waved it
+    through -- and the models it names are the models of a graph ComfyUI would refuse to run.
+    """
+    (tmp_path / "prompt_api.json").write_text(
+        json.dumps({
+            "1": node("CheckpointLoaderSimple", ckpt_name="sdxl/a.safetensors"),
+            "2": node("KSampler", model=["1", 0], latent_image=["99", 0]),
+        }),
+        encoding="utf-8",
+    )
+    graph, source = _load_graph(tmp_path, object_info=None)
+    assert graph is None
+    assert "stale" in source
+    assert "2.latent_image -> 99" in source
+
+
 def test_nothing_readable_says_so(tmp_path):
     graph, source = _load_graph(tmp_path, object_info=None)
     assert graph is None

@@ -42,12 +42,22 @@ def _ui_graph(extra_type: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- converter result
 
-def test_non_strict_reports_missing_and_still_returns_a_partial_prompt():
+def test_non_strict_refuses_rather_than_returning_a_partial_prompt():
+    """The partial prompt this used to assert WAS the defect.
+
+    "the resolvable nodes are still compiled, for inspection" reads reasonably until you notice
+    that every link INTO an unresolvable node survives the omission. ComfyUI rejects the result
+    with `KeyError: '<id>'` from inside validate_inputs, naming an id no user has ever seen, and
+    the compile reply said `ok: false` beside a prompt_api.json that said otherwise. Nothing
+    inspected the partial graph; two callers submitted it.
+    """
     result = convert_ui_graph(_ui_graph("SomeUninstalledNode"), SCHEMA)
     assert isinstance(result, ConversionResult)
     assert result.missing_classes == ["SomeUninstalledNode"]
-    assert result.node_count == 2, "the resolvable nodes are still compiled, for inspection"
-    assert "1" in result.prompt
+    assert result.errors, "a conversion that could not resolve a class must say so"
+    assert "SomeUninstalledNode" in result.errors[0]
+    assert result.prompt == {}, "no partial graph escapes"
+    assert result.node_count == 0
 
 
 def test_non_strict_clean_graph_reports_nothing_missing():
@@ -100,6 +110,30 @@ def test_state_missing_classes(tmp_path, monkeypatch):
     assert out["ok"] is False
     assert out["object_info_available"] is True
     assert out["missing_classes"] == ["SomeUninstalledNode"]
+
+
+def test_a_refused_compile_writes_no_prompt_file(tmp_path, monkeypatch):
+    """`ok: false` in a reply is not a fact about the disk.
+
+    The refused prompt used to be written anyway, so a graph with unresolvable classes left a
+    prompt_api.json behind that the draft builder and the readiness pass then read as a compile
+    that had worked. The reply is gone by the next command; the file is not.
+    """
+    out = _run(tmp_path, monkeypatch, _ui_graph("SomeUninstalledNode"), SCHEMA)
+    assert out["ok"] is False
+    assert not (tmp_path / "prompt_api.json").exists()
+    assert out["compiled_prompt_path"] is None
+    assert "SomeUninstalledNode" in out["reason"]
+
+
+def test_a_refused_compile_leaves_an_earlier_good_prompt_alone(tmp_path, monkeypatch):
+    """Refusing must not destroy a prompt that worked -- the pack may simply be uninstalled today."""
+    earlier = tmp_path / "prompt_api.json"
+    earlier.write_text(json.dumps({"1": {"class_type": "PreviewImage", "inputs": {}}}), encoding="utf-8")
+    _run(tmp_path, monkeypatch, _ui_graph("SomeUninstalledNode"), SCHEMA)
+    assert json.loads(earlier.read_text(encoding="utf-8")) == {
+        "1": {"class_type": "PreviewImage", "inputs": {}}
+    }
 
 
 def test_state_unknown_when_comfy_is_down(tmp_path, monkeypatch):
