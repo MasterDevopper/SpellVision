@@ -5964,6 +5964,24 @@ void MainWindow::beginModelDownload(const QString &reference,
     if (!context.isEmpty())
         request.insert(QStringLiteral("context"), context);
 
+    // W5 Task 5 -- where the file ENDS UP.
+    //
+    // W1 Task 10 built the post-download hook: `models_root` makes the lane place the finished
+    // weight under the right subdirectory of the library and identify THAT file, writing its
+    // sidecar. `download_manager` is explicit that absent means "the file stays wherever the
+    // materializer put it" -- python/.cache/assets/... -- and no caller in `qt_ui/` ever sent it.
+    // So every download through this app, from the Models page's own button and from a link
+    // dropped on the page, finished successfully into a cache directory the Models page does not
+    // scan. From the user's chair that is a download that did not happen.
+    //
+    // Deliberately not `model_kind`: the kind is a claim about a file nobody has classified yet,
+    // and `placement.subdir_for` already falls back to the same filename heuristic the C++ drop
+    // path uses. Sending a guess would make the guess authoritative.
+    const QString libraryRoot =
+        spellvision::shell::RuntimeProfile::load(resolveProjectRoot()).modelsRoot.trimmed();
+    if (!libraryRoot.isEmpty())
+        request.insert(QStringLiteral("models_root"), libraryRoot);
+
     sendWorkerRequestAsync(request, [this, ref](const QJsonObject &response,
                                                 const QString &diagnostics,
                                                 bool startedOk) {
@@ -6034,6 +6052,13 @@ void MainWindow::pollDownloadStatus()
 
         if (downloadActiveCount_ > 0)
             downloadPollTick_ = 0;
+
+        // W5 Task 5: the lane just placed a weight in the library and wrote its sidecar, and the
+        // Models page reads kinds and pictures at SCAN time -- so without this the model the user
+        // just downloaded is on disk, identified, and absent from every tab until they press
+        // Refresh Models themselves.
+        if (previousCount > 0 && downloadActiveCount_ == 0 && modelsPage_)
+            modelsPage_->refreshInventory();
 
         if (downloadActiveCount_ != previousCount || downloadPercent_ != previousPercent)
             syncBottomTelemetry();
