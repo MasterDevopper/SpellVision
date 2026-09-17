@@ -240,7 +240,7 @@ class ComfyRuntimeManager:
             self._last_status = status
             return status
 
-    def start(self, timeout_sec: float | None = None) -> dict[str, Any]:
+    def start(self, timeout_sec: float | None = None, *, arm: dict[str, Any] | None = None) -> dict[str, Any]:
         with self.lock:
             existing = self.status()
             state_key = str(existing.get("state") or "")
@@ -281,6 +281,10 @@ class ComfyRuntimeManager:
                 # NOT: it runs on a poll loop, and probing there both costs a subprocess per poll
                 # and floods a stderr pipe the test harness drains only at teardown.
                 apply_launch_policy=True,
+                # `arm=None` (the default) must walk the exact branch this call always walked --
+                # see build_launch_command's docstring note. Only an explicit A/B request changes
+                # what gets launched.
+                arm=arm,
             )
             command = list(bootstrap.get("recommended_command") or [])
             if not command:
@@ -300,6 +304,13 @@ class ComfyRuntimeManager:
                 proc = subprocess.Popen(
                     command,
                     cwd=self.comfy_root,
+                    # No env= here used to mean launch_env() -- which the module docstring calls
+                    # load-bearing, and which applies PYTHONUTF8=1 / PYTHONIOENCODING=utf-8 -- never
+                    # reached the Python-managed launch. Popen with no `env` inherits this process's
+                    # environment unchanged, so a stale inherited PYTHONIOENCODING (the exact case
+                    # that crashes ComfyUI's stderr logging under Windows cp1252, CLAUDE.md 9.2)
+                    # passed straight through. `launch_env` was, until now, referenced only by tests.
+                    env=comfy_launch_policy.launch_env(),
                     stdin=subprocess.DEVNULL,
                     stdout=stdout_fp,
                     stderr=stderr_fp,
@@ -331,6 +342,13 @@ class ComfyRuntimeManager:
             deadline = time.time() + (timeout_sec or self.startup_timeout_sec)
             while time.time() < deadline:
                 payload = self.status()
+                # `argv` is what was ACTUALLY launched (the `command` list this call built and
+                # handed to Popen), not the policy's own recommendation for the next launch --
+                # `status()` computes the latter fresh, without `arm`, and would silently show a
+                # different command than the one running. A caller must be able to verify the arm
+                # took rather than trust the request was honoured (the Qt sage probe fails open to
+                # SDPA on a cold launch, so a request for sage can legitimately produce SDPA).
+                payload["argv"] = list(command)
                 if payload.get("state") == "ready_managed":
                     payload["ok"] = True
                     return payload
@@ -341,6 +359,7 @@ class ComfyRuntimeManager:
                 time.sleep(self.poll_interval_sec)
 
             payload = self.status()
+            payload["argv"] = list(command)
             payload["ok"] = False
             payload["message"] = f"Timed out waiting for managed Comfy runtime at {self.endpoint}"
             return payload
@@ -423,7 +442,7 @@ class ComfyRuntimeManager:
                 payload["message"] = "Managed Comfy runtime stopped."
             return payload
 
-    def restart(self, timeout_sec: float | None = None) -> dict[str, Any]:
+    def restart(self, timeout_sec: float | None = None, *, arm: dict[str, Any] | None = None) -> dict[str, Any]:
         with self.lock:
             status = self.status()
             if status.get("state") == "ready_external":
@@ -431,4 +450,4 @@ class ComfyRuntimeManager:
                 status["message"] = "External Comfy runtime detected; SpellVision will not restart a runtime it does not own."
                 return status
             self.stop()
-            return self.start(timeout_sec=timeout_sec)
+            return self.start(timeout_sec=timeout_sec, arm=arm)

@@ -457,9 +457,71 @@ Reports which of the given model roots can be read right now.
 
 ------------------------------------------------------------------------
 
+## Comfy Runtime Commands
+
+### Restart Comfy Runtime Request
+
+Stops the managed ComfyUI process (if any) and starts it again. With no `arm`-shaped keys, this
+launches exactly as `start_comfy_runtime` always has -- the same environment-driven attention/VRAM
+defaults, unchanged. Naming any of `attention`, `fast`, `dynamic_vram` or `vram_headroom` launches
+that arm explicitly instead, for a measured A/B: the flag for whichever side is named is written to
+the command line rather than left to ComfyUI's own default, so a request for `sdpa` is
+distinguishable on the wire from "nothing was asked for and SDPA happened to run".
+
+#### Request
+
+``` json
+{
+  "command": "restart_comfy_runtime",
+  "startup_timeout_sec": 90,
+  "attention": "sdpa",
+  "fast": ["fp16_accumulation"],
+  "dynamic_vram": false,
+  "vram_headroom": 16
+}
+```
+
+All fields are optional. `startup_timeout_sec` defaults to 60. `attention` accepts the same
+spellings as `SPELLVISION_COMFY_ATTENTION` (`sage`/`sageattention`/`sage_attention`,
+`sdpa`/`pytorch`/`torch`/`none`/`off`/`default`); naming `sage` when the package is not importable
+in ComfyUI's own venv **fails the request** rather than silently launching SDPA -- a caller that
+asked for sage must be told it did not get sage, not be handed a mislabelled row. `fast` is a list
+of `comfy/cli_args.py` `PerformanceFeature` names (an empty list requests the bare `--fast`, which
+enables all of them). `dynamic_vram: false` passes `--disable-dynamic-vram`; omitting the key, or
+passing `true`, leaves DynamicVRAM on (this core's own default). `vram_headroom` is a number of GB
+to reserve for the OS via `--reserve-vram`; omitted or `null` means "ComfyUI's own OS-dependent
+reservation", which is not the same as reserving nothing.
+
+#### Response
+
+``` json
+{
+  "type": "comfy_runtime_ack",
+  "action": "restart_comfy_runtime",
+  "ok": true,
+  "state": "ready_managed",
+  "argv": [
+    "C:/sv_comfynext_v034/.venv/Scripts/python.exe", "C:/sv_comfynext_v034/ComfyUI/main.py",
+    "--listen", "127.0.0.1", "--port", "8188", "--dont-print-server",
+    "--use-pytorch-cross-attention", "--fast", "fp16_accumulation",
+    "--disable-dynamic-vram", "--reserve-vram", "16"
+  ],
+  "endpoint": "http://127.0.0.1:8188"
+}
+```
+
+`argv` is the command line this restart actually launched -- read back from the same
+`recommended_command`/`Popen` call, not recomputed from the request -- so a caller can verify the
+arm took rather than trust that the request was honoured. This matters because the Qt sage probe
+fails open to SDPA on a cold cache miss (`RuntimeProfile.cpp`): a request for `sage` can legitimately
+launch a process running SDPA, and only reading the process back (here, or via
+`optimization_provenance.probe()` against the running `/system_stats`) tells the two apart.
+
+------------------------------------------------------------------------
+
 ## Command Coverage
 
-**This document details 9 of 133 commands.** The two examples above the Model Intelligence
+**This document details 10 of 133 commands.** The two examples above the Model Intelligence
 Commands section are the shape every command follows, not the set of commands that exist -- and
 the difference matters, because a reader who took the old "Future Request Types" list at face
 value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and

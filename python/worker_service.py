@@ -134,6 +134,7 @@ from comfy_prompt_client import (
     request_comfy_free_memory,
     run_comfy_workflow,
 )
+from optimization_provenance import invalidate_optimization_provenance
 from native_runners import (
     _native_video_kwargs,
     run_flux3_video,
@@ -1647,12 +1648,37 @@ def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict
     return _runtime_message("comfy_runtime_ack", "stop_comfy_runtime", payload)
 
 
+# The keys an A/B arm may carry. Presence, not truthiness, is what makes a key part of the arm --
+# `{"dynamic_vram": False}` must reach comfy_launch_policy.arm_args as a request to disable it, not
+# be filtered out for being falsy.
+_ARM_KEYS = ("attention", "fast", "dynamic_vram", "vram_headroom")
+
+
+def _arm_from_request(req: dict[str, Any]) -> dict[str, Any] | None:
+    """The arm dict for an A/B restart, or ``None`` when the request named none of the arm keys.
+
+    ``None`` has to reach ``ComfyRuntimeManager.restart``/``start`` unchanged: that is the whole
+    byte-for-byte-default contract this wave is built on (see ``build_launch_command``'s docstring
+    note). A restart request that names no arm key must launch exactly as it always did.
+    """
+    arm = {key: req[key] for key in _ARM_KEYS if key in req}
+    return arm or None
+
+
 def handle_restart_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
-    payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0))
+    arm = _arm_from_request(req)
+    payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0), arm=arm)
     invalidate_comfy_object_info("comfy runtime restarted")
+    # A restart that changes which build is running invalidates optimization provenance too, for
+    # the same reason it invalidates /object_info: the CACHE this guards
+    # (optimization_provenance._CACHE) is a probe of the RUNNING process, and a restart replaces
+    # that process. Task 1 added this function and nothing called it -- an uninvalidated cache means
+    # every A/B row after the first restart would carry the PREVIOUS arm's provenance while looking
+    # complete, which is worse than recording no provenance at all.
+    invalidate_optimization_provenance("comfy runtime restarted")
     return _runtime_message("comfy_runtime_ack", "restart_comfy_runtime", payload)
 
 

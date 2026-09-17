@@ -61,6 +61,20 @@ _SDPA_NAMES = frozenset({"sdpa", "pytorch", "torch", "none", "off", "default"})
 
 SAGE_FLAG = "--use-sage-attention"
 
+# ComfyUI's own flag to FORCE pytorch/SDPA attention, as opposed to merely not asking for sage.
+# launch_args()/attention_args() never spell this -- "no flag" is sufficient there, because SDPA is
+# ComfyUI's own default. An A/B arm cannot rely on that: it must be able to pin either side
+# explicitly, because a bare launch that happens to land on SDPA is not evidence that SDPA was
+# asked for (see arm_args()).
+PYTORCH_ATTENTION_FLAG = "--use-pytorch-cross-attention"
+
+# `--fast` and `--disable-dynamic-vram` are the direct levers `optimization_provenance.py` reads
+# back out of a running process's argv (attention_from_argv / fast_from_argv /
+# dynamic_vram_from_argv). Named here too so the writer and the reader agree on the same strings
+# without one of them re-typing a literal.
+FAST_FLAG = "--fast"
+DISABLE_DYNAMIC_VRAM_FLAG = "--disable-dynamic-vram"
+
 # --- VRAM, which is not what a decade of ComfyUI advice says it is ------------------------------
 #
 # Core 0.34.0 runs DynamicVRAM (`comfy-aimdo`), enabled by default -- `cli_args.enables_dynamic_vram`
@@ -286,6 +300,53 @@ def launch_args(
     headroom, headroom_reason = resolve_vram_headroom(vram_headroom)
     log.warning("ComfyUI VRAM headroom: %s", headroom_reason)
     args.extend(vram_args(headroom))
+    return args
+
+
+def arm_args(
+    arm: Mapping[str, Any] | None,
+    python_executable: str | Path | None = None,
+    *,
+    probe: bool = True,
+) -> list[str]:
+    """The launch arguments for one named arm of an A/B run.
+
+    ``arm`` is ``{attention, fast, dynamic_vram, vram_headroom}``, every key optional. An axis the
+    arm does not name falls through to the same env/default resolution ``launch_args()`` uses, so
+    an arm that overrides one axis still behaves normally on the others.
+
+    The attention axis is the one place this deliberately diverges from ``launch_args()``: when the
+    arm NAMES a backend, the flag for either side is emitted explicitly -- including SDPA, via
+    ``PYTORCH_ATTENTION_FLAG`` -- because an A/B run has to control what actually runs, not merely
+    avoid asking for the other option. A caller reading the flags back
+    (``optimization_provenance.py``) must see which side was asked for, not infer it from absence.
+    Missing sageattention when the arm explicitly names ``sage`` still raises, via the same
+    ``resolve_attention_backend`` contract ``launch_args()`` uses -- an A/B run downgrading its own
+    "sage" arm to SDPA would produce a labelled row that is not what it claims to be.
+    """
+    arm = arm or {}
+    args: list[str] = []
+
+    explicit_attention = arm.get("attention")
+    backend, reason = resolve_attention_backend(python_executable, explicit=explicit_attention, probe=probe)
+    log.warning("ComfyUI attention backend (arm): %s -- %s", backend, reason)
+    if explicit_attention is not None:
+        args.append(SAGE_FLAG if backend == SAGE else PYTORCH_ATTENTION_FLAG)
+    else:
+        args.extend(attention_args(backend))
+
+    fast = arm.get("fast")
+    if fast is not None:
+        args.append(FAST_FLAG)
+        args.extend(str(name) for name in fast)
+
+    if arm.get("dynamic_vram") is False:
+        args.append(DISABLE_DYNAMIC_VRAM_FLAG)
+
+    headroom, headroom_reason = resolve_vram_headroom(arm.get("vram_headroom"))
+    log.warning("ComfyUI VRAM headroom (arm): %s", headroom_reason)
+    args.extend(vram_args(headroom))
+
     return args
 
 
