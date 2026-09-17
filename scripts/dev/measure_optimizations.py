@@ -26,8 +26,19 @@ Rules 3-5 live in ``measure_optimizations_rows``; the wire lives in ``measure_op
 the pixels live in ``measure_optimizations_quality``. This module owns the matrix, the arm order and
 the CLI.
 
+**A seventh discipline, added once the six above were in place: give the stack back.** Every arm
+restarts a ComfyUI this harness does not own. Before this, nothing restored it, so the harness left
+the owner's stack in whatever arm ran last -- and an interrupted run (their own Ctrl+C) stranded it
+in an arbitrary one. ``measure_optimizations_restore`` captures the running argv before the first
+restart and hands it back in a ``finally`` around the arm loop, on every exit: normal completion, an
+exception, or ``KeyboardInterrupt``. Where the starting state cannot be expressed as an arm --
+no attention flag at all is not the same as pinning ``{"attention": "sdpa"}`` -- it says so rather
+than claiming a fidelity it did not perform, and a restore that itself fails is reported, not
+swallowed.
+
 **Task 4 ends at ``--dry-run``.** Running the live matrix is Task 5: it restarts the owner's ComfyUI
-once per arm and renders for hours, so a bare invocation deliberately refuses.
+once per arm and renders for hours, so a bare invocation deliberately refuses. ``run_arms_with_restore``
+is the shape Task 5's loop runs inside of.
 
     python scripts/dev/measure_optimizations.py --dry-run
     python scripts/dev/measure_optimizations.py --dry-run --family krea2 --lever sage_attention
@@ -57,11 +68,22 @@ from measure_optimizations_rows import (  # noqa: E402
     quality_verdict,
     verify_arm,
 )
+from measure_optimizations_restore import (  # noqa: E402
+    RestoreResult,
+    StartingState,
+    capture_starting_state,
+    describe_restore,
+    describe_starting_state,
+    restore_starting_state,
+    run_arms_with_restore,
+)
 
 __all__ = [
-    "ArmStep", "ArmVerification", "Baseline", "Cell", "RunPlan", "RunResult",
-    "arm_sequence", "build_matrix", "build_rows", "describe", "link", "main", "measure_quality",
-    "quality_verdict", "runs_for_cell", "verify_arm",
+    "ArmStep", "ArmVerification", "Baseline", "Cell", "RestoreResult", "RunPlan", "RunResult",
+    "StartingState", "arm_sequence", "build_matrix", "build_rows", "capture_starting_state",
+    "describe", "describe_restore", "describe_starting_state", "link", "main", "measure_quality",
+    "quality_verdict", "restore_starting_state", "run_arms_with_restore", "runs_for_cell",
+    "verify_arm",
 ]
 
 # The cockpit's own seed range (SamplingController.cpp: setRange(0, 2147483647)). A harness seed

@@ -6,6 +6,8 @@ prevents, because the harness's rules are not general research hygiene; they are
 """
 from __future__ import annotations
 
+import io
+import json
 import sys
 from pathlib import Path
 
@@ -329,3 +331,214 @@ def test_the_dry_run_never_touches_the_worker(monkeypatch) -> None:
 
     monkeypatch.setattr(harness.link, "request", explode)
     assert harness.main(["--dry-run"]) == 0
+
+
+# --- discipline 7: give the stack back -----------------------------------------------------------
+#
+# This harness restarts a ComfyUI it does not own. Before this discipline, nothing restored it: the
+# harness left the owner's stack in whatever arm ran last, and an interrupted run -- their own
+# Ctrl+C, the likeliest interruption there is -- stranded it in an arbitrary one. Every test here
+# uses a fake urllib opener for the probe and a monkeypatched harness.link.restart_into_arm for the
+# restart -- no socket, real or fake-over-TCP, is ever opened.
+
+
+class _FakeProbeResponse(io.BytesIO):
+    status = 200
+
+
+class _FakeProbeOpener:
+    """Stands in for urllib against ComfyUI's own /system_stats -- never a real socket."""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def open(self, request, timeout=None):  # noqa: ARG002 -- signature matches urllib's opener
+        return _FakeProbeResponse(json.dumps(self.payload).encode("utf-8"))
+
+
+def _system_stats(argv: list[str]) -> dict:
+    return {
+        "system": {
+            "comfyui_version": "0.34.0",
+            "pytorch_version": "2.10.0+cu128",
+            "python_version": "3.12.7",
+            "argv": list(argv),
+            "comfy_package_versions": [],
+        }
+    }
+
+
+def _ack(*argv: str, ok: bool = True, **extra) -> dict:
+    reply = {"type": "comfy_runtime_ack", "ok": ok, "argv": ["main.py", *argv]}
+    reply.update(extra)
+    return reply
+
+
+def test_the_starting_state_is_captured_before_any_restart() -> None:
+    """The probe reads the RUNNING process -- the same evidence verify_arm trusts -- not what a
+    launch script intended."""
+    state = harness.capture_starting_state(
+        opener=_FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))
+    )
+    assert state.probe["attention_backend"] == "sage"
+    assert state.restore_arm["attention"] == "sage"
+    assert "attention" not in state.unreproducible
+
+
+def test_no_attention_flag_at_all_is_not_the_same_as_pinning_sdpa() -> None:
+    """The one named subtlety: a bare launch that lands on SDPA because nothing was installed to
+    pick sage is not evidence SDPA was asked for. {"attention": "sdpa"} PINS it explicitly
+    (comfy_launch_policy.arm_args); a restore that cannot tell the difference must say so."""
+    state = harness.capture_starting_state(
+        opener=_FakeProbeOpener(_system_stats(["main.py", "--listen", "127.0.0.1"]))
+    )
+    assert state.probe["attention_backend"] == "sdpa"
+    assert "attention" not in state.restore_arm
+    assert "attention" in state.unreproducible
+
+
+def test_restore_runs_on_normal_completion(monkeypatch) -> None:
+    calls = []
+
+    def fake_restart(arm, **_kwargs):
+        calls.append(arm)
+        return _ack("--use-sage-attention")
+
+    monkeypatch.setattr(harness.link, "restart_into_arm", fake_restart)
+    ran = []
+    result = harness.run_arms_with_restore(
+        ["arm-a", "arm-b"],
+        ran.append,
+        probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+        printer=lambda _line: None,
+    )
+    assert ran == ["arm-a", "arm-b"]
+    assert calls == [{"attention": "sage", "dynamic_vram": True}]
+    assert result.attempted is True and result.ok is True
+
+
+def test_restore_runs_when_the_arm_loop_raises(monkeypatch) -> None:
+    """An exception mid-matrix must not strand the stack in whatever arm was running when it blew
+    up."""
+    calls = []
+    monkeypatch.setattr(
+        harness.link, "restart_into_arm",
+        lambda arm, **_kw: calls.append(arm) or _ack("--use-sage-attention"),
+    )
+
+    def boom(_step):
+        raise RuntimeError("render blew up")
+
+    with pytest.raises(RuntimeError, match="render blew up"):
+        harness.run_arms_with_restore(
+            ["arm-a"], boom,
+            probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+            printer=lambda _line: None,
+        )
+    assert calls == [{"attention": "sage", "dynamic_vram": True}]
+
+
+def test_restore_runs_on_keyboard_interrupt(monkeypatch) -> None:
+    """The operator's own Ctrl+C is the likeliest interruption there is, and exactly when stranding
+    the stack would be worst."""
+    calls = []
+    monkeypatch.setattr(
+        harness.link, "restart_into_arm",
+        lambda arm, **_kw: calls.append(arm) or _ack("--use-sage-attention"),
+    )
+
+    def interrupt(_step):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        harness.run_arms_with_restore(
+            ["arm-a"], interrupt,
+            probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+            printer=lambda _line: None,
+        )
+    assert calls == [{"attention": "sage", "dynamic_vram": True}]
+
+
+def test_a_failed_restore_is_reported_not_swallowed(monkeypatch) -> None:
+    """A silent failed restore is worse than no restore -- the operator would believe the stack is
+    back when it is not."""
+    monkeypatch.setattr(
+        harness.link, "restart_into_arm",
+        lambda arm, **_kw: _ack(
+            "--use-pytorch-cross-attention", ok=False, error="comfy would not come back up",
+        ),
+    )
+    printed = []
+    result = harness.run_arms_with_restore(
+        ["arm-a"], lambda _step: None,
+        probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+        printer=printed.append,
+    )
+    assert result.attempted is True and result.ok is False
+    assert "comfy would not come back up" in result.reason
+    assert any("FAILED" in line for line in printed)
+
+
+def test_a_restore_transport_error_does_not_mask_the_original_exception(monkeypatch) -> None:
+    """restore_starting_state must catch its own failure rather than let it replace whatever
+    exception sent the harness to `finally` in the first place -- two different problems must not
+    collapse into one confusing traceback."""
+    def blow_up(*_args, **_kwargs):
+        raise OSError("socket gone")
+
+    monkeypatch.setattr(harness.link, "restart_into_arm", blow_up)
+    printed = []
+
+    def boom(_step):
+        raise RuntimeError("render blew up")
+
+    with pytest.raises(RuntimeError, match="render blew up"):
+        harness.run_arms_with_restore(
+            ["arm-a"], boom,
+            probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+            printer=printed.append,
+        )
+    assert any("FAILED" in line and "socket gone" in line for line in printed)
+
+
+def test_the_starting_state_is_printed_before_the_restore(monkeypatch) -> None:
+    """So the operator can see, before anything restarts, what this run will be returned to."""
+    monkeypatch.setattr(
+        harness.link, "restart_into_arm",
+        lambda arm, **_kw: _ack("--use-sage-attention"),
+    )
+    printed = []
+    harness.run_arms_with_restore(
+        ["arm-a"], lambda _step: None,
+        probe_kwargs={"opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))},
+        printer=printed.append,
+    )
+    joined = "\n".join(printed)
+    assert joined.index("STARTING STATE") < joined.index("RESTORE")
+
+
+def test_a_successful_restore_still_names_what_it_could_not_reproduce() -> None:
+    """A restore that claims fidelity it did not perform is worse than one that admits the gap."""
+    state = harness.capture_starting_state(opener=_FakeProbeOpener(_system_stats(["main.py"])))
+    assert "attention" in state.unreproducible
+    text = harness.describe_restore(
+        harness.RestoreResult(attempted=True, ok=True, reason="", starting=state)
+    )
+    assert "attention" in text and "could not be reproduced" in text
+
+
+def test_when_nothing_could_be_probed_the_restore_is_not_attempted(monkeypatch) -> None:
+    """No starting state means no honest claim about what "restored" would even mean -- refuse
+    rather than restart into a guess."""
+    def must_not_restart(*_args, **_kwargs):
+        raise AssertionError("must not restart when nothing was captured to restore to")
+
+    monkeypatch.setattr(harness.link, "restart_into_arm", must_not_restart)
+    printed = []
+    result = harness.run_arms_with_restore(
+        ["arm-a"], lambda _step: None,
+        probe_kwargs={"opener": _FakeProbeOpener({"system": {}})},
+        printer=printed.append,
+    )
+    assert result.attempted is False and result.ok is False
+    assert any("NOT ATTEMPTED" in line for line in printed)
