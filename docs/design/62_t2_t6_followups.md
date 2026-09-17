@@ -154,6 +154,15 @@ Each step earns its place. Shortening the query is what finds `Lightricks/LTX-2.
 
 **48.1% is not "near zero", so the arm was wired rather than deleted**, in `refresh.RefreshJob._hf` behind `hf_candidates.py`. The property that makes guessing safe is that a candidate is accepted ONLY on a sha256 match, so a wrong guess costs a request and can never mislabel a file — the opposite of 3l below, which is a *correct* hash match to a bundle. A `lookup_failed` never reaches the second arm. `identified_hf` is reported beside `identified` so a single total cannot hide which arm is working.
 
+**Verified independently 2026-09-17, and one claim needs narrowing.** Over the live library: 759 sidecars, **27 now carry a HuggingFace source**, and the HF arm is genuinely supplying identity and licence for them — `sigclip_vision_patch14_384` reads `apache-2.0`, the three Hunyuan video weights read `other`. **19 sidecars now carry a `license.name`, all of them from HF card frontmatter**, where CivitAI supplies none.
+
+But **the `card:*` settings tiers still contribute nothing to this library — the provenance histogram is unchanged at `site:image-meta-mode` 2591 · `table:family-default` 1738 · `site:trainedWords` 353 · `site:image-meta-weak` 243, with zero `card:*`.** The capability is real: asked directly, `settings_from_readme` on `Lightricks/LTX-2.3` returns **steps 8 / cfg 1 at `card:prose-regex`**, agreeing with the distilled two-stage route in CLAUDE.md §6. It simply never fires here, for two structural reasons worth writing down:
+
+1. **HF is only consulted when CivitAI found nothing** — correct, and it means a weight CivitAI carries can never reach its HF card. `ltx-2.3-22b-dev`, the very model whose card parses cleanly, matched CivitAI, so its card is never read.
+2. **`card:*` sits below `site:image-meta-mode` in the precedence order**, so even where both exist the site's own render metadata wins.
+
+So: *reachable in code, unexercised in data.* Say it that way. A future reader who sees "wired" and assumes card values are flowing into defaults would be wrong, and would go looking for a bug that is not there.
+
 The remaining misses are the honest answer, not a shortfall: the owner's own fused LoRAs (`Fused_*`, `Penis_*`, `st0m4chBulg3_*`) and CivitAI LoRAs nobody mirrored to HF. Live proof through the shipped path: `trellis_2_bf16` → `Comfy-Org/TRELLIS.2` (licence `mit`), `ip-adapter-plus_sd15` → `InvokeAI/ip_adapter_plus_sd15` (`apache-2.0`), and `Lightricks/LTX-2.3`'s card yields `steps 8 / cfg 1` at `card:prose-regex` — the first `card:*` provenance this project has ever resolved, and it agrees with the distilled two-stage route CLAUDE.md §6 records.
 
 **3k. Creator and licence are null on all 680 identified models — FIXED 2026-09-17.** `CivitaiClient.model()` existed at `civitai_lookup.py:109` and had no caller anywhere in the tree. Measured live against the public API rather than assumed:
