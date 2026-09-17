@@ -806,6 +806,11 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "install_recommended_video_nodes":
             emitter.emit(ws.handle_install_recommended_video_nodes_command(req))
             return
+        if command == "optimization_results":
+            import optimization_commands
+
+            emitter.emit(optimization_commands.handle_optimization_results_command(req))
+            return
         if command == "resolve_missing_models":
             import model_resolution_commands
 

@@ -519,9 +519,72 @@ launch a process running SDPA, and only reading the process back (here, or via
 
 ------------------------------------------------------------------------
 
+## Optimization Results
+
+Reads the optimization ledger (`runtime/state/optimization_results.jsonl`), whose only writer is
+`scripts/dev/measure_optimizations.py`. DIAGNOSTIC: no UI route until W3 T6.
+
+**Request**
+
+```json
+{
+  "command": "optimization_results",
+  "family": "krea2",
+  "lever": "sage_attention",
+  "limit": 50
+}
+```
+
+`family`, `lever` and `limit` are all optional; with none of them the whole ledger comes back.
+
+**Reply**
+
+```json
+{
+  "type": "optimization_results",
+  "ok": true,
+  "rows": [
+    {
+      "family": "krea2", "mode": "t2i", "lever": "sage_attention", "arm": "sage",
+      "seconds": [120.72, 122.10], "mean": 121.41,
+      "baseline_mean": 124.01, "delta_pct": -2.1,
+      "warm": true,
+      "quality": {"guards": ["black_frame"], "status": "pass", "values": {}},
+      "memory": {"peak_vram_gb": null, "comparable": false, "reason": "no --reserve-vram was passed"},
+      "provenance": {"attention_backend": "sage", "comfy_argv": ["..."], "fast_flags": []},
+      "exclusions": [], "excluded_from_delta": false,
+      "dest": "...", "job_id": "...", "recorded_at": "2026-09-16T21:04:11"
+    }
+  ],
+  "families": ["krea2"],
+  "levers": ["sage_attention"],
+  "unmeasured_levers": ["vae_tiling"],
+  "blocked_levers": {"ck_int8_attention": "..."},
+  "cut_levers": {"nvfp4": "..."},
+  "path": "C:/.../runtime/state/optimization_results.jsonl"
+}
+```
+
+Four properties of a row are enforced by `python/optimization_results.py` rather than left to the
+writer, and each exists because a published number on this project violated it:
+
+* **`seconds` is a list, never a scalar.** A single timing is not a measurement; a row with one
+  timed run is recorded and excluded from every delta.
+* **`warm` is explicit.** The archive holds the same configuration at 159.27 s cold and 120.72 s
+  warm.
+* **`baseline_mean` travels with the row**, so a delta can never be computed against a baseline
+  from another session or another build. Nothing reads a baseline out of a different row.
+* **A row whose `provenance.attention_backend` is `unknown` is recorded and excluded from every
+  delta** -- the harness has to be able to say "this ran, and I cannot tell you on what".
+
+`excluded_from_delta` is therefore never a silent drop: `exclusions` names every reason, and
+`delta_pct` is `null` whenever it is set.
+
+------------------------------------------------------------------------
+
 ## Command Coverage
 
-**This document details 10 of 133 commands.** The two examples above the Model Intelligence
+**This document details 11 of 134 commands.** The two examples above the Model Intelligence
 Commands section are the shape every command follows, not the set of commands that exist -- and
 the difference matters, because a reader who took the old "Future Request Types" list at face
 value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and
@@ -534,9 +597,9 @@ cannot quietly go stale the way the "Planned commands" list did.
 | audience | count | what it means |
 |---|---|---|
 | user-facing | 58 | reachable from the UI by a normal user action |
-| diagnostic | 59 | for inspecting state; safe, but not part of a normal flow |
+| diagnostic | 60 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
-| **total** | **133** | |
+| **total** | **134** | |
 
 Commands not detailed here still follow the envelope and event model described above: a `command`
 field, an optional `job_id`, and the same status / progress / result / error events.

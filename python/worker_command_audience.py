@@ -133,6 +133,11 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # this list in W2, when the cockpit started asking it what a model wants.
     "model_intel_get", "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
     "model_roots_status",
+    # The optimization ledger (W3). Read-only over runtime/state/optimization_results.jsonl, whose
+    # only writer is scripts/dev/measure_optimizations.py. DIAGNOSTIC deliberately: the row shape
+    # has to settle against a real matrix run before a surface is built on it, and W3 T6 is where a
+    # qt_ui/ route would promote it.
+    "optimization_results",
 })
 
 # Never addressed by a person.

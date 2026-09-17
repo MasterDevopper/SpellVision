@@ -75,6 +75,10 @@ MODEL_INTELLIGENCE_MESSAGE_TYPES = {
     "model_intel_set_user", "model_recommended_settings", "model_roots_status",
     "model_intel_progress",
 }
+# The optimization ledger (W3 T3). DIAGNOSTIC in worker_command_audience until T6 wires a
+# qt_ui/ route, and registered here regardless: an unregistered type reaches every client as
+# client_warning with ok=false, so even a terminal-only reply has to be a first-class one.
+OPTIMIZATION_MESSAGE_TYPES = {"optimization_results"}
 DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
@@ -439,6 +443,7 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         | WORKFLOW_COMPILE_MESSAGE_TYPES
         | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
         | MODEL_INTELLIGENCE_MESSAGE_TYPES
+        | OPTIMIZATION_MESSAGE_TYPES
     ):
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:

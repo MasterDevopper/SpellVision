@@ -52,7 +52,7 @@ seam between two of these steps rather than inside any one of them.
 2. **The submission policy decides whether to send it.** `qt_ui/workers/WorkerSubmissionPolicy`.
 3. **It goes over the socket.** `qt_ui/workers/WorkerSocketClient` carries every one-shot command.
    (It replaced spawning `python worker_client.py` per RPC: ~79 ms → ~1.4 ms, on a 1.8 s poll.)
-4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 125
+4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 134
    commands. `python/worker_command_audience.py` classifies every one of them as user-facing,
    diagnostic or internal, and `tests/test_protocol_doc.py` holds the protocol document to that set.
 5. **The job enters the state machine.** `python/worker_service_state.py` owns `JobState` and
@@ -92,6 +92,7 @@ extractions; `worker_tcp.py` is 864.
 | Workflows | `workflow_importer.py`, `workflow_scanner.py`, `workflow_url_import.py`, `workflow_pack_resolver.py`, `workflow_model_declarations.py`, `workflow_architecture_inference.py`, `workflow_library_commands.py`, `node_pack_installer.py`, `node_dependency_resolver.py`, `node_registry_resolver.py` | Import a foreign workflow, resolve what it needs, install pinned |
 | LTX | `ltx_workflow_contract.py`, `ltx_workflow_materialization.py`, `ltx_workflow_graph_inspection.py`, `ltx_prompt_api_*.py`, `ltx_queue_history_registry.py`, `ltx_requeue_draft_submission.py`, `ltx_smoke_test_route.py` | The LTX route and its prompt-API fallback |
 | Character | `character_create.py`, `character_pack.py`, `character_export_validate.py`, `look_completion.py`, `clothes_only.py`, `garment_shrinkwrap.py`, `plate_to_sliders.py`, `lock_plate_blend.py` | The Character Studio commands |
+| Optimization evidence | `optimization_provenance.py`, `optimization_levers.py`, `optimization_results.py`, `optimization_commands.py` | What build produced a render, which levers this stack can actually measure, and the ledger a timing is recorded in |
 | Resources | `runtime_paths.py`, `app_paths.py`, `runtime_identity.py`, `vram.py`, `memory_optimization.py`, `download_manager.py`, `download_commands.py`, `credential_store.py` | Paths, VRAM, memory profile, the download lane, secrets |
 
 `python/video_adapters/` holds `base.py`, `registry.py`, `ltx_adapter.py`, `wan_adapter.py` and
