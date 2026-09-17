@@ -391,6 +391,19 @@
 
       <section id="t4">
         <h2>T4 — optimizations, generate-proven</h2>
+        <p class="warn">
+          <strong>CORRECTED 2026-09-17 — the sage-vs-SDPA figures below are withdrawn.</strong>
+          The full measurement is <a href="60_t4_optimization_results.md">Doc 60</a>. Two things the
+          numbers below could not know: <code>runtime/state/job_archive.json</code> holds a
+          <strong>third arm at 159.27 s</strong> that this section never mentions, so the published
+          gap was smaller than the spread between two runs of the <em>same</em> arm; and the first
+          arm measured in a session runs <strong>7-8% slow</strong> even after its cold render is
+          discarded, which is more than twice the effect being claimed.
+          On a warm baseline SageAttention is worth <strong>−0.3% on krea2 images</strong> (nothing)
+          and <strong>−10.2% on LTX video</strong>. The largest finding in the matrix is not an
+          optimization at all: <strong>LTX with DynamicVRAM disabled is 22× slower</strong>
+          (895.96 s against 40.11 s).
+        </p>
         <p>Sage was installed but not in argv on the adopted Comfy. Restarted with <code>--use-sage-attention</code>. krea2 T2I completed. Dest landed. Cold A/B on the same job (prompt golden-hour landscape, seed 7, 1024×1024, 52/3.5, krea2 utopic v20, Comfy restarted between arms): sage <strong>120.72s</strong> vs SDPA <strong>124.01s</strong>. Sage is ~3% on this image job — not the Wan −25% figure. Do not quote 25% for T2I.</p>
         <figure>
           <img src="55_t7_assets/t4_krea2_dest.png" alt="Dest still from sage krea2 T2I: goblin witch girl, pastel lavender costume">
