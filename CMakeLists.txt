@@ -112,6 +112,7 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/ImageGenerationPage_preview.cpp
     qt_ui/ImageGenerationPage_video.cpp
     qt_ui/ImageGenerationPage_catalog.cpp
+    qt_ui/ImageGenerationPage_ui.cpp
     qt_ui/generation/CockpitWidgetKit.cpp
     qt_ui/generation/CockpitWidgetKit.h
 
