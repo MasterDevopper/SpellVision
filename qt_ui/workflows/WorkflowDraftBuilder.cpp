@@ -2,6 +2,8 @@
 
 #include "WorkflowLaunchController.h"
 
+#include "assets/AssetCatalogScanner.h"
+
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -133,13 +135,6 @@ QString compactBaseName(const QString &value)
     return fileName.isEmpty() ? trimmed : fileName;
 }
 
-const QSet<QString> kCheckpointInputNames = {
-    QStringLiteral("ckpt_name"),
-    QStringLiteral("checkpoint"),
-    QStringLiteral("model"),
-    QStringLiteral("model_name")
-};
-
 const QSet<QString> kLoraInputNames = {
     QStringLiteral("lora_name"),
     QStringLiteral("lora")
@@ -162,6 +157,12 @@ bool hasLikelyModelExtension(const QString &value)
 {
     const QString suffix = QFileInfo(value.trimmed()).suffix().trimmed().toLower();
     return suffix == QStringLiteral("safetensors")
+        // .sft is safetensors under its short name, and .gguf is how every quantized Wan / Flux /
+        // Qwen checkpoint in the library is shipped. Their absence here is why the model walk below
+        // ran off the end of four Wan graphs whose loader is a UnetLoaderGGUF: the file was right
+        // there, and the value did not read as a model.
+        || suffix == QStringLiteral("sft")
+        || suffix == QStringLiteral("gguf")
         || suffix == QStringLiteral("ckpt")
         || suffix == QStringLiteral("pt")
         || suffix == QStringLiteral("pth")
@@ -223,29 +224,6 @@ double doubleInputByNames(const QJsonObject &inputs, const QSet<QString> &names,
     }
 
     return fallback;
-}
-
-QString extractCheckpointFromInputs(const QString &, const QJsonObject &inputs)
-{
-    const QString direct = stringInputByNames(inputs, kCheckpointInputNames);
-    if (!direct.isEmpty() && isLikelyAssetValue(direct))
-        return direct;
-
-    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
-    {
-        if (!it.value().isString())
-            continue;
-
-        const QString key = it.key().trimmed().toLower();
-        if (!kCheckpointInputNames.contains(key) && !key.contains(QStringLiteral("checkpoint")) && !key.contains(QStringLiteral("ckpt")))
-            continue;
-
-        const QString value = it.value().toString().trimmed();
-        if (isLikelyAssetValue(value))
-            return value;
-    }
-
-    return {};
 }
 
 QString extractLoraNameFromInputs(const QString &classType, const QJsonObject &inputs)
@@ -396,6 +374,9 @@ struct SamplingFacts
     QString positiveRef;
     QString negativeRef;
     QString latentRef;
+    // What this sampler samples WITH. The checkpoint is found by walking upstream from here, not by
+    // matching input names anywhere in the graph -- see loaderOnModelPath below.
+    QString modelRef;
 };
 
 void recoverGuiderFacts(const QJsonObject &prompt, const QString &guiderRef, SamplingFacts *facts)
@@ -404,6 +385,10 @@ void recoverGuiderFacts(const QJsonObject &prompt, const QString &guiderRef, Sam
     const QJsonObject inputs = nodeInputsFor(prompt, guiderRef);
     if (inputs.isEmpty() && classType.isEmpty())
         return;
+
+    // Every guider shape takes `model`, whatever it does with the conditioning, so this is read once
+    // rather than per class -- the same reason the sampler slot is read by its input name above.
+    facts->modelRef = nodeInputRefId(inputs.value(QStringLiteral("model")));
 
     if (classType == QStringLiteral("CFGGuider"))
     {
@@ -512,6 +497,7 @@ SamplingFacts recoverFromCustomSampler(const QJsonObject &prompt)
         const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
         facts.found = true;
         facts.latentRef = nodeInputRefId(inputs.value(QStringLiteral("latent_image")));
+        facts.modelRef = nodeInputRefId(inputs.value(QStringLiteral("model")));
 
         if (classType == QStringLiteral("SamplerCustom"))
         {
@@ -606,6 +592,219 @@ CanvasSize canvasFromLatent(const QJsonObject &prompt, const QString &latentRef)
     }
 
     return {};
+}
+
+// --- the model path ------------------------------------------------------------------------------
+//
+// The graph STATES which model it samples with, structurally: the sampler has a `model` input, and
+// following it upstream through the LoRA loaders, the ModelSampling* patches and the untyped
+// switches reaches the node that loads a model from a filename. Read that node's filename input,
+// whatever it is called, and an upscale model stops being reachable BY CONSTRUCTION -- it is not on
+// the model path -- rather than by a blacklist that would go stale the next time somebody publishes
+// a loader. That is the whole fix: the old scan matched input NAMES anywhere in the graph, its set
+// held `model_name` (an upscaler's input) and not `unet_name` (every Wan / Flux / Qwen diffusion
+// loader's), and whichever node the prompt map happened to yield first decided the answer.
+//
+// Same shape as the three walks above: an explicit stack, a visited-set, reverse-pushed so LIFO
+// gives the graph's own input order. An imported graph has overflowed the stack on a cycle here
+// before.
+
+// A MODEL-typed slot, by the name ComfyUI gives it. `model` is what 106 of the 112 direct links off
+// a loader in the owner's library are called; the rest are untyped switch inputs, handled below. The
+// two exclusions matter: `model_name` and `model_path` name a FILE, not a MODEL, which is exactly
+// the confusion this file exists to end.
+bool isModelSlotKey(const QString &key)
+{
+    const QString normalized = key.trimmed().toLower();
+    if (normalized == QStringLiteral("unet") || normalized == QStringLiteral("diffusion_model"))
+        return true;
+    if (!normalized.startsWith(QStringLiteral("model")))
+        return false;
+    return !normalized.contains(QStringLiteral("name")) && !normalized.contains(QStringLiteral("path"));
+}
+
+// The first string input on this node that names a model file, in key order so the answer is
+// deterministic. A UNETLoader carries `unet_name` beside `weight_dtype`; a CheckpointLoaderSimple
+// carries `ckpt_name`; a UnetLoaderGGUF carries `unet_name` beside a device string. None of those
+// companions read as an asset, so the name of the input never has to be known in advance.
+QString modelFileInputOf(const QJsonObject &inputs)
+{
+    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
+    {
+        if (!it.value().isString())
+            continue;
+        const QString value = it.value().toString().trimmed();
+        if (isLikelyAssetValue(value))
+            return value;
+    }
+    return {};
+}
+
+// Follow a MODEL link upstream to the node that loads it from a file.
+//
+// A node that has a model-typed link is a patch, a LoRA or a switch ON the way to the loader, never
+// the loader itself -- LoraLoaderModelOnly carries a `lora_name` that looks exactly like a
+// checkpoint, and stopping there would report the LoRA as the model. So: model slots first, always;
+// only a node with none of them is allowed to answer with a filename; and a node with neither (a
+// Reroute, an "Any Switch") passes its other links through, which is how the untyped passthroughs
+// in the library are crossed without naming any of their classes.
+QString loaderOnModelPath(const QJsonObject &prompt, const QString &startNodeId)
+{
+    QStringList pending;
+    if (!startNodeId.trimmed().isEmpty())
+        pending.push_back(startNodeId);
+
+    QSet<QString> visited;
+    while (!pending.isEmpty())
+    {
+        const QString nodeId = pending.takeLast();
+        if (nodeId.trimmed().isEmpty() || visited.contains(nodeId))
+            continue;
+        visited.insert(nodeId);
+
+        const QJsonObject inputs = nodeInputsFor(prompt, nodeId);
+
+        QStringList modelRefs;
+        QStringList otherRefs;
+        for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
+        {
+            const QString ref = nodeInputRefId(it.value());
+            if (ref.trimmed().isEmpty())
+                continue;
+            if (isModelSlotKey(it.key()))
+                modelRefs.push_back(ref);
+            else
+                otherRefs.push_back(ref);
+        }
+
+        if (!modelRefs.isEmpty())
+        {
+            for (int i = modelRefs.size() - 1; i >= 0; --i)
+                pending.push_back(modelRefs.at(i));
+            continue;
+        }
+
+        const QString file = modelFileInputOf(inputs);
+        if (!file.isEmpty())
+            return file;
+
+        for (int i = otherRefs.size() - 1; i >= 0; --i)
+            pending.push_back(otherRefs.at(i));
+    }
+
+    return {};
+}
+
+// Where every model walk in the graph starts: the `model` input of each sampler, and for the custom
+// chain the guider's, because that is where SamplerCustomAdvanced keeps it. Key order, so a graph
+// with two samplers answers the same way twice.
+QStringList samplerModelRefs(const QJsonObject &prompt)
+{
+    QStringList refs;
+    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
+    {
+        const QJsonObject node = it.value().toObject();
+        const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
+        const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
+
+        QString ref;
+        if (classType == QStringLiteral("KSampler")
+            || classType == QStringLiteral("KSamplerAdvanced")
+            || classType == QStringLiteral("SamplerCustom"))
+        {
+            ref = nodeInputRefId(inputs.value(QStringLiteral("model")));
+        }
+        else if (classType == QStringLiteral("SamplerCustomAdvanced"))
+        {
+            const QJsonObject guider =
+                nodeInputsFor(prompt, nodeInputRefId(inputs.value(QStringLiteral("guider"))));
+            ref = nodeInputRefId(guider.value(QStringLiteral("model")));
+        }
+
+        if (!ref.trimmed().isEmpty() && !refs.contains(ref))
+            refs.push_back(ref);
+    }
+    return refs;
+}
+
+// Every node whose output is consumed through a MODEL-typed slot. This is the graph saying what a
+// node IS without anyone reading its class name: a loader wired to `model` is on a model path even
+// when no sampler this build knows sits at the end of it, and a loader wired to `upscale_model`,
+// `vae`, `clip` or `control_net` is not, whatever its filename input happens to be called.
+QSet<QString> nodesFeedingAModelSlot(const QJsonObject &prompt)
+{
+    QSet<QString> feeding;
+    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
+    {
+        const QJsonObject inputs = it.value().toObject().value(QStringLiteral("inputs")).toObject();
+        for (auto input = inputs.constBegin(); input != inputs.constEnd(); ++input)
+        {
+            if (!isModelSlotKey(input.key()))
+                continue;
+            const QString ref = nodeInputRefId(input.value());
+            if (!ref.trimmed().isEmpty())
+                feeding.insert(ref);
+        }
+    }
+    return feeding;
+}
+
+// What the graph loads as a diffusion model, in the order the graph reaches it, and by which tier.
+// Both tiers are structural; there is no name-matching rung under them. The brief asked for one --
+// the old scan, kept as a net so the 71 graphs that are right today could not regress -- and the
+// measurement said no: over the 84 imported prompts that rung protects ZERO correct answers and
+// fires on exactly four, every one of which is a graph whose compiled prompt lost its model links
+// (a wanBlockSwap with empty inputs, UNETLoaders wired to nothing) and every one of which it
+// answers with `RealESRGAN_x4plus.pth`. That is the original symptom, one tier lower. A net that
+// only ever catches the thing it was built to stop is not a net.
+struct ModelsFound
+{
+    QStringList files;
+    // "walk" | "model-slot" | "" -- reported so the weaker tier is visible rather than silently
+    // standing in for the strong one.
+    QString tier;
+};
+
+ModelsFound modelsOnEveryModelPath(const QJsonObject &prompt)
+{
+    ModelsFound found;
+
+    // Tier 1: from the samplers. This is the answer whenever the graph samples through a class this
+    // build knows, which is 67 of the owner's 84 imported prompts.
+    const QStringList starts = samplerModelRefs(prompt);
+    for (const QString &start : starts)
+    {
+        const QString file = loaderOnModelPath(prompt, start);
+        if (!file.isEmpty() && !found.files.contains(file))
+            found.files.push_back(file);
+    }
+    if (!found.files.isEmpty())
+    {
+        found.tier = QStringLiteral("walk");
+        return found;
+    }
+
+    const QSet<QString> viaModelSlot = nodesFeedingAModelSlot(prompt);
+
+    // Tier 2: a graph whose sampler is a custom class -- Pro Grade v17 samples through an author's
+    // own pipe node -- still wires its loader into somebody's `model` input. Start from every node
+    // that feeds one.
+    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
+    {
+        if (!viaModelSlot.contains(it.key()))
+            continue;
+        const QString file = loaderOnModelPath(prompt, it.key());
+        if (!file.isEmpty() && !found.files.contains(file))
+            found.files.push_back(file);
+    }
+    if (!found.files.isEmpty())
+        found.tier = QStringLiteral("model-slot");
+
+    // Nothing else. A graph with no diffusion loader on any model path -- an upscale-only or
+    // post-process graph, or one whose compiled prompt lost its model links -- reports NO
+    // checkpoint and says so in `warnings`. Reaching for whatever filename is lying around is how a
+    // 1x skin-detail upscaler came to fill the model row of a Krea graph.
+    return found;
 }
 
 // One sentence shape for every field the graph did not yield, so the list reads as a list.
@@ -738,13 +937,6 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
         const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
         const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
 
-        if (checkpointName.isEmpty())
-        {
-            const QString extractedCheckpoint = extractCheckpointFromInputs(classType, inputs);
-            if (!extractedCheckpoint.isEmpty())
-                checkpointName = extractedCheckpoint;
-        }
-
         const QString extractedLora = extractLoraNameFromInputs(classType, inputs);
         if (!extractedLora.isEmpty())
         {
@@ -784,6 +976,7 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
             facts.positiveRef = nodeInputRefId(inputs.value(QStringLiteral("positive")));
             facts.negativeRef = nodeInputRefId(inputs.value(QStringLiteral("negative")));
             facts.latentRef = nodeInputRefId(inputs.value(QStringLiteral("latent_image")));
+            facts.modelRef = nodeInputRefId(inputs.value(QStringLiteral("model")));
         }
 
         if (frames <= 0)
@@ -805,6 +998,49 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
     // No KSampler in the graph does not mean no sampling in the graph.
     if (!facts.found)
         facts = recoverFromCustomSampler(prompt);
+
+    // The model comes off the MODEL PATH, not off an input name. Everything below is about which of
+    // the models on that path the single `checkpoint` field shows, and about saying out loud what
+    // the other ones are.
+    const ModelsFound models = modelsOnEveryModelPath(prompt);
+
+    // A Wan 2.2 graph carries two experts -- a high-noise first stage and a low-noise refiner -- and
+    // each has its own sampler, so the walk reaches both. Which one lands in `checkpoint` must not
+    // depend on the numeric node ids the converter happened to emit, so it is anchored on the HIGH
+    // expert: it is the stage that runs first in the MoE handoff. Both halves are reported under the
+    // names AssetCatalogScanner already uses for this pair (high_noise_path / low_noise_path,
+    // stack_kind wan_dual_noise) rather than a second vocabulary for the same fact, and the pair is
+    // detected by that file's own predicates so there is one detector, not two.
+    QString wanHighNoise;
+    QString wanLowNoise;
+    for (const QString &file : models.files)
+    {
+        if (wanHighNoise.isEmpty() && assets::looksLikeWanHighNoisePath(file))
+            wanHighNoise = file;
+        if (wanLowNoise.isEmpty() && assets::looksLikeWanLowNoisePath(file))
+            wanLowNoise = file;
+    }
+    const bool wanDualNoise = !wanHighNoise.isEmpty() && !wanLowNoise.isEmpty();
+
+    if (wanDualNoise)
+    {
+        checkpointName = wanHighNoise;
+    }
+    else if (!models.files.isEmpty())
+    {
+        // Otherwise: the model the sampler THIS draft reports actually samples with, so the model
+        // row and the sampling row describe the same pass. Falling back to the first on the path
+        // covers the graphs whose sampler this build could not identify at all.
+        const QString fromReportedSampler = loaderOnModelPath(prompt, facts.modelRef);
+        checkpointName = models.files.contains(fromReportedSampler) ? fromReportedSampler
+                                                                    : models.files.first();
+    }
+
+    if (models.files.isEmpty())
+    {
+        qWarning("workflow draft: no model path in this graph reaches a loader, so the model row is "
+                 "left empty rather than filled from an unrelated filename");
+    }
 
     std::optional<QString> positivePrompt;
     std::optional<QString> negativePrompt;
@@ -848,6 +1084,12 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
         draft.insert(QStringLiteral("negative_prompt"), *negativePrompt);
     draft.insert(QStringLiteral("checkpoint"), checkpointName);
     draft.insert(QStringLiteral("checkpoint_display"), compactBaseName(checkpointName));
+    if (wanDualNoise)
+    {
+        draft.insert(QStringLiteral("stack_kind"), QStringLiteral("wan_dual_noise"));
+        draft.insert(QStringLiteral("high_noise_path"), wanHighNoise);
+        draft.insert(QStringLiteral("low_noise_path"), wanLowNoise);
+    }
     if (!facts.sampler.isEmpty())
         draft.insert(QStringLiteral("sampler"), facts.sampler);
     if (!facts.scheduler.isEmpty())
@@ -882,6 +1124,31 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
 
     QStringList draftWarnings;
     bool safeToSubmit = true;
+
+    // Never silently drop the other half. A Wan 2.2 pair is named as a pair; anything else the model
+    // path reached and this draft did not choose is listed, because a graph that loads two models
+    // and shows one is a graph the user has to be told about.
+    if (wanDualNoise)
+    {
+        draftWarnings.push_back(
+            QStringLiteral("This workflow runs a Wan dual-noise expert pair: high noise %1, low noise %2. "
+                           "The model row shows the high-noise expert.")
+                .arg(compactBaseName(wanHighNoise), compactBaseName(wanLowNoise)));
+    }
+    else if (models.files.size() > 1)
+    {
+        QStringList others;
+        for (const QString &file : models.files)
+        {
+            if (file != checkpointName)
+                others.push_back(compactBaseName(file));
+        }
+        draftWarnings.push_back(
+            QStringLiteral("This workflow loads %1 models. The model row shows %2; it also loads %3.")
+                .arg(models.files.size())
+                .arg(compactBaseName(checkpointName), others.join(QStringLiteral(", "))));
+    }
+
     if (checkpointName.trimmed().isEmpty() && !isVideoMode(source.modeId, source.mediaType))
     {
         safeToSubmit = false;

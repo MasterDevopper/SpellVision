@@ -22,6 +22,15 @@ namespace spellvision::workflows
 // ComfyUI classes -- and none of those values sit on the sampler node, so each is walked to across
 // one link hop. Two hops is guessing, and it refuses instead.
 //
+// The MODEL is read off the model PATH, not off an input name. The sampler's `model` input is
+// followed upstream through the LoRA loaders, the ModelSampling* patches and the untyped switches to
+// the node that loads a model from a filename, and that node's filename input is the answer whatever
+// it is called. Matching names instead is how an UpscaleModelLoader's `model_name` came to fill the
+// model row of a Krea graph while every Wan 2.2 graph in the library -- whose loader carries
+// `unet_name` -- filled in nothing. A Wan dual-noise pair is reported as a pair, under the names
+// AssetCatalogScanner already uses for it. A graph with no diffusion loader on any model path
+// reports NO checkpoint and says so.
+//
 // AND IT OMITS WHAT IT COULD NOT READ. Every value in the draft is a value the graph actually
 // carried; a field that could not be recovered is ABSENT from the draft and named in `warnings`, so
 // the page keeps its own default rather than adopting a zero that reads like the workflow's choice.
