@@ -212,10 +212,14 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 ## Model Intelligence Commands
 
 Six commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
-site that hosts it, and the settings it wants. `model_recommended_settings` is `USER_FACING` in
-`worker_command_audience.py` -- the cockpit asks it on every checkpoint change
-(`MainWindow::fetchModelDefaultsAsync`, W2). The other five are still filed `DIAGNOSTIC`: nothing
-in `qt_ui/` reaches them yet, and W5 wires them into the Models page.
+site that hosts it, and the settings it wants. Four are `USER_FACING` in
+`worker_command_audience.py`: `model_recommended_settings` (the cockpit asks it on every checkpoint
+change -- `MainWindow::fetchModelDefaultsAsync`, W2), and `model_intel_refresh`,
+`model_intel_cancel` and `model_intel_set_user`, which W5 wired into the Models page as "Refresh
+metadata" (per-model from the inspector, library-wide from the toolbar), its Stop button, and
+"Use my picture...". `model_intel_get` and `model_roots_status` stay `DIAGNOSTIC` and that is not
+an oversight: the inspector reads `<stem>.spellvision.json` off disk rather than asking for it,
+and the page decides for itself which roots are scannable (`scannableModelsRoots`).
 
 ### Model Intel Get Request
 
@@ -268,7 +272,9 @@ and progress plus the final `model_intel_refresh` result are published to `subsc
 ```
 
 `files` is optional and narrows the pass to exactly those weights -- what the Models inspector's
-"Refresh metadata" sends, because it is about one model rather than a library. Each one must lie
+"Refresh metadata" sends, because it is about one model rather than a library. The toolbar's
+library-wide button omits it and always sends `"background": true`; the per-model button sends both
+(`qt_ui/assets/ModelRefreshController.cpp`, W5). Each one must lie
 inside the named `roots`; a file outside them is refused with a reason rather than hashed. Without
 it every weight under `roots` is walked, smallest first.
 

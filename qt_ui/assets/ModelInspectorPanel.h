@@ -81,6 +81,14 @@ public:
     void requestUserPicture(const QString &picturePath);
     void requestRefresh();
 
+    // W5 Task 4: the refresh is a long background job with a job id, progress and a cancel, and
+    // exactly one thing owns that conversation (`ModelRefreshController`). The panel ASKS and then
+    // shows what it is told -- it does not build the request and it does not write its own ending,
+    // because a second author for the same status line is how "Metadata refreshed." ends up
+    // painted over a summary that said three files could not be looked up.
+    void setRefreshStatus(const QString &text, bool isError);
+    void setRefreshBusy(bool busy);
+
 public slots:
     // A reply to something this panel asked for. Routed by `type`; anything else is ignored, so a
     // page that forwards every worker reply is not a bug.
@@ -91,6 +99,9 @@ signals:
     void workerRequested(const QJsonObject &request);
     // "Apply to this mode" — the resolved settings, for the cockpit.
     void applyRecommendedRequested(const QString &weightPath, const QJsonObject &settings);
+    // "Refresh metadata" for THIS weight. The page routes it to the one controller that owns
+    // refreshes, so the per-model and the library action cannot disagree about the wire.
+    void refreshRequested(const QString &weightPath);
 
 private:
     void rebuild();
@@ -103,6 +114,9 @@ private:
     QStringList modelRoots_;
     ModelIntel intel_;
     bool descriptionExpanded_ = false;
+    // Driven by the page from the refresh controller; rebuild() must not enable the button back
+    // underneath a running job.
+    bool refreshBusy_ = false;
 
     QLabel *headlineLabel_ = nullptr;
     QLabel *subtitleLabel_ = nullptr;

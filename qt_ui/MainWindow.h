@@ -297,6 +297,11 @@ private:
     // given no path. The Models page calls it on an inventory refresh: a sidecar written between
     // two picks of the same checkpoint has to be able to reach the cockpit without a restart.
     void clearModelDefaultsCache(const QString &modelPath = QString());
+    // W5 Task 4: a `subscribe` listener open only while a metadata refresh is running. A
+    // background refresh publishes its progress and its result to subscribers, not to the
+    // connection that started it.
+    void startModelIntelEvents();
+    void stopModelIntelEvents();
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();
@@ -520,6 +525,8 @@ private:
     // in flight" and "who is waiting on it" are both questions about a path, not about the app.
     // Keys go through modelDefaultsCacheKey() on both the store and the lookup side.
     QHash<QString, QJsonObject> modelDefaultsByPath_;
+    // Owns the `subscribe` socket a background metadata refresh reports over; null when none.
+    QObject *modelIntelEventGuard_ = nullptr;
     QSet<QString> modelDefaultsInFlight_;
     QHash<QString, std::vector<std::function<void()>>> modelDefaultsWaiters_;
     QMap<QString, QWidget *> modePages_;

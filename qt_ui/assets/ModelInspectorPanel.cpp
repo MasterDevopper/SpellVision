@@ -360,7 +360,7 @@ void ModelInspectorPanel::rebuild()
 
     applyButton_->setEnabled(hasModel && !lines.isEmpty());
     usePictureButton_->setEnabled(hasModel);
-    refreshButton_->setEnabled(hasModel);
+    refreshButton_->setEnabled(hasModel && !refreshBusy_);
     openSiteButton_->setVisible(canOpenOnSite());
 }
 
@@ -505,23 +505,24 @@ void ModelInspectorPanel::requestRefresh()
 {
     if (weightPath_.isEmpty())
         return;
-    QJsonObject request;
-    request.insert(QStringLiteral("command"), QStringLiteral("model_intel_refresh"));
-    QJsonArray roots;
-    for (const QString &root : modelRoots_)
-    {
-        if (!root.trimmed().isEmpty())
-            roots.append(root.trimmed());
-    }
-    // `roots` is required by the command. Falling back to the weight's own folder keeps the button
-    // working on a library whose roots the page has not pushed yet, and narrows the walk to the
-    // one directory rather than silently re-hashing terabytes.
-    if (roots.isEmpty())
-        roots.append(QFileInfo(weightPath_).absolutePath());
-    request.insert(QStringLiteral("roots"), roots);
-    request.insert(QStringLiteral("files"), QJsonArray{weightPath_});
-    setStatus(QStringLiteral("Refreshing metadata…"), false);
-    emit workerRequested(request);
+    // The panel no longer builds this request. A refresh is a long background job with a job id,
+    // progress events and a cancel, and W5 Task 4 gave that conversation ONE owner -- so the
+    // per-model button and the library button cannot end up sending two different wires for the
+    // same command. The page routes this to `ModelRefreshController::startModelRefresh`, which is
+    // what puts the `files` list on it.
+    emit refreshRequested(weightPath_);
+}
+
+void ModelInspectorPanel::setRefreshStatus(const QString &text, bool isError)
+{
+    setStatus(text, isError);
+}
+
+void ModelInspectorPanel::setRefreshBusy(bool busy)
+{
+    refreshBusy_ = busy;
+    if (refreshButton_)
+        refreshButton_->setEnabled(!weightPath_.isEmpty() && !busy);
 }
 
 void ModelInspectorPanel::applyWorkerReply(const QJsonObject &reply)
@@ -561,8 +562,10 @@ void ModelInspectorPanel::applyWorkerReply(const QJsonObject &reply)
 
     if (type == QStringLiteral("model_intel_refresh"))
     {
+        // Re-read the document the refresh just wrote. The STATUS line is deliberately not touched
+        // here: the controller writes the ending, and a "Metadata refreshed." painted over
+        // "3 could not be looked up" is a success message covering a failure.
         reloadFromDisk();
-        setStatus(QStringLiteral("Metadata refreshed."), false);
         return;
     }
 

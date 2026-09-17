@@ -1781,9 +1781,25 @@ void MainWindow::buildPages()
     // socket. A refresh can take minutes on a large root, so it gets a long budget -- and the reply
     // goes straight back to the page whether it succeeded or not, because the containment refusal
     // (a picture outside the model roots) is the answer the user most needs to SEE.
+    // W5 Task 4: a refresh ENDS long after its request was answered -- `background: true` replies
+    // with the started event and publishes progress and the result to `subscribe`rs. This is where
+    // the cockpit's per-model answers are dropped, because the sidecars they were resolved from
+    // have just been rewritten. Doing it when the REQUEST returned would have dropped them at the
+    // start of a 79-minute pass and cached the stale ones again while it ran.
+    connect(modelsPage_, &ModelManagerPage::modelIntelRefreshFinished, this,
+            [this](const QString &weightPath) {
+                clearModelDefaultsCache(weightPath);
+                stopModelIntelEvents();
+            });
     connect(modelsPage_, &ModelManagerPage::modelIntelRequested, this, [this](const QJsonObject &request) {
         const QString command = request.value(QStringLiteral("command")).toString();
         const int budgetMs = command == QStringLiteral("model_intel_refresh") ? 600000 : 20000;
+        // A background refresh answers immediately and then says nothing on this connection ever
+        // again. Its progress and its result go to `subscribe`rs, so the listener has to be open
+        // BEFORE the request is sent -- a refresh over a handful of files can finish first.
+        if (command == QStringLiteral("model_intel_refresh")
+            && request.value(QStringLiteral("background")).toBool(false))
+            startModelIntelEvents();
         sendWorkerRequestAsync(
             request,
             [this, command, request](const QJsonObject &response, const QString &error, bool startedOk) {
@@ -1799,8 +1815,12 @@ void MainWindow::buildPages()
                     return;
                 }
                 // A sidecar written between two picks of the same checkpoint has to be able to
-                // reach the cockpit; the cached per-model answer is now stale.
-                clearModelDefaultsCache(request.value(QStringLiteral("path")).toString());
+                // reach the cockpit; the cached per-model answer is now stale. `path` is present on
+                // the set-user request and absent on a refresh -- whose eviction is deferred to
+                // modelIntelRefreshFinished, since a background pass has not written anything yet
+                // when this reply (the started event) arrives.
+                if (request.contains(QStringLiteral("path")))
+                    clearModelDefaultsCache(request.value(QStringLiteral("path")).toString());
                 modelsPage_->applyModelIntelReply(response);
             },
             budgetMs);
@@ -3541,6 +3561,49 @@ void MainWindow::clearModelDefaultsCache(const QString &modelPath)
         if (key.startsWith(prefix))
             modelDefaultsByPath_.remove(key);
     }
+}
+
+// W5 Task 4 -- the other half of `background: true`.
+//
+// A background refresh replies once, with its job id, and then goes quiet: progress and the final
+// result are published to `subscribe`rs (python/model_intelligence_commands.py `_fanout`). Without
+// a listener the Models page would show a spinner that never moved and a cancel button that
+// nothing ever retired. The subscription is opened only while a refresh is running -- the queue
+// controller keeps its own permanent one, and two listeners for the whole session would double
+// every queue frame the app already handles.
+void MainWindow::startModelIntelEvents()
+{
+    if (modelIntelEventGuard_)
+        return;
+    modelIntelEventGuard_ = new QObject(this);
+    spellvision::workers::WorkerSocketClient::listen(
+        modelIntelEventGuard_,
+        QJsonObject{{QStringLiteral("command"), QStringLiteral("subscribe")}},
+        [this](const QJsonObject &frame) {
+            // `subscribe` carries every fan-out, generation progress included. The page routes by
+            // type and ignores what is not its own, so the filter here is only about not waking it
+            // for every render step.
+            const QString type = frame.value(QStringLiteral("type")).toString();
+            if (!modelsPage_ || !type.startsWith(QStringLiteral("model_intel")))
+                return;
+            modelsPage_->applyModelIntelReply(frame);
+        },
+        [this]() {
+            // The socket died. Dropping the guard lets the next refresh open a fresh one rather
+            // than believing it still has a listener.
+            if (!modelIntelEventGuard_)
+                return;
+            modelIntelEventGuard_->deleteLater();
+            modelIntelEventGuard_ = nullptr;
+        });
+}
+
+void MainWindow::stopModelIntelEvents()
+{
+    if (!modelIntelEventGuard_)
+        return;
+    modelIntelEventGuard_->deleteLater();
+    modelIntelEventGuard_ = nullptr;
 }
 
 void MainWindow::sendWorkerRequestAsync(

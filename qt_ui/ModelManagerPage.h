@@ -11,12 +11,18 @@
 class QLabel;
 class QLineEdit;
 class QComboBox;
+class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QDragEnterEvent;
 class QDropEvent;
+
+namespace spellvision::widgets
+{
+class ElidingLabel;
+}
 
 namespace spellvision::assets
 {
@@ -28,6 +34,7 @@ class ModelCardView;
 class ModelOverlayStore;
 class ModelKindTabBar;
 class ModelInspectorPanel;
+class ModelRefreshController;
 }
 
 class ModelManagerPage : public QWidget
@@ -92,6 +99,12 @@ signals:
     void modelIntelRequested(const QJsonObject &request);
     // "Apply to this mode" -- the settings this model publishes, with their provenance attached.
     void applyModelSettingsRequested(const QString &weightPath, const QJsonObject &settings);
+    // W5 Task 4: a metadata refresh ENDED (completed, cancelled or failed). `weightPath` names the
+    // one model a per-model refresh was about and is empty for a library pass. MainWindow drops the
+    // per-model defaults cache on it -- at the END, not at the start, because with
+    // `background: true` the immediate reply is only the started event and every answer resolved
+    // before the sidecars were rewritten is the stale one.
+    void modelIntelRefreshFinished(const QString &weightPath);
 
 public slots:
     void refreshInventory();
@@ -117,6 +130,9 @@ private slots:
 
 private:
     void handleDroppedReference(const QString &reference);
+    // Everything the refresh row shows, in one place, driven by the controller's stateChanged.
+    void syncMetadataRefreshRow();
+    QStringList currentModelRoots() const;
     QString destSubdirForWeight(const QString &fileName) const;
     QPushButton *downloadModelButton_ = nullptr;
     QPushButton *deleteModelButton_ = nullptr;
@@ -214,6 +230,17 @@ private:
     spellvision::assets::ModelInspectorPanel *inspectorPanel_ = nullptr;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
+
+    // W5 Task 4: "Refresh metadata" -- the action W2's caption named and the app did not have.
+    // The controller owns the conversation (background job id, progress, cancel); these widgets
+    // only show it. The progress row is hidden while nothing is running rather than sitting at 0%,
+    // because a bar at zero claims a denominator nobody has counted yet.
+    spellvision::assets::ModelRefreshController *refreshController_ = nullptr;
+    QPushButton *metadataRefreshButton_ = nullptr;
+    QWidget *metadataProgressRow_ = nullptr;
+    QProgressBar *metadataProgressBar_ = nullptr;
+    spellvision::widgets::ElidingLabel *metadataProgressLabel_ = nullptr;
+    QPushButton *metadataCancelButton_ = nullptr;
 
     // S3 workflow binding: the bound-workflow row in the details card + its actions.
     QLabel *workflowBindingLabel_ = nullptr;

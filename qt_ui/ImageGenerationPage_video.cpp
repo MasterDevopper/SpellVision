@@ -1102,13 +1102,15 @@ void ImageGenerationPage::refreshModelDefaultsCaption(const QJsonObject &reply)
     case DefaultsSource::Table:
     case DefaultsSource::None:
         // Two different situations, and conflating them is what sends a user looking for a setting
-        // that was never published. The difference is worth a sentence -- but neither sentence may
-        // name an action. The first version of this told the user to "run Refresh metadata on
-        // the Models page", and there is no such control: the Models page has "Refresh Models",
-        // which rescans the inventory, and nothing in the UI starts a model_intel_refresh at all.
-        // Sending someone to look for a button that does not exist is worse than saying less.
+        // that was never published. The difference is worth a sentence, and the first one may now
+        // name an action again: W5 Task 4 built "Refresh metadata" on the Models page -- a real
+        // control, beside "Refresh Models", that starts a model_intel_refresh and writes the
+        // sidecar this branch is missing. W2 had to delete this sentence because the button did
+        // not exist; restoring it is the other half of that ruling, and it is restored here rather
+        // than paraphrased so the words on screen match the words on the button.
         caption = noSidecar
-            ? QStringLiteral("Family defaults · SpellVision has no metadata for this model yet")
+            ? QStringLiteral("Family defaults · run Refresh metadata on the Models page to use "
+                             "this model's own")
             : QStringLiteral("Family defaults (this model has no published settings)");
         break;
     }

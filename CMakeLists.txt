@@ -167,6 +167,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/assets/ModelKindTabs.h
     qt_ui/assets/ModelInspectorPanel.cpp
     qt_ui/assets/ModelInspectorPanel.h
+    qt_ui/assets/ModelRefreshController.cpp
+    qt_ui/assets/ModelRefreshController.h
     qt_ui/assets/ModelOverlayStore.cpp
     qt_ui/assets/ModelOverlayStore.h
     qt_ui/assets/ModelThumbnailCache.cpp
@@ -722,6 +724,18 @@ qt_add_executable(test_model_inspector tests/cpp/test_model_inspector.cpp)
 target_link_libraries(test_model_inspector PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME model_inspector COMMAND test_model_inspector)
 
+# W5 Task 4: "Refresh metadata", from inside the app. W2's cockpit caption told the user to run it
+# and the sentence had to be DELETED, because nothing in qt_ui/ started a model_intel_refresh at
+# all. Four properties make restoring that sentence honest, and two of them fail SILENTLY: a
+# per-model refresh that forgets its `files` list does not error, it walks 759 files and 2.09 TB;
+# and a key check added "for safety" would block the one CivitAI operation that is public (the
+# anonymous and keyed by-hash replies were verified identical against the live API). The other two
+# are the long job itself -- background, with progress -- and a cancel addressed by the job id that
+# only the started event carries.
+qt_add_executable(test_model_refresh_action tests/cpp/test_model_refresh_action.cpp)
+target_link_libraries(test_model_refresh_action PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_refresh_action COMMAND test_model_refresh_action)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -743,6 +757,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       test_workflow_draft_builder test_workflow_drop_coordinator
                       test_model_kind_tabs test_model_card_sidecar test_model_inspector
+                      test_model_refresh_action
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

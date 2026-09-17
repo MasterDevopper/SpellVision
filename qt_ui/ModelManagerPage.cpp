@@ -10,9 +10,11 @@
 #include "assets/ModelInspectorPanel.h"
 #include "assets/ModelIntelSidecar.h"
 #include "assets/ModelKindTabs.h"
+#include "assets/ModelRefreshController.h"
 #include "assets/CatalogPickerDialog.h"
 #include "style/SvKit.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "widgets/ElidingLabel.h"
 
 #include <QClipboard>
 #include <QDebug>
@@ -44,6 +46,7 @@
 #include <QDropEvent>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
@@ -770,6 +773,62 @@ void ModelManagerPage::applyModelIntelReply(const QJsonObject &reply)
 {
     if (inspectorPanel_)
         inspectorPanel_->applyWorkerReply(reply);
+    // The controller runs SECOND so its ending is the one on screen. The panel re-reads the
+    // sidecar a refresh just wrote; the controller writes what the pass actually did, including
+    // the counts a "Metadata refreshed." would have covered up.
+    if (refreshController_)
+        refreshController_->applyWorkerReply(reply);
+}
+
+QStringList ModelManagerPage::currentModelRoots() const
+{
+    return spellvision::shell::scannableModelsRoots(
+        resolveModelsRoot(),
+        spellvision::shell::extraModelsRootsFromSettings());
+}
+
+void ModelManagerPage::syncMetadataRefreshRow()
+{
+    if (!refreshController_)
+        return;
+    const bool running = refreshController_->isRunning();
+
+    if (metadataProgressRow_)
+        metadataProgressRow_->setVisible(running);
+    if (metadataRefreshButton_)
+        metadataRefreshButton_->setEnabled(!running);
+    if (metadataCancelButton_)
+        metadataCancelButton_->setEnabled(refreshController_->canCancel());
+    if (metadataProgressBar_)
+    {
+        const int percent = refreshController_->percent();
+        if (percent < 0)
+        {
+            // Busy, not 0%. The worker has not counted the library yet, and a bar sitting at zero
+            // for the minutes that takes is indistinguishable from one that is stuck.
+            metadataProgressBar_->setRange(0, 0);
+        }
+        else
+        {
+            metadataProgressBar_->setRange(0, 100);
+            metadataProgressBar_->setValue(percent);
+        }
+    }
+    if (metadataProgressLabel_)
+        metadataProgressLabel_->setText(refreshController_->progressText());
+
+    // The inspector's own button and status line follow the same job: a library pass and a
+    // per-model pass are the same command, and a second "Refresh metadata" that looks available
+    // while one is running is a click that gets refused.
+    if (inspectorPanel_)
+    {
+        inspectorPanel_->setRefreshBusy(running);
+        if (!refreshController_->statusText().isEmpty())
+            inspectorPanel_->setRefreshStatus(refreshController_->statusText(),
+                                              refreshController_->statusIsError());
+    }
+    if (summaryLabel_ && !running && !refreshController_->lastResult().isEmpty())
+        summaryLabel_->setText(refreshController_->statusText());
 }
 
 void ModelManagerPage::updateDetailsForRow(int row)
@@ -1220,6 +1279,19 @@ void ModelManagerPage::buildUi()
     setRole(addFolderButton_, svstyle::Role::Secondary);
     addFolderButton_->setToolTip(QStringLiteral("Also scan another drive or a removable disk. Locked or unplugged volumes are skipped."));
 
+    // W5 Task 4. "Refresh Models" rescans the FOLDERS; this asks the site who each weight IS. Two
+    // different questions that a single button could not answer, which is why the caption W2 wrote
+    // ("run Refresh metadata on the Models page") had to be deleted rather than repointed.
+    metadataRefreshButton_ = new QPushButton(QStringLiteral("Refresh metadata"), this);
+    metadataRefreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    metadataRefreshButton_->setCursor(Qt::PointingHandCursor);
+    setRole(metadataRefreshButton_, svstyle::Role::Secondary);
+    metadataRefreshButton_->setToolTip(QStringLiteral(
+        "Ask Civitai and Hugging Face who each weight is, and write what they say beside it: the "
+        "name, the pictures, the trigger words and the settings it was published with.\n"
+        "No account or API key is needed. The whole library takes a while — it runs in the "
+        "background and you can stop it at any time."));
+
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
@@ -1228,9 +1300,35 @@ void ModelManagerPage::buildUi()
     toolbarRow->addWidget(gridToggleButton_);
     toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
+    toolbarRow->addWidget(metadataRefreshButton_);
     toolbarRow->addWidget(rebuildCacheButton_);
     toolbarRow->addWidget(openRootButton_);
     toolbarRow->addWidget(addFolderButton_);
+
+    // --- W5 Task 4: the metadata-refresh progress row ---
+    //
+    // Hidden entirely while nothing is running. A bar parked at 0% with no job behind it is a
+    // claim about a denominator nobody counted, and on a page whose other long action already owns
+    // the word "Refreshing" it would read as a second, stuck one.
+    metadataProgressBar_ = new QProgressBar(this);
+    metadataProgressBar_->setObjectName(QStringLiteral("ModelsMetadataProgress"));
+    metadataProgressBar_->setTextVisible(false);
+    metadataProgressBar_->setMinimumWidth(160);
+    metadataProgressLabel_ = new spellvision::widgets::ElidingLabel(this);
+    metadataProgressLabel_->setObjectName(QStringLiteral("ModelsMeta"));
+    metadataCancelButton_ = new QPushButton(QStringLiteral("Stop"), this);
+    metadataCancelButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    metadataCancelButton_->setCursor(Qt::PointingHandCursor);
+    setRole(metadataCancelButton_, svstyle::Role::Secondary);
+
+    metadataProgressRow_ = new QWidget(this);
+    auto *metadataRow = new QHBoxLayout(metadataProgressRow_);
+    metadataRow->setContentsMargins(0, 0, 0, 0);
+    metadataRow->setSpacing(tight);
+    metadataRow->addWidget(metadataProgressBar_);
+    metadataRow->addWidget(metadataProgressLabel_, 1);
+    metadataRow->addWidget(metadataCancelButton_);
+    metadataProgressRow_->hide();
 
     // --- Tree: the visual centre; sits on its own themed surface ---
     modelsTree_ = new QTreeWidget(this);
@@ -1313,6 +1411,29 @@ void ModelManagerPage::buildUi()
     connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::applyRecommendedRequested,
             this, &ModelManagerPage::applyModelSettingsRequested);
 
+    // W5 Task 4. ONE owner for the refresh conversation, shared by the per-model button in the
+    // inspector and the library button in the toolbar -- otherwise the two actions can drift into
+    // sending different wires for the same command, and only one of them carries the `files` list
+    // that keeps a single model's refresh from reading 2.09 TB.
+    refreshController_ = new spellvision::assets::ModelRefreshController(this);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::workerRequested,
+            this, &ModelManagerPage::modelIntelRequested);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::stateChanged,
+            this, &ModelManagerPage::syncMetadataRefreshRow);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::refreshFinished,
+            this, [this](const QString &weightPath, const QJsonObject &) {
+                // The cockpit's cached answers were resolved from the sidecars this pass just
+                // rewrote, so they are now claims nobody has re-checked.
+                emit modelIntelRefreshFinished(weightPath);
+                // And the CARD's kind is read at scan time, so a sidecar written just now does not
+                // move a model between tabs until the inventory is read again.
+                refreshInventory();
+            });
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::refreshRequested,
+            this, [this](const QString &weightPath) {
+                refreshController_->startModelRefresh(currentModelRoots(), weightPath);
+            });
+
     // --- S3 bound-workflow row: name / task / readiness + Bind / Use / Resolve actions ---
     workflowBindingLabel_ = new QLabel(this);
     workflowBindingLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
@@ -1387,11 +1508,18 @@ void ModelManagerPage::buildUi()
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);
     mainLayout->addLayout(toolbarRow);
+    mainLayout->addWidget(metadataProgressRow_);
     mainLayout->addWidget(kindTabBar_);
     mainLayout->addWidget(viewStack_, 1);
     mainLayout->addWidget(detailsCard, 0);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
+    connect(metadataRefreshButton_, &QPushButton::clicked, this, [this]() {
+        refreshController_->startLibraryRefresh(currentModelRoots());
+    });
+    connect(metadataCancelButton_, &QPushButton::clicked, this, [this]() {
+        refreshController_->cancel();
+    });
     connect(rebuildCacheButton_, &QPushButton::clicked, this, &ModelManagerPage::rebuildThumbnailCache);
     connect(openRootButton_, &QPushButton::clicked, this, [this]()
     {
