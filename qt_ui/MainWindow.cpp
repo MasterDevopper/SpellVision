@@ -51,6 +51,9 @@
 #include "workers/WorkerSocketClient.h"
 #include "workers/WorkerSubmissionPolicy.h"
 #include "generation/OutputPathHelpers.h"
+#include "generation/EndpointRouting.h"
+#include "shell/EndpointProbe.h"
+#include "shell/EndpointRegistry.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -3199,6 +3202,68 @@ void MainWindow::submitGenerationRequest(
         return;
     }
     requestPayload.insert(QStringLiteral("output_folder"), dest);
+
+    // --- which machine, decided BEFORE the enqueue ------------------------------------------------
+    //
+    // The refusal has to be here. A job that reaches the queue and then fails on the far machine is
+    // exactly the outcome the endpoint work exists to prevent, and it is the shape both candidate
+    // packs have: ComfyUI-Distributed runs the job on the master when no worker answers, NetDist
+    // substitutes a black image. Both succeed at the wrong thing.
+    {
+        const spellvision::shell::RuntimeProfile endpointProfile =
+            spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+        const QString localBaseUrl = QStringLiteral("http://%1:%2")
+                                         .arg(endpointProfile.comfyHost)
+                                         .arg(endpointProfile.comfyPort);
+        const spellvision::shell::EndpointRegistry endpoints =
+            spellvision::shell::EndpointRegistry::load(localBaseUrl);
+        QHash<QString, spellvision::shell::EndpointStatus> endpointStatuses;
+        for (const spellvision::shell::Endpoint &endpoint : endpoints.entries())
+        {
+            endpointStatuses.insert(
+                endpoint.id, spellvision::shell::EndpointProbe::instance().statusFor(endpoint.id));
+        }
+
+        QString requestedEndpoint = page->runOnEndpointId();
+        // One consent, read at the moment it matters. Off means every job runs here, whatever a
+        // page is set to -- and it is said out loud rather than quietly honoured, because a silent
+        // reroute is the same class of substitution as a silent fallback.
+        QSettings endpointSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        const bool remoteAllowed =
+            endpointSettings.value(QStringLiteral("runtime/allowRemoteQueuing"), false).toBool();
+        if (!remoteAllowed
+            && requestedEndpoint != spellvision::generation::autoEndpointChoice()
+            && requestedEndpoint != spellvision::shell::EndpointRegistry::localId())
+        {
+            const QString message = QStringLiteral(
+                "%1 is set to run on another machine, but \"Allow queuing to remote workers\" is "
+                "off in Runtime.").arg(modeId.toUpper());
+            appendLogLine(message);
+            page->setBusy(false, QString());
+            page->showGenerationError(message);
+            completeRejected();
+            return;
+        }
+        if (!remoteAllowed)
+            requestedEndpoint = spellvision::shell::EndpointRegistry::localId();
+
+        const spellvision::generation::RouteDecision route = spellvision::generation::chooseEndpoint(
+            endpoints, endpointStatuses, requestedEndpoint,
+            spellvision::generation::endpointRequestFromPayload(requestPayload));
+        if (!route.accepted)
+        {
+            appendLogLine(QStringLiteral("%1 request refused: %2").arg(modeId.toUpper(), route.reason));
+            page->setBusy(false, QString());
+            page->showGenerationError(route.reason);
+            completeRejected();
+            return;
+        }
+        if (!route.isLocal)
+        {
+            requestPayload.insert(QStringLiteral("comfy_api_url"), route.baseUrl);
+            appendLogLine(route.reason);
+        }
+    }
 
     appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
         modeId,

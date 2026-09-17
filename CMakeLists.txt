@@ -143,6 +143,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/generation/SamplingController.cpp
     qt_ui/generation/UpscaleController.cpp
     qt_ui/generation/SamplingController.h
+    qt_ui/generation/EndpointRouting.cpp
+    qt_ui/generation/EndpointRouting.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
 
@@ -538,6 +540,14 @@ qt_add_executable(test_endpoint_registry tests/cpp/test_endpoint_registry.cpp)
 target_link_libraries(test_endpoint_registry PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME endpoint_registry COMMAND test_endpoint_registry)
 
+# Which machine a job goes to, and the refusal that must come BEFORE the queue. ComfyUI-Distributed
+# falls back to the master when no worker answers and says so only in a log line; NetDist substitutes
+# a black image. Both succeed at the wrong thing. This holds the opposite: Auto prefers a free local
+# master, and an explicit pick that cannot run the job is refused by name rather than rerouted.
+qt_add_executable(test_endpoint_routing tests/cpp/test_endpoint_routing.cpp)
+target_link_libraries(test_endpoint_routing PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME endpoint_routing COMMAND test_endpoint_routing)
+
 # The Runtime page's list of machines, driven with a fake registry and fake probes. The case that
 # matters most is the one that cannot be proven by looking at a control: an unticked family must not
 # become ticked when the gesture is made, because UIA's IsEnabled lied to the last wave and a
@@ -782,7 +792,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_workflow_draft_builder test_workflow_drop_coordinator
                       test_model_kind_tabs test_model_card_sidecar test_model_inspector
                       test_model_refresh_action
-                      test_endpoint_registry test_endpoint_panel
+                      test_endpoint_registry test_endpoint_routing test_endpoint_panel
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

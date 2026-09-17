@@ -68,6 +68,9 @@ private slots:
     void theOutputFolderIsCreated();
     void aNotSetFolderIsTreatedAsAbsent();
 
+    void aRemoteChoiceCarriesComfyApiUrl();
+    void aLocalChoiceCarriesNothingNew();
+
     void theWorkflowLaunchTakesItsComfyRootFromTheCaller();
     void theWorkflowSlugIsFilesystemSafe();
 };
@@ -304,6 +307,41 @@ void TestWorkerRequestBuilder::theWorkflowSlugIsFilesystemSafe()
     for (const QChar bad : forbidden)
         QVERIFY2(!name.contains(bad), qPrintable(name));
     QVERIFY2(name.startsWith(QStringLiteral("flux-sdxl-v2-1-final")), qPrintable(name));
+}
+
+// --- which machine ------------------------------------------------------------------------------
+
+void TestWorkerRequestBuilder::aRemoteChoiceCarriesComfyApiUrl()
+{
+    // python/comfy_endpoint.py has resolved `comfy_api_url` per request since it was written, and
+    // comfy_prompt_client parameterises submit, poll, upload, /view, /free and /object_info on it.
+    // NOTHING in qt_ui/ ever set the key, so the whole remote half of the product was correct and
+    // unreachable. This is the producer.
+    QJsonObject p = minimalPayload(tmp_.path());
+    p.insert(QStringLiteral("comfy_api_url"), QStringLiteral("http://192.168.1.127:8188/"));
+    const QJsonObject r = buildWorkerGenerationRequest(QStringLiteral("t2i"), p, tmp_.path());
+    // Normalised, so one machine has one spelling on the wire -- the worker keys a queue lane on it.
+    QCOMPARE(r.value(QStringLiteral("comfy_api_url")).toString(),
+             QStringLiteral("http://192.168.1.127:8188"));
+}
+
+void TestWorkerRequestBuilder::aLocalChoiceCarriesNothingNew()
+{
+    // A single-machine install must be byte-for-byte what it was before routing existed. Stating a
+    // loopback endpoint explicitly is still local, and still adds nothing.
+    const QJsonObject plain =
+        buildWorkerGenerationRequest(QStringLiteral("t2i"), minimalPayload(tmp_.path()), tmp_.path());
+    QVERIFY(!plain.contains(QStringLiteral("comfy_api_url")));
+
+    for (const QString &local : {QStringLiteral("http://127.0.0.1:8188"),
+                                 QStringLiteral("http://localhost:8188"),
+                                 QStringLiteral("  ")})
+    {
+        QJsonObject p = minimalPayload(tmp_.path());
+        p.insert(QStringLiteral("comfy_api_url"), local);
+        const QJsonObject r = buildWorkerGenerationRequest(QStringLiteral("t2i"), p, tmp_.path());
+        QVERIFY2(!r.contains(QStringLiteral("comfy_api_url")), qPrintable(local));
+    }
 }
 
 QTEST_MAIN(TestWorkerRequestBuilder)

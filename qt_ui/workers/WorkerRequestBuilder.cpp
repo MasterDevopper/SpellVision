@@ -11,6 +11,7 @@
 #include <QStringList>
 
 #include "generation/OutputPathHelpers.h"
+#include "shell/EndpointRegistry.h"
 #include "shell/RuntimeProfile.h"
 #include "workers/WorkerSubmissionPolicy.h"
 
@@ -85,6 +86,24 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
         request.insert(QStringLiteral("task_type"), studioCommand);
     }
     spellvision::shell::RuntimeProfile::load(projectRoot).applyToWorkerRequest(request);
+
+    // The producer the tree has been missing.
+    //
+    // python/comfy_endpoint.py has resolved `comfy_api_url` per request since it was written, and
+    // comfy_prompt_client parameterises every call on it -- submit, poll, upload, /view, /free,
+    // /object_info. A real run against the second machine on 2026-09-01 fetched a 1.28 MB PNG back
+    // through that path first try. What did not exist was anything in qt_ui/ that set the key, so
+    // the whole remote half of the product was correct and unreachable.
+    //
+    // Stated ONLY for a non-local choice, deliberately: a local job's request is byte-for-byte what
+    // it was before this wave, so a single-machine install cannot be altered by a routing feature it
+    // never uses. Normalised through the registry's resolver rather than re-parsed here, so there is
+    // one spelling of an endpoint on this side of the wire.
+    const QString chosenEndpoint = spellvision::shell::normalizedEndpointUrl(
+        payload.value(QStringLiteral("comfy_api_url")).toString());
+    if (!chosenEndpoint.isEmpty() && !spellvision::shell::endpointUrlIsLocal(chosenEndpoint))
+        request.insert(QStringLiteral("comfy_api_url"), chosenEndpoint);
+
     if (!kStudioExecutionCommands.contains(studioCommand))
         request.insert(QStringLiteral("task_type"), taskCommand);
     request.insert(QStringLiteral("submit_origin"), payload.value(QStringLiteral("submit_origin")).toString());

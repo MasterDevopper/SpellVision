@@ -88,6 +88,12 @@ public:
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
     QJsonObject buildRequestPayload() const;
+    // Which machine this page is set to render on: an endpoint id, or "auto".
+    //
+    // Read by MainWindow immediately before the enqueue, because the refusal has to happen there --
+    // a job that reaches the queue and fails on the far machine is the outcome this whole feature
+    // exists to prevent.
+    QString runOnEndpointId() const;
     // Public re-scan hook (worker-ready recovery): the constructor's catalog scan
     // can land before the worker binds :8765, leaving fallback families; MainWindow
     // calls this on the worker down->up edge to repopulate from the classifier.
@@ -173,6 +179,8 @@ public:
     // Phase 7: app-global Simple/Advanced disclosure mode. Step 1 is plumbing only -- this records
     // the mode (advanced_); later steps gate per-tab controls off it.
     void updateDisclosure(bool advanced);
+    // Creates the Run on row on first call and repopulates it from the endpoint registry after.
+    void ensureRunOnRow();
 
     // Simple hides the raw knobs but keeps their values -- so four of them can change the output
     // with nothing on screen saying so. This states them instead of discarding them. No-op in
@@ -603,6 +611,13 @@ public:
     QWidget *heightRow_ = nullptr;
     QWidget *batchRow_ = nullptr;
     QWidget *prefixRow_ = nullptr;
+    // "Run on": Auto / this machine / a named endpoint. Advanced-only; Simple is always Auto.
+    //
+    // Built lazily by ensureRunOnRow() from updateDisclosure() rather than in buildUi(), because
+    // buildUi() lives in ImageGenerationPage.cpp and that file is over its 3000-line ceiling -- the
+    // row is inserted into the Output card's existing layout beside prefixRow_.
+    QWidget *runOnRow_ = nullptr;
+    QComboBox *runOnCombo_ = nullptr;
     // Phase 7 Sampling-tab rows gated Advanced-only (Aspect + Frames/FPS stay Simple). The video
     // sampler/scheduler also carry an isVideoMode() guard the disclosure gate AND-composes with.
     QWidget *samplerRow_ = nullptr;
