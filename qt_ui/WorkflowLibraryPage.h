@@ -142,6 +142,11 @@ private:
         QString compiledPromptFormat = QStringLiteral("unknown");
         bool apiPromptCompatible = false;
         bool compiledPromptPresent = false;
+        // compiledPromptPath is CONSTRUCTED from the import directory, so `present` says a file of
+        // that name is there and nothing more. This says a compile named it. Only a compile reply
+        // ever sets it true, it is never persisted to the library cache, and it is what the draft
+        // handoff keys on -- because the artefacts that ruin a render are the well-formed ones.
+        bool compiledPromptVerified = false;
 
         QStringList compileWarnings;
         QString compileError;
@@ -212,6 +217,9 @@ private:
     static void applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability);
     static bool ensureCompiledPrompt(WorkflowRecord &record);
     static void buildReusableDraft(WorkflowRecord &record);
+    // Compile the row against the live schema and hand the cockpit a draft built from the path that
+    // compile named -- or the refusal, with the packs it named, and no draft at all.
+    void requestVerifiedDraft(int index);
 
     void rebuildFilters();
     void rebuildList();
