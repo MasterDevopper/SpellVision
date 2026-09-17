@@ -1,63 +1,70 @@
 {
- "schema": "spellvision.model-sidecar/1",
- "identity": {
-  "file_name": "qwen_image_vae.safetensors",
-  "size": 253806246,
-  "hashes": {
-   "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
-   "autov2": "a70580f021"
+  "schema": "spellvision.model-sidecar/1",
+  "identity": {
+    "file_name": "qwen_image_vae.safetensors",
+    "size": 253806246,
+    "hashes": {
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+      "autov2": "a70580f021"
+    },
+    "kind": "vae",
+    "family": "unknown",
+    "base_model": "Other",
+    "quantisation": "bf16",
+    "sources": [
+      {
+        "site": "civitai",
+        "model_id": 1842123,
+        "version_id": 2089517,
+        "url": "https://civitai.com/models/1842123?modelVersionId=2089517",
+        "fetched_at": "2026-09-16T16:22:32.441109+00:00"
+      }
+    ]
   },
-  "kind": "vae",
-  "family": "unknown",
-  "base_model": "Other",
-  "quantisation": "bf16",
-  "sources": [
-   {
-    "site": "civitai",
-    "model_id": 1842123,
-    "version_id": 2089517,
-    "url": "https://civitai.com/models/1842123?modelVersionId=2089517",
-    "fetched_at": "2026-09-16T16:22:32.441109+00:00"
-   }
-  ]
- },
- "display": {
-  "name": {
-   "value": "Qwen-Image - GGUF",
-   "user_override": false
-  },
-  "description_html": {
-   "value": "",
-   "user_override": false
-  },
-  "creator": null,
-  "license": {
-   "name": null,
-   "allowCommercialUse": null,
-   "allowDerivatives": null,
-   "allowNoCredit": null
-  },
-  "nsfw_level": 1,
-  "trigger_words": {
-   "value": [],
-   "user_override": false
-  },
-  "images": [
-   {
-    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/944f5833-5594-43ff-9911-49ca183e0f69/original=true/92798468.jpeg",
-    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f\\0.jpg",
-    "width": 300,
-    "height": 168,
+  "display": {
+    "name": {
+      "value": "Qwen-Image - GGUF",
+      "user_override": false
+    },
+    "description_html": {
+      "value": "",
+      "user_override": false
+    },
+    "creator": "Hikarias",
+    "license": {
+      "name": null,
+      "allowCommercialUse": [
+        "Image",
+        "RentCivit",
+        "Rent",
+        "Sell",
+        "SellMerge"
+      ],
+      "allowDerivatives": true,
+      "allowNoCredit": true,
+      "allowDifferentLicense": true
+    },
     "nsfw_level": 1,
-    "is_cover": true,
-    "user_override": false,
-    "meta": {}
-   }
-  ]
- },
- "recommended": {},
- "user": {
-  "notes": "",
-  "favorite": false
- }
+    "trigger_words": {
+      "value": [],
+      "user_override": false
+    },
+    "images": [
+      {
+        "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/944f5833-5594-43ff-9911-49ca183e0f69/original=true/92798468.jpeg",
+        "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f\\0.jpg",
+        "width": 300,
+        "height": 168,
+        "nsfw_level": 1,
+        "is_cover": true,
+        "user_override": false,
+        "meta": {}
+      }
+    ]
+  },
+  "recommended": {},
+  "user": {
+    "notes": "",
+    "favorite": false
+  }
 }

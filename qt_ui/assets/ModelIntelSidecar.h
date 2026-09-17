@@ -102,6 +102,20 @@ struct ModelIntel
     QString descriptionHtml;
     QString creator;
     QString licenseName;
+    // CivitAI states PERMISSIONS and never an SPDX name; HuggingFace card frontmatter states a
+    // name and rarely the permissions. Both halves are kept because neither site answers the
+    // other's question, and a licence line built from only one of them reads as "not stated"
+    // for the site that supplies the other.
+    QStringList licenseCommercialUse; // e.g. {"RentCivit", "Image"}; empty means the site said none
+    int licenseAllowsDerivatives = -1;      // -1 == the sidecar said nothing
+    int licenseAllowsNoCredit = -1;
+    int licenseAllowsDifferentLicense = -1;
+    bool hasLicenseTerms() const
+    {
+        return !licenseName.isEmpty() || !licenseCommercialUse.isEmpty()
+            || licenseAllowsDerivatives >= 0 || licenseAllowsNoCredit >= 0
+            || licenseAllowsDifferentLicense >= 0;
+    }
     int nsfwLevel = -1; // -1 == the sidecar said nothing
     QStringList triggerWords;
     bool triggerWordsAreUserOverride = false;

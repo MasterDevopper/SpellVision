@@ -221,8 +221,34 @@ ModelIntel parseModelIntelDocument(const QByteArray &json, const QString &sideca
     intel.descriptionHtml = display.value(QStringLiteral("description_html")).toObject()
                                 .value(QStringLiteral("value")).toString();
     intel.creator = display.value(QStringLiteral("creator")).toString().trimmed();
-    intel.licenseName = display.value(QStringLiteral("license")).toObject()
-                            .value(QStringLiteral("name")).toString().trimmed();
+    const QJsonObject license = display.value(QStringLiteral("license")).toObject();
+    intel.licenseName = license.value(QStringLiteral("name")).toString().trimmed();
+    // `allowCommercialUse` is a LIST on CivitAI ("RentCivit", "Image", "Sell"...), not a bool.
+    // Reading it as a bool is how this field would silently become "false" for a model that
+    // permits everything.
+    const QJsonValue commercial = license.value(QStringLiteral("allowCommercialUse"));
+    if (commercial.isArray())
+    {
+        for (const QJsonValue &value : commercial.toArray())
+        {
+            const QString term = value.toString().trimmed();
+            if (!term.isEmpty())
+                intel.licenseCommercialUse << term;
+        }
+    }
+    else if (commercial.isString())
+    {
+        const QString term = commercial.toString().trimmed();
+        if (!term.isEmpty())
+            intel.licenseCommercialUse << term;
+    }
+    const auto tristate = [&license](const char *key) {
+        const QJsonValue value = license.value(QLatin1String(key));
+        return value.isBool() ? (value.toBool() ? 1 : 0) : -1;
+    };
+    intel.licenseAllowsDerivatives = tristate("allowDerivatives");
+    intel.licenseAllowsNoCredit = tristate("allowNoCredit");
+    intel.licenseAllowsDifferentLicense = tristate("allowDifferentLicense");
     const QJsonValue nsfw = display.value(QStringLiteral("nsfw_level"));
     intel.nsfwLevel = nsfw.isDouble() ? nsfw.toInt() : -1;
 
