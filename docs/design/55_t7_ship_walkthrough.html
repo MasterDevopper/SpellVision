@@ -540,6 +540,195 @@
           </tbody>
         </table>
         <p class="muted"><strong>W1 only stores this.</strong> The sidecar per weight now carries the site-published settings, but no generation page reads it yet — T2I/I2I still render every krea2 checkpoint at the family table's 52/3.5 regardless of which one is selected. Wiring a generation page to prefer a model's own sidecar over the family default is the next wave (W2), not this one.</p>
+
+        <h2>W5 &mdash; the page becomes a library, and the refresh has a button (2026-09-17)</h2>
+        <p>
+          W1 stored the intelligence and no surface read it. W5 Tasks 1&ndash;3 gave the page tabs from the
+          classifier, cards that show what the site says, and an inspector. Tasks 4&ndash;6, below, add the
+          action that makes the rest usable: <strong>Refresh metadata</strong>, run from inside the app.
+          Everything in this block was driven through the built <code>SpellVision.exe</code> against the
+          real library on <code>D:/AI_ASSETS/models</code>, with the live CivitAI API and
+          <strong>no account and no API key</strong>. ComfyUI was not running for any of it.
+        </p>
+
+        <h3>The library, by kind</h3>
+        <figure>
+          <img src="55_t7_assets/w5_models_page_tabs.png" alt="Models page with kind tabs and counts over 759 assets">
+          <figcaption>
+            2026-09-17 05:00 &middot; MODEL LIBRARY &middot; 759 assets, 17 families, root <code>D:/AI_ASSETS/models</code> &middot;
+            tabs <strong>All 759 &middot; Checkpoints 131 &middot; Diffusion models 51 &middot; LoRAs 498 &middot; VAE 20 &middot;
+            Text encoders 18 &middot; Vision 7 &middot; Embeddings 8 &middot; Upscalers 6 &middot; Style models 2 &middot; Other 18</strong>.
+            The counts add to All, which is the conservation law the tabs are tested on: a model in no tab
+            is, from the user's chair, a model that is not installed. Most cards read
+            <em>Not identified yet</em>, and that is the honest state of this root &mdash; it holds no
+            sidecars at all, which is exactly the situation the button below exists for.
+          </figcaption>
+        </figure>
+
+        <h3>Refresh metadata, on one model, with no key</h3>
+        <figure>
+          <img src="55_t7_assets/w5_identified_triggers.png" alt="An identified LoRA with its site name, six pictures, trigger words and recommended settings">
+          <figcaption>
+            2026-09-17 05:07 &middot; <code>3DRedmond-3DRenderStyle-3DRenderAF.safetensors</code>, a weight
+            that was <em>Not identified yet</em> a minute earlier. One click on the inspector's
+            <strong>Refresh metadata</strong> hashed that one file, asked CivitAI by hash and wrote the
+            sidecar: site name <strong>3D.Redmond - 3D Render Style for SD XL</strong>, the quantisation
+            chip <code>bf16</code>, six example pictures fetched into
+            <code>models/.spellvision/previews/</code>, <strong>Triggers: 3D Render Style, 3DRenderAF</strong>,
+            <em>Licence: not stated by the site</em>, and the outcome line
+            <strong>Examined 1 &middot; 1 identified</strong>. No credential was configured and none was asked for.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_recommended_provenance.png" alt="Recommended settings with a provenance caption on every value">
+          <figcaption>
+            The Recommended-settings panel, cropped. Every value carries where it came from &mdash;
+            <code>Steps: 40 (from 10 of 10 example images on the site)</code> through to
+            <code>Prompt prefix: 3D Render Style, 3DRenderAF (the trigger words the site lists)</code>.
+            A number with no source invites the user to trust the wrong one; this is the difference
+            between &ldquo;the author renders it this way&rdquo; and &ldquo;our family table guessed&rdquo;.
+          </figcaption>
+        </figure>
+
+        <h3>A picture of your own, across a refresh</h3>
+        <figure>
+          <img src="55_t7_assets/w5_user_picture_before.png" alt="The user's own picture set as the model cover">
+          <figcaption>
+            2026-09-17 05:11 &middot; <strong>Use my picture&hellip;</strong> &rarr; a deliberately
+            unmistakable magenta plate, chosen from inside the model roots. Status:
+            <em>Your picture is now this model's cover.</em> It sits first in the gallery, ahead of the six
+            the site published.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_user_picture_survives.png" alt="The same model after a second refresh, still showing the user's picture">
+          <figcaption>
+            2026-09-17 05:12 &middot; the <em>same</em> model after a second full
+            <strong>Refresh metadata</strong> (<code>Examined 1 &middot; 1 identified</code>, site pictures
+            re-fetched). The card cover and the first gallery tile are still the user's plate. This is the
+            promise three docstrings made and nothing held until W5 Task 3, and it can fail in two
+            independent ways &mdash; the sidecar entry and the bytes on disk &mdash; so it is asserted at
+            both ends.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>Read this before trusting a live check of this behaviour.</strong> The first live run of
+          exactly this sequence FAILED &mdash; the picture was replaced by the site's cover &mdash; and the
+          code was not the reason. The worker on <code>:8765</code> had been started the previous evening,
+          hours before the fix landed, so it was serving the old <code>sidecar.merge</code> out of memory.
+          The same sequence run head-on against the modules on disk passed at once. Python is not compiled,
+          so a long-running worker is a stale binary in every sense that matters: restart it before you
+          measure it.
+        </p>
+
+        <h3>The whole library: background, progress, cancel</h3>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_progress.png" alt="Library-wide refresh running with a progress row and a Stop button">
+          <figcaption>
+            2026-09-17 05:12 &middot; the toolbar's <strong>Refresh metadata</strong> against all 759 files.
+            Progress row: <code>3 of 759 &middot; lazypos.safetensors</code>, a <strong>Stop</strong> button,
+            both refresh buttons disabled, inspector status <em>Reading the library&hellip;</em>. The request
+            carries <code>"background": true</code>, so the reply is the job id and the progress arrives over
+            <code>subscribe</code> &mdash; a foreground pass would hold the connection for the ~79 minutes
+            this library takes and be indistinguishable from a hung worker.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_progress2.png" alt="The same refresh a few seconds later at 13 of 759">
+          <figcaption>
+            Four seconds later: <code>13 of 759 &middot; skinny_fat_v2_loraholic.safetensors</code>. Smallest
+            file first, by design, so the library fills in visibly instead of starting on a 6 GB checkpoint.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_cancelled.png" alt="The refresh stopped, reporting how far it got">
+          <figcaption>
+            <strong>Stop</strong> &rarr; <code>model_intel_cancel</code> with the job id &rarr;
+            <strong>Stopped after 14 of 759 &middot; 14 identified</strong>. A cancelled run still returns the
+            counts it reached rather than nothing, the progress row retires, and the user's picture is still
+            the cover. Cancel is addressed <em>by job id</em>, which only the started event carries, so the
+            button is not offered in the window before that id arrives &mdash; a cancel with no id cancels
+            every running refresh.
+          </figcaption>
+        </figure>
+
+        <h3>The sentence W2 had to delete</h3>
+        <figure>
+          <img src="55_t7_assets/w5_cockpit_caption_crop.png" alt="The cockpit caption naming Refresh metadata again">
+          <figcaption>
+            2026-09-17 05:18 &middot; T2I &middot; Sampling &middot; a checkpoint with no sidecar
+            (<code>novaExanimeXL_ilV50</code>) &middot;
+            <strong>&ldquo;Family defaults &middot; run Refresh metadata on the Models page to use this
+            model's own&rdquo;</strong>. W2 wrote that sentence, could not make it true, and deleted it
+            (ruling W2-F1: &ldquo;there is no such control and nothing in <code>qt_ui/</code> starts a
+            <code>model_intel_refresh</code> at all&rdquo;). It is restored here in the words the button
+            uses, and the button is two clicks away in the shots above.
+          </figcaption>
+        </figure>
+
+        <h3>Downloads land in the library</h3>
+        <p>
+          Separately, and not pictured: <code>beginModelDownload</code> is the only place this app builds a
+          <code>start_download</code>, and it never sent <code>models_root</code>. W1's post-download hook is
+          explicit that without it &ldquo;the file stays wherever the materializer put it&rdquo; &mdash;
+          <code>python/.cache/assets/</code>, a directory the Models page does not scan. So every download
+          this app has ever started, from the page's own button and from a Civitai or Hugging Face link
+          dropped on the page, completed successfully into a folder the library cannot see. It now names the
+          library, the lane places and identifies the file, and the page rescans when the lane drains. Held
+          by <code>tests/test_models_download_lands.py</code>, which drives the real worker command over a
+          real <code>DownloadManager</code> and asserts the weight arrives under
+          <code>&lt;root&gt;/checkpoints/</code> with its sidecar &mdash; plus two cases that hold the two UI
+          call sites to sending the field, because the hook, the command and the manager were all already
+          correct and complete.
+        </p>
+        <p class="warn">
+          <strong>Not pictured, and therefore not claimed:</strong> a real multi-gigabyte download from the
+          page, end to end. The lane is exercised from the worker command down, not from the click through
+          the network.
+        </p>
+
+        <h3>T3 is NOT green</h3>
+        <p>The owner's bar, quoted rather than paraphrased:</p>
+        <blockquote>
+          <p>&ldquo;<strong>Source green &ne; done.</strong> Each wave ends with a live, pictured proof on
+          this box written into <code>docs/design/55_t7_ship_walkthrough.html</code> under the T's section,
+          with the queue id and dest path. A wave whose live proof cannot be taken &hellip; ships its code
+          and records the gate as <strong>PENDING</strong>, never green.&rdquo; &mdash; spec R0.4</p>
+          <p>&ldquo;<strong>Not in scope (1.1.0, Doc 58):</strong> recipes, favorites sync, CivitAI/HF
+          <em>browse</em> inside the app, LoRA Manager parity.&rdquo; &mdash; spec &sect;5.1</p>
+        </blockquote>
+        <p>What the pictures above prove, and nothing more:</p>
+        <ul class="tight">
+          <li>The tabs, counts and cards are real over the owner's 759-file library.</li>
+          <li>One weight identified live by hash with no key, showing its site name, its pictures, its
+            trigger words and its published settings with a provenance on every value.</li>
+          <li>A user-chosen picture surviving a real refresh &mdash; entry and bytes.</li>
+          <li>A library-wide refresh reporting progress and stopping on demand, with its counts.</li>
+          <li>The cockpit caption restored and true.</li>
+        </ul>
+        <p>What is still open:</p>
+        <ul class="tight">
+          <li><strong>The library is 14 of 759 identified.</strong> The full pass was started and
+            deliberately cancelled after fourteen files; nobody has run the ~79 minutes. Most cards on this
+            root still read <em>Not identified yet</em>, and that is what the page honestly shows.</li>
+          <li><strong>No download was pictured</strong> &mdash; see above.</li>
+          <li><strong>A dropped URL was not pictured either.</strong> It routes through the same request a
+            test now holds, but drag-and-drop was not driven through the UI in this pass.</li>
+          <li><code>clip_skip</code> and <code>guidance</code> are still resolved by the worker and then
+            <strong>discarded</strong>: no widget exists for either in <code>qt_ui/</code>. Carried from W2,
+            still carried.</li>
+          <li>A preset and a model's own defaults can both write steps and CFG, and which one the user sees
+            still depends on the order they touched them. Recorded in W2, not resolved here.</li>
+          <li>The refresh surfaces no rate-limit backoff. A throttled CivitAI reply is counted as
+            <code>lookup_failed</code> and the summary says so, which is honest but is not a retry.</li>
+          <li>This is Stage-2 shaped. Recipes, favourites sync, in-app CivitAI/HF browsing and LoRA Manager
+            parity are 1.1.0/1.2.0 and none of them exist.</li>
+        </ul>
+        <p class="warn">
+          <strong>T3 gate: still PARTIAL.</strong> The surface is real and the action that fills it exists
+          and works. The library itself is not identified, and &ldquo;the Models page is a library&rdquo;
+          will be true for this box when a full pass has actually been run against it.
+        </p>
       </section>
 
       <section id="t6">

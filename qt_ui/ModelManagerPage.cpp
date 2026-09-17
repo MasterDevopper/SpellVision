@@ -538,6 +538,11 @@ void ModelManagerPage::onRefreshFinished()
     persistCache(result.entries, result.checkedAtMs);
     applyEntries(result, QStringLiteral("live"));
     setRefreshBusy(false);
+    // A metadata refresh ENDS by rescanning the inventory, and re-selecting the row rebuilds the
+    // inspector from disk -- which clears its status line. Measured on the live page: the outcome
+    // of the refresh the user had just watched was on screen for about a second and then wiped by
+    // its own follow-up. Re-assert it after the rebuild.
+    syncMetadataRefreshRow();
 }
 
 void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &sourceLabel)
@@ -827,8 +832,10 @@ void ModelManagerPage::syncMetadataRefreshRow()
             inspectorPanel_->setRefreshStatus(refreshController_->statusText(),
                                               refreshController_->statusIsError());
     }
-    if (summaryLabel_ && !running && !refreshController_->lastResult().isEmpty())
-        summaryLabel_->setText(refreshController_->statusText());
+    // Deliberately NOT the summary card: its first line is the library's own census (installed
+    // assets, families, the models root), and writing the refresh outcome over it replaced a
+    // standing fact with a transient one -- seen on the live page as "Examined 1 · 1 identified"
+    // sitting where "Installed assets: 759" belongs. The refresh has two places of its own.
 }
 
 void ModelManagerPage::updateDetailsForRow(int row)

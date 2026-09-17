@@ -213,8 +213,13 @@ ModelInspectorPanel::ModelInspectorPanel(QWidget *parent)
     actions->addWidget(usePictureButton_);
     actions->addWidget(refreshButton_);
     actions->addWidget(openSiteButton_);
-    actions->addWidget(statusLabel_, 1);
+    actions->addStretch(1);
     column->addLayout(actions);
+    // On its OWN line. Sharing the action row cost it every pixel: four buttons with an expanding
+    // policy take the whole width, an ElidingLabel elides to nothing rather than forcing a
+    // minimum, and the result was a refresh whose outcome -- including "3 could not be looked up"
+    // -- was rendered at zero width. Measured on the live page, not reasoned about.
+    column->addWidget(statusLabel_);
     column->addSpacing(hair);
 
     Q_UNUSED(snug);
