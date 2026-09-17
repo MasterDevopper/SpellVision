@@ -3,6 +3,7 @@
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardView.h"
 #include "generation/OutputPathHelpers.h"
+#include "workflows/WorkflowLaunchController.h"
 
 #include <QDir>
 #include <QDirIterator>
@@ -47,9 +48,11 @@ OutputCardModel::Output buildOutput(const QFileInfo &fi, const QString &sidecarP
         meta = QJsonDocument::fromJson(f.readAll()).object();
         f.close();
     }
-    o.modeId = meta.value(QStringLiteral("task_type")).toString().trimmed().toLower();
-    if (o.modeId.isEmpty())
-        o.modeId = o.isVideo ? QStringLiteral("t2v") : QStringLiteral("t2i");
+    // The sidecar records what produced this file, and the ONE resolver reads it -- so a gallery card
+    // and a Flows row cannot disagree about what a render was. The line this replaces fell back to
+    // "it is a video file, therefore t2v", which labelled every i2v render T2V and every i2i render
+    // T2I. A render whose sidecar never said leaves the subtext blank now, which is true.
+    o.modeId = spellvision::workflows::WorkflowLaunchController::resolveModeId(meta);
 
     const QString model = meta.value(QStringLiteral("model_display")).toString().trimmed();
     const int w = meta.value(QStringLiteral("width")).toInt();
@@ -156,7 +159,8 @@ QVariant OutputCardModel::data(const QModelIndex &index, int role) const
             return QStringLiteral("NO");
         return o.isVideo ? QStringLiteral("Video") : QStringLiteral("Image"); // badge
     case Role::FamilyRole:
-        return o.modeId.toUpper(); // subtext line = source mode
+        // Blank rather than a guess when the sidecar did not record it -- see buildOutput().
+        return o.modeId.isEmpty() ? QString() : o.modeId.toUpper(); // subtext line = source mode
     case Role::PreviewPathRole:
         return o.path; // media path; the cache turns a video into a poster
     case Role::NativePathRole:

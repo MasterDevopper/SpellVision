@@ -55,6 +55,13 @@ COMFY_SCHEMA_READER_MODULE = "python/" + "comfy_graph_helpers" + ".py"
 # legitimately read each other's metrics, and pinning the exception to whichever file holds the
 # geometry today is exactly the memo-shaped scope this module exists to abolish.
 SHELL_PACKAGE = "qt_ui/" + "shell" + "/"
+# The ONE place a workflow's mode may be derived. Three C++ sites used to answer "what kind of
+# generation is this workflow" independently and one of them answered it from the FILE PATH. A rule
+# about who may answer it has to name the one that may, and a rule may not name a file -- so the
+# owner lives here with its neighbours, spelled the same way. A STEM, not a path: the answer lives in
+# the .cpp and the struct it returns lives in the .h, and pinning the rule to whichever half holds
+# the logic today is the memo-shaped scope this module exists to abolish.
+WORKFLOW_MODE_RESOLVER = "Workflow" + "LaunchController"
 
 
 def _keep(path: Path) -> bool:

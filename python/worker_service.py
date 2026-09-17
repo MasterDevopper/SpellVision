@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import comfy_endpoint as comfy_endpoint_module
 from comfy_endpoint import comfy_endpoint, comfy_host, comfy_port
 
 import copy
@@ -134,6 +135,7 @@ from comfy_prompt_client import (
     request_comfy_free_memory,
     run_comfy_workflow,
 )
+from optimization_provenance import invalidate_optimization_provenance
 from native_runners import (
     _native_video_kwargs,
     run_flux3_video,
@@ -242,7 +244,10 @@ def load_job_archive() -> None:
 load_job_archive()
 
 
-COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
+# One manager per (install, host, port, interpreter), not one global rebuilt whenever any of them
+# differs. The old single global meant two endpoints thrashed each other: every alternation threw
+# away the manager for the endpoint it was leaving, along with everything it had detected.
+COMFY_RUNTIME_MANAGERS: dict[tuple[str, str, int, str], ComfyRuntimeManager] = {}
 COMFY_RUNTIME_MANAGER_LOCK = threading.Lock()
 
 
@@ -994,6 +999,13 @@ def detect_pipeline_type(model_name_or_path: str, requested_family: str | None =
     return detect_image_pipeline_type(model_name_or_path, requested_family)
 
 
+# The ten kinds the Models page tabs are built from (spec R1.2) live in ONE place now:
+# model_intelligence.kinds. They were declared here AND derived differently in
+# model_intelligence/refresh.py, so the same weight was "other" to this command and "unknown" in
+# the sidecar written beside it. See that module's docstring.
+from model_intelligence.kinds import normalise_kind as _normalise_kind  # noqa: E402
+
+
 def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
     # Batch classification for the Qt catalog scanner (option A of the detection
     # accelerator's Qt-consumption follow-up): the UI stops guessing families with
@@ -1017,9 +1029,10 @@ def handle_classify_models_command(req: dict[str, Any]) -> dict[str, Any]:
                 "confidence": c.confidence,
                 "source_layer": c.source_layer,
                 "model_type": c.model_type,
+                "kind": _normalise_kind(getattr(c, "model_type", "")),
             })
         except Exception as exc:  # never fail the whole batch on one bad file
-            classifications.append({"path": path, "family": "unknown", "error": str(exc)})
+            classifications.append({"path": path, "family": "unknown", "error": str(exc), "kind": "other"})
     # No "type" key -> worker_client passes this through unwrapped (ok-based branch).
     return {"ok": True, "classifications": classifications}
 
@@ -1520,27 +1533,79 @@ def _managed_comfy_python(req: dict[str, Any] | None = None) -> str:
 
 
 def get_comfy_runtime_manager(req: dict[str, Any] | None = None) -> ComfyRuntimeManager:
-    global COMFY_RUNTIME_MANAGER
+    """The process manager for THIS request's endpoint, remembered rather than rebuilt.
+
+    Only ever call this for a LOCAL endpoint. A ComfyRuntimeManager starts, stops and reads the
+    state file of a ComfyUI installed on this machine; against a remote endpoint every one of those
+    is meaningless, and `ensure`/`status` short-circuit to a health probe before they get here.
+    """
     req = req or {}
     comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
     host = _managed_comfy_host(req)
     port = _managed_comfy_port(req)
     python_executable = _managed_comfy_python(req)
+    key = (comfy_root, host, port, python_executable)
     with COMFY_RUNTIME_MANAGER_LOCK:
-        if (
-            COMFY_RUNTIME_MANAGER is None
-            or COMFY_RUNTIME_MANAGER.comfy_root != comfy_root
-            or COMFY_RUNTIME_MANAGER.host != host
-            or COMFY_RUNTIME_MANAGER.port != port
-            or COMFY_RUNTIME_MANAGER.python_executable != python_executable
-        ):
-            COMFY_RUNTIME_MANAGER = ComfyRuntimeManager(
+        manager = COMFY_RUNTIME_MANAGERS.get(key)
+        if manager is None:
+            manager = ComfyRuntimeManager(
                 comfy_root,
                 python_executable=python_executable,
                 host=host,
                 port=port,
             )
-        return COMFY_RUNTIME_MANAGER
+            COMFY_RUNTIME_MANAGERS[key] = manager
+        return manager
+
+
+def remote_endpoint_health_payload(req: dict[str, Any], action: str) -> dict[str, Any]:
+    """What "ensure the runtime" can honestly mean for a machine that is not this one.
+
+    A remote endpoint has no local process to start, no state file to read and no custom_nodes/ to
+    install into, so the only true answer is whether it ANSWERS. Before this, run_comfy_workflow
+    called ensure_comfy_runtime unconditionally, which for a remote job meant starting a ComfyUI
+    process HERE and then submitting the prompt THERE -- two ComfyUIs, one of them pointless, and a
+    success report either way.
+
+    Health is /system_stats and not a model listing: ComfyUI walks its model directories to answer
+    a filename list, and a node whose models arrive over a dead CIFS share blocks on exactly that.
+    """
+    from endpoint_capability import endpoint_health
+
+    endpoint = str(comfy_endpoint(req)).rstrip("/")
+    health = endpoint_health(endpoint, timeout_sec=bounded_option(req, "health_timeout_sec", 5.0))
+    healthy = bool(health.get("ok"))
+    payload: dict[str, Any] = {
+        "ok": True,
+        "endpoint": endpoint,
+        # Deliberately NOT `endpoint_is_local`. In this protocol that key is the marker of a
+        # REFUSAL -- worker_tcp sets it on the reply that turns down a local-install command for a
+        # remote endpoint, and tests/test_remote_endpoint_guard reads it as exactly that. A status
+        # that succeeded must not carry a refusal's marker. `ownership` and `can_stop` say the same
+        # thing without the collision: nothing here owns that process and nothing here can stop it.
+        "state": "ready_external" if healthy else "unreachable",
+        # Never "managed": nothing here owns that process, and saying otherwise would offer a Stop
+        # button that cannot stop anything.
+        "ownership": "external" if healthy else "none",
+        "running": healthy,
+        "healthy": healthy,
+        "endpoint_alive": healthy,
+        "pid": None,
+        "detected_pid": None,
+        "can_stop": False,
+        "started_by_spellvision": False,
+        "installed": healthy,
+        "message": (
+            f"External ComfyUI answered at {endpoint}."
+            if healthy
+            else f"{endpoint} did not answer a health check on /system_stats: {health.get('error')}"
+        ),
+    }
+    if healthy:
+        payload["system_stats"] = health.get("system_stats")
+    else:
+        payload["error"] = health.get("error")
+    return payload
 
 
 def _runtime_message(message_type: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1567,6 +1632,10 @@ def handle_delete_model_command(req: dict[str, Any] | None = None) -> dict[str, 
 
 def handle_comfy_runtime_status_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    if not comfy_endpoint_module.is_local_endpoint(req):
+        payload = remote_endpoint_health_payload(req, "comfy_runtime_status")
+        payload["version_check"] = _comfy_version_check(payload, req)
+        return _runtime_message("comfy_runtime_status", "comfy_runtime_status", payload)
     manager = get_comfy_runtime_manager(req)
     payload = manager.status()
     payload["version_check"] = _comfy_version_check(payload, req)
@@ -1608,11 +1677,25 @@ def _sync_comfy_extra_model_paths(req: dict[str, Any] | None) -> bool:
 
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    if not comfy_endpoint_module.is_local_endpoint(req):
+        # No local process to start and no local extra_model_paths.yaml to write -- that file is
+        # read by a ComfyUI on this machine, and rewriting it would change what THIS install can
+        # see while claiming to have prepared the other one.
+        return _runtime_message(
+            "comfy_runtime_ack", "ensure_comfy_runtime",
+            remote_endpoint_health_payload(req, "ensure_comfy_runtime"),
+        )
     yaml_changed = _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
     timeout = bounded_option(req, "startup_timeout_sec", 60.0)
     # Comfy reads extra_model_paths.yaml at startup. A yaml rewrite while it is
     # already running leaves F: companions invisible (krea2 unet_raw / qwen3vl).
+    #
+    # This restart passes no arm ON PURPOSE, and that now means "keep the arm the session was
+    # launched with" rather than "re-resolve from the environment" (comfy_session_arm). It used to
+    # mean the latter, and a live run caught it replacing an explicitly requested SDPA with sage
+    # because sageattention is installed on this box -- a library added mid-session silently
+    # changed the attention backend, so renders before and after it were not comparable.
     if yaml_changed:
         payload = manager.restart(timeout_sec=timeout)
         invalidate_comfy_object_info("extra_model_paths.yaml changed")
@@ -1639,12 +1722,46 @@ def handle_stop_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict
     return _runtime_message("comfy_runtime_ack", "stop_comfy_runtime", payload)
 
 
+# The keys an A/B arm may carry. Presence, not truthiness, is what makes a key part of the arm --
+# `{"dynamic_vram": False}` must reach comfy_launch_policy.arm_args as a request to disable it, not
+# be filtered out for being falsy.
+_ARM_KEYS = ("attention", "fast", "dynamic_vram", "vram_headroom")
+
+
+def _arm_from_request(req: dict[str, Any]) -> dict[str, Any] | None:
+    """The arm dict for an A/B restart, or ``None`` when the request named none of the arm keys.
+
+    ``None`` has to reach ``ComfyRuntimeManager.restart``/``start`` unchanged: that is the whole
+    byte-for-byte-default contract this wave is built on (see ``build_launch_command``'s docstring
+    note). A restart request that names no arm key must launch exactly as it always did -- which
+    now means "whatever arm the session was launched with", not "the environment default" (see
+    ``comfy_session_arm``).
+
+    The flat keys alone cannot say "go back to the environment": an empty selection from them is
+    indistinguishable from naming no key at all. A nested ``arm`` object can, and wins when present,
+    so ``{"arm": {}}`` clears the session's memory and ``{"arm": {"attention": "sage"}}`` sets it.
+    """
+    nested = req.get("arm")
+    if isinstance(nested, dict):
+        return {str(key): value for key, value in nested.items()}
+    arm = {key: req[key] for key in _ARM_KEYS if key in req}
+    return arm or None
+
+
 def handle_restart_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
     _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
-    payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0))
+    arm = _arm_from_request(req)
+    payload = manager.restart(timeout_sec=numeric_option(req, "startup_timeout_sec", 60.0), arm=arm)
     invalidate_comfy_object_info("comfy runtime restarted")
+    # A restart that changes which build is running invalidates optimization provenance too, for
+    # the same reason it invalidates /object_info: the CACHE this guards
+    # (optimization_provenance._CACHE) is a probe of the RUNNING process, and a restart replaces
+    # that process. Task 1 added this function and nothing called it -- an uninvalidated cache means
+    # every A/B row after the first restart would carry the PREVIOUS arm's provenance while looking
+    # complete, which is worse than recording no provenance at all.
+    invalidate_optimization_provenance("comfy runtime restarted")
     return _runtime_message("comfy_runtime_ack", "restart_comfy_runtime", payload)
 
 

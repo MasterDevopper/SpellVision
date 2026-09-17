@@ -727,15 +727,29 @@ def _module_name(path: Path) -> str:
     return name[: -len(".__init__")] if name.endswith(".__init__") else name
 
 
-def _import_edges(name: str, tree: ast.Module) -> set[str]:
+def _import_edges(name: str, tree: ast.Module, *, is_package: bool = False) -> set[str]:
     """Every module this one imports, with RELATIVE imports resolved.
 
     Resolving them is the whole correctness of this rule. The first version of this sweep skipped
     `node.level` and reported `video_adapters/ltx_adapter.py` as unreachable -- a live adapter,
     reached only by `from .ltx_adapter import LtxVideoAdapter` in its sibling registry, and one
     deletion away from being removed on the strength of a green sweep.
+
+    A second version got `node.level` right and the CALLER wrong. `_module_name` reduces
+    `model_intelligence/__init__.py` to `"model_intelligence"` -- a name with no dot in it -- so
+    `name.rsplit(".", 1)[0] if "." in name else ""` fell to the empty-string branch and treated a
+    package's own `__init__.py` as having no package. `level == 1` inside `pkg/__init__.py` means
+    THE PACKAGE ITSELF (`from .hashing import x` -> `pkg.hashing`), not its parent -- the same rule
+    that already applied correctly to `pkg/mod.py` (where `level == 1` means the CONTAINING
+    package). Passing `pkg=""` turned `from .hashing import thing` into the edge `.hashing`, a
+    leading-dot string that matches no module in the graph, and the edge was silently dropped. A
+    module reached ONLY through a relative import from its package's `__init__.py` read as
+    unreachable -- and the rule's "N modules reachable" count was never the true count, because an
+    entire import form (relative-from-`__init__`) was invisible to it while it kept reporting
+    green. `is_package` is how the caller tells this function the fact `_module_name` had already
+    thrown away, rather than trying to re-derive it from a name that no longer carries it.
     """
-    pkg = name.rsplit(".", 1)[0] if "." in name else ""
+    pkg = name if is_package else (name.rsplit(".", 1)[0] if "." in name else "")
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -756,11 +770,19 @@ def _import_edges(name: str, tree: ast.Module) -> set[str]:
 def _reachable_modules() -> set[str]:
     """Computed once for the whole tree; the per-file check just asks whether it is in the set."""
     trees: dict[str, ast.Module] = {}
+    # Which names are a package's own __init__.py -- `_module_name` already stripped the literal
+    # ".__init__" off these, so this is the only place that fact survives. `_import_edges` needs it
+    # to resolve `level == 1` correctly (see its docstring).
+    packages: set[str] = set()
     for path in sources.python_sources():
         try:
-            trees[_module_name(path)] = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, SyntaxError):
             continue
+        name = _module_name(path)
+        trees[name] = tree
+        if path.stem == "__init__":
+            packages.add(name)
 
     # A module named in an IMPORT STATEMENT of a test or script is an entry too. Matched as an
     # import rather than as a bare word: `base` and `registry` appear in ordinary prose, and a
@@ -788,7 +810,7 @@ def _reachable_modules() -> set[str]:
         if cur in seen or cur not in trees:
             continue
         seen.add(cur)
-        for dep in _import_edges(cur, trees[cur]):
+        for dep in _import_edges(cur, trees[cur], is_package=cur in packages):
             parts = dep.split(".")
             for i in range(len(parts), 0, -1):
                 cand = ".".join(parts[:i])
@@ -2509,6 +2531,435 @@ R_PROGRESS_NOT_INVENTED = Rule(
 )
 
 
+# --- R32: a sampling default is data, not a C++ literal (spec docs/superpowers/specs/2026-09-15-t2-t6-completion-design.md 2) ---
+
+# W2 deleted applyOptimalVideoSamplingDefaults' wan/ltx/flux3 blocks, which set steps, CFG, shift,
+# frames and fps from C++ literals while the Python operating-point table held its own answers for
+# the same families. They had already drifted: the table says wan is CFG 4.0 on euler, the C++ said
+# 5.0 on uni_pc, so the cockpit showed a pair the render was never going to use. One table, and the
+# C++ applies whatever it is handed.
+#
+# LITERALS ONLY. `spin->setValue(settings.value("steps").toInt())` is the correct implementation and
+# must not trip this -- the rule matches a bare number at the call site and nothing else. That is a
+# narrower rule than its name suggests and the narrowness is deliberate: a rule that also flagged
+# computed writes would block the very code this wave exists to produce, and would then be widened
+# by exemption until it measured nothing.
+# The CANVAS is in the list, and the SAMPLER is matched by a second pattern. Both were missing, and
+# the rule's own citation names them: a plant of the deleted function's exact shape --
+# `widthSpin_->setValue(832); heightSpin_->setValue(480);
+# selectComboValue(videoSamplerCombo(), QStringLiteral("uni_pc"))` -- scored ZERO violations. A
+# ratchet blind to two of the three forms of the thing it is named after is not holding the deletion
+# in place; it is describing it.
+_SAMPLING_WIDGET = (
+    r"(?:stepsSpin|cfgSpin|highNoiseStepsSpin_|lowNoiseStepsSpin_|splitStepSpin_|"
+    r"highNoiseShiftSpin_|lowNoiseShiftSpin_|frameCountSpin_|fpsSpin_|shiftSpin_|"
+    r"widthSpin_|heightSpin_)"
+)
+_LITERAL_SAMPLING_WRITE = re.compile(
+    _SAMPLING_WIDGET + r"(?:\s*\(\s*\))?\s*->\s*setValue\s*\(\s*(-?\d+(?:\.\d+)?)\s*\)"
+)
+# `selectComboValue(<a sampling combo>, QStringLiteral("euler"))`. STILL LITERALS ONLY: the correct
+# implementation is `selectComboValue(target, sampler)` where `sampler` came from the answer, and
+# that has no QStringLiteral at the call site, so it cannot trip this. The combo is named by what it
+# IS (samplerCombo / schedulerCombo, with or without the video prefix and with or without the
+# `sampling_->` accessor) rather than by which file it lives in.
+_SAMPLING_COMBO = r"(?:video)?(?:[Ss]ampler|[Ss]cheduler)Combo"
+_LITERAL_SAMPLER_WRITE = re.compile(
+    r"selectCombo(?:Value|ByContains)\s*\(\s*[^,()]*" + _SAMPLING_COMBO
+    + r"[^,]*,\s*QStringLiteral\s*\(\s*\"([^\"]*)\"\s*\)"
+)
+
+
+def _check_sampling_defaults_are_data(path: Path, text: str) -> list[Violation]:
+    out: list[Violation] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith(("//", "*", "#")):
+            continue
+        for pattern, kind in ((_LITERAL_SAMPLING_WRITE, "value"), (_LITERAL_SAMPLER_WRITE, "sampler")):
+            for match in pattern.finditer(line):
+                out.append(Violation(
+                    path=path, line=number,
+                    key=f"{_enclosing_cpp_function(text, match.start())}:{match.group(0).replace(' ', '')}",
+                    detail=f"literal sampling {kind} default in C++: {match.group(0)}",
+                ))
+    return out
+
+
+R_SAMPLING_DEFAULTS_ARE_DATA = Rule(
+    name="sampling-defaults-are-data",
+    citation=(
+        "applyOptimalVideoSamplingDefaults held wan 28/5.0/uni_pc, ltx 30/3.5/49 and flux3 24/120 "
+        "as C++ literals duplicating the operating-point table -- and had drifted from it, so the "
+        "cockpit showed a CFG the render would not use. Sampling numbers live in the table the "
+        "worker resolves from; the C++ applies what it is handed. "
+        "WHAT IT SEES: a bare number written into one of the named sampling or canvas spin boxes, "
+        "and a QStringLiteral sampler/scheduler pushed into one of the sampling combos -- all three "
+        "forms the deleted function used. Widened 2026-09-16 after a plant of that function's exact "
+        "shape scored zero: the canvas and the sampler it names were both invisible to it. "
+        "WHAT IT CANNOT SEE: a literal reached through a variable (const int w = 832; "
+        "widthSpin_->setValue(w);), a number in a table this file does not name, or anything "
+        "outside qt_ui. The narrowness is deliberate -- a rule that also flagged COMPUTED writes "
+        "would block the very code this wave exists to produce, and would then be widened by "
+        "exemption until it measured nothing."
+    ),
+    select=sources.cpp_sources,
+    check=_check_sampling_defaults_are_data,
+)
+
+
+# --- R33: every field applyResolvedSettings WRITES is a field watchForUserEdits WATCHES ------------
+
+# The ledger recorded ruling W2-E3 -- "one user-edit flag per field the wave writes" -- as satisfied.
+# It was not: applyResolvedSettings wrote highNoiseStepsSpin_, lowNoiseStepsSpin_ and splitStepSpin_
+# and watchForUserEdits connected none of them, so a deliberate asymmetric MoE split (20 high / 8
+# low) was reset to 14/14 by the next Simple/Advanced toggle.
+#
+# Adding the three connections fixes today. This makes it structural, because the next person adding
+# a field to the applier has no way to remember a list they have never read: the rule pairs the two
+# function bodies and fails when the first writes a spin box the second does not connect.
+#
+# SPIN BOXES ONLY. The combos are written through locals (samplerTarget, chosen by mode) and are
+# covered by tests instead; matching a local's name here would mean tracking assignments, which is a
+# dataflow question and would make this rule lie in both directions.
+_RESOLVED_WRITE = re.compile(r"(?:(\w+_)|sampling_->(\w+)\(\))\s*->\s*setValue\s*\(")
+# The sampling_-> form is tried FIRST. The other way round, `(\w+_)` matched the `sampling_` in
+# `sampling_->stepsSpin()` and the rule reported steps and CFG -- the two fields that have been
+# watched since the day the function was written -- as unwatched.
+_WATCH_CALL = re.compile(r"watch(?:Spin|Double)\s*\(\s*(?:sampling_->(\w+)\(\)|(\w+_))")
+
+
+def _cpp_function_body(text: str, signature: str) -> str:
+    """The braced body of one function, by a fragment of its definition line. "" when absent."""
+    start = text.find(signature)
+    if start < 0:
+        return ""
+    open_brace = text.find("{", start)
+    if open_brace < 0:
+        return ""
+    depth = 0
+    for index in range(open_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace:index + 1]
+    return ""
+
+
+def _check_resolved_fields_are_watched(path: Path, text: str) -> list[Violation]:
+    applier = _cpp_function_body(text, "::applyResolvedSettings(")
+    if not applier:
+        return []
+    watcher = _cpp_function_body(text, "::watchForUserEdits(")
+    watched = {(a or b) for a, b in _WATCH_CALL.findall(watcher)}
+    base_line = text[:text.find(applier)].count("\n") + 1
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for offset, line in enumerate(applier.splitlines()):
+        if line.strip().startswith(("//", "*")):
+            continue
+        for a, b in _RESOLVED_WRITE.findall(line):
+            widget = a or b
+            if widget in watched or widget in seen:
+                continue
+            seen.add(widget)
+            out.append(Violation(
+                path=path, line=base_line + offset,
+                key=f"applyResolvedSettings:{widget}",
+                detail=(f"applyResolvedSettings writes {widget} but watchForUserEdits does not watch "
+                        "it -- a value the user set there is silently overwritten"),
+            ))
+    return out
+
+
+R_RESOLVED_FIELDS_ARE_WATCHED = Rule(
+    name="resolved-fields-are-watched",
+    citation=(
+        "Ruling W2-E3 is one user-edit flag per field the wave writes, and the ledger recorded it "
+        "as satisfied while three fields had none: applyResolvedSettings wrote the wan dual-noise "
+        "high/low/split spins and watchForUserEdits watched none of them, so a hand-set 20/8 MoE "
+        "handoff was reset to 14/14 by the next Simple/Advanced toggle. This pairs the two function "
+        "bodies so the pairing is a property rather than a list someone has to remember. "
+        "WHAT IT CANNOT SEE: the sampler/scheduler COMBOS, which the applier writes through a "
+        "mode-chosen local -- following that would be dataflow, and a rule that guessed at it would "
+        "be wrong in both directions. Those are held by tests/cpp/test_model_defaults_apply.cpp."
+    ),
+    select=sources.cpp_sources,
+    check=_check_resolved_fields_are_watched,
+)
+
+
+# --- R34: every dict that records generation_time_sec also records optimizations -------------------
+
+# None of the 59 keys in video_history.jsonl matched atten|sage|sdpa|accel|teacache|tiling|fp16|comfy
+# -- the stopwatch (generation_time_sec) was written to THREE places (the per-render metadata
+# sidecar, job_archive.json via JobResult, and video_history.jsonl derived from it) and none of them
+# named which build produced the number. The one published A/B on this project (Doc 55, sage vs
+# SDPA on krea2) is distinguishable solely because a human typed "t4_sage"/"t4_sdpa" into two output
+# filenames -- and job_archive.json held a THIRD arm nobody mentioned, at 159.27s against the quoted
+# 120.72s, smaller than the variance between two runs of the SAME arm.
+#
+# Scoped to the dict LITERAL, not to worker_metadata.py by name: fixing the one function that
+# happened to be cited was not enough on this tree -- job_archive.json and video_history.jsonl turned
+# out to read generation_time_sec from a SEPARATE dict (the runner's own "ok": True payload, and
+# JobResult built from it) that build_metadata_payload's fix never touched. A rule naming one file
+# would have missed exactly the two places the motivating defect actually lived in.
+
+
+def _check_argv_named(path: Path, text: str) -> list[Violation]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {
+            key.value for key in node.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        if "generation_time_sec" not in keys or "optimizations" in keys:
+            continue
+        out.append(Violation(
+            path=path,
+            line=node.lineno,
+            key=_enclosing_function(tree, node.lineno),
+            detail=(
+                "records generation_time_sec with no optimizations field beside it -- a seconds "
+                "figure with no recorded arm is not evidence, only a filename someone typed by hand"
+            ),
+        ))
+    return out
+
+
+R_ARGV_NAMED = Rule(
+    name="every-render-names-its-argv",
+    citation=(
+        "generation_time_sec and steps_per_sec were recorded on every render, twice over -- "
+        "job_archive.json and video_history.jsonl -- and none of the 59 history keys named which "
+        "ComfyUI build, attention backend or fast-math flag produced the number. The only published "
+        "A/B on this project (Doc 55, sage vs SDPA on krea2) is distinguishable solely because a "
+        "human typed t4_sage/t4_sdpa into two output filenames, and the archive holds a third arm "
+        "nobody mentioned at 159.27s against the quoted 120.72s -- smaller than the variance "
+        "between two runs of the SAME arm. A seconds figure with no arm recorded beside it is not "
+        "evidence."
+    ),
+    select=sources.python_sources,
+    check=_check_argv_named,
+)
+
+
+# --- R35: one answer to "what kind of generation is this workflow" --------------------------------
+
+# Three C++ functions derived it independently -- the launch controller's, HomePage's and
+# WorkflowLibraryPage's -- and the Home one ended in a loop over the FILE PATH looking for "i2v",
+# "t2v", "i2i", "t2i" as substrings, then returned t2i regardless. A workflow whose classification
+# failed was therefore routed by its filename onto a page whose graph it does not belong to, and
+# nothing said so: the cockpit just looked wrong. The worker already answers this properly, from what
+# the graph OUTPUTS, and that answer reaches the UI as inferred_task_command and
+# capability_report.primary_task.
+#
+# WHAT IT SEES: a function that both names a workflow-classification key AND produces a mode id as a
+# LITERAL -- returned, or assigned. That pair is what "deriving a mode from a profile" looks like in
+# C++, and it is what all three of the merged resolvers did.
+#
+# WHAT IT CANNOT SEE: a derivation that goes through a variable or a table the function does not
+# spell, and a derivation written in Python. The narrowness is deliberate in both directions. A rule
+# that fired on any mode literal anywhere would flag every mode COMPARISON in the tree -- isImageMode,
+# the rail specs, the page switch -- and would then be widened by exemption until it measured
+# nothing. A rule that fired on any classification-key read would flag the two pages that
+# legitimately DISPLAY a workflow's task.
+_CLASSIFICATION_KEYS = (
+    "inferred_task_command",
+    "primary_task",
+    "user_task_override",
+    "task_override",
+    "workflow_task_command",
+    "task_command",
+    "task_type",
+)
+_MODE_LITERALS = ("t2i", "i2i", "t2v", "i2v", "v2v")
+# PRODUCED, not merely mentioned: `return QStringLiteral("t2i");` and `modeId = QStringLiteral("i2v");`
+# are derivations. `normalizedModeId(x) != QStringLiteral("v2v")` and a rail spec listing them are not.
+_MODE_PRODUCED = re.compile(
+    r"(?:\breturn\s+|=\s*)"
+    r"(?:QStringLiteral|QLatin1String|QString::fromLatin1)?\s*\(?\s*"
+    r"\"(" + "|".join(_MODE_LITERALS) + r")\"\s*\)?\s*;"
+)
+# The other half of the same defect, and the one Shape A could not see: no mode literal at all, the
+# classification keys read straight into something named for a mode. `record.modeId =
+# normalizedModeId(safeObjectString(object, {"mode_id", "task", "mode", "task_command"}))`.
+# An ASSIGNMENT specifically -- `profile.insert(QStringLiteral("task_command"), record.modeId)` writes
+# the answer out rather than deriving it, and flagging that would make the rule lie about every site
+# that merely carries a mode somewhere.
+_MODE_ASSIGNED = re.compile(
+    r"([A-Za-z_][\w.:>-]*(?:[Mm]odeId|[Tt]askCommand|[Pp]rimaryTask))\s*=[^=]"
+)
+_CPP_SIGNATURE = re.compile(
+    r"^[A-Za-z_][\w:<>,&*~\s]*?([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?$"
+)
+
+
+def _cpp_functions(text: str) -> list[tuple[str, int, str]]:
+    """(name, 1-based start line, body) for every brace-balanced definition in a C++ file.
+
+    Crude on purpose -- there is no C++ AST here. Anything it mis-parses is simply not reported,
+    which is the safe direction for a ratchet: it may miss a site, it cannot invent one.
+    """
+    out: list[tuple[str, int, str]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].rstrip()
+        candidate = stripped[:-1].rstrip() if stripped.endswith("{") else stripped
+        match = _CPP_SIGNATURE.match(candidate)
+        opens = stripped.endswith("{") or (index + 1 < len(lines) and lines[index + 1].strip() == "{")
+        if not match or not opens:
+            index += 1
+            continue
+        start = index
+        depth = 0
+        seen_open = False
+        body: list[str] = []
+        while index < len(lines):
+            depth += lines[index].count("{") - lines[index].count("}")
+            seen_open = seen_open or "{" in lines[index]
+            body.append(lines[index])
+            index += 1
+            if seen_open and depth <= 0:
+                break
+        out.append((match.group(1), start + 1, "\n".join(body)))
+    return out
+
+
+def _check_one_workflow_mode_resolver(path: Path, text: str) -> list[Violation]:
+    if sources.WORKFLOW_MODE_RESOLVER in path.name:
+        return []
+
+    out: list[Violation] = []
+    for name, line, body in _cpp_functions(text):
+        if not any(key in body for key in _CLASSIFICATION_KEYS):
+            continue
+
+        # Shape A -- HomePage's: the function spells the mode out itself. `return QStringLiteral("t2i");`
+        produced = sorted(set(_MODE_PRODUCED.findall(body)))
+
+        # Shape B -- WorkflowLibraryPage's: no literal anywhere, the classification keys are read
+        # straight into something called a mode. Shape A alone scored ZERO on that file, which is
+        # why this half exists: two of the three merged resolvers did not look alike.
+        assigned = sorted({
+            match.group(1)
+            for statement in body.split(";")
+            if any(key in statement for key in _CLASSIFICATION_KEYS)
+            for match in [_MODE_ASSIGNED.search(statement)]
+            if match
+        })
+
+        if not produced and not assigned:
+            continue
+
+        did = []
+        if produced:
+            did.append("produces " + ", ".join(produced))
+        if assigned:
+            did.append("reads them into " + ", ".join(assigned))
+        out.append(Violation(
+            path=path, line=line, key=name,
+            detail=(f"{name}() derives a workflow's mode itself ({'; '.join(did)}) -- ask "
+                    f"{sources.WORKFLOW_MODE_RESOLVER}::modeResolution() instead, which refuses "
+                    "with a reason where this will guess"),
+        ))
+    return out
+
+
+R_ONE_WORKFLOW_MODE_RESOLVER = Rule(
+    name="one-workflow-mode-resolver",
+    citation=(
+        'Three C++ sites answered "what kind of generation is this workflow" independently, and '
+        "HomePage::inferModeFromWorkflowProfile answered it by matching t2i/i2i/t2v/i2v as "
+        "SUBSTRINGS OF THE FILE PATH and then returning t2i regardless -- so a workflow whose "
+        "classification failed opened a cockpit chosen by its filename, holding a graph that does "
+        "not belong there, silently. Four of the 88 imported profiles in this tree are v2v and every "
+        'one of them displayed as T2V, because media_type said "video". The worker already decides '
+        "this by what the graph OUTPUTS rather than by node family; the UI consumes that verdict and "
+        "refuses with a reason when there is none, because landing someone on a plausible wrong page "
+        "is worse than refusing. WHAT IT CANNOT SEE: a derivation through a variable or a table the "
+        "function does not spell, and the Python side."
+    ),
+    select=sources.cpp_sources,
+    check=_check_one_workflow_mode_resolver,
+)
+
+
+
+# --- R36: the second machine is data, not a literal ----------------------------------------------
+
+# Two spellings of "a ComfyUI endpoint written into the program". The port catches a local one, the
+# private-range prefix catches the second machine -- which is how it got in: 192.168.1.127 appeared
+# in ManagerPage.cpp twice, once as label text and once as the URL of a QNetworkAccessManager GET.
+_ENDPOINT_LITERAL = re.compile(r"192\.168\.\d{1,3}\.\d{1,3}|(?<![\w.])8188(?![\w.])")
+# The resolver is allowed to name what it resolves between, identified by DEFINING the profile --
+# the same way the output-locality rule identifies its resolver by defining its predicate, so
+# renaming or moving the file cannot silently switch the rule off.
+_ENDPOINT_RESOLVER = re.compile(r"struct RuntimeProfile$|RuntimeProfile RuntimeProfile::load\s*\(", re.MULTILINE)
+
+
+def _check_hardcoded_endpoint_literal(path: Path, text: str) -> list[Violation]:
+    """A ComfyUI host or port written into the C++ instead of resolved.
+
+    The second machine used to be a string literal in ``ManagerPage.cpp``: line 291 printed
+    "192.168.1.127:8188 SpellNode" into a QLabel and line 675 issued a GET at the same host spelled
+    again, so the app could not be pointed at a different machine without a rebuild, and nothing
+    outside that page could ask what endpoints existed at all. Its health was then read back out of
+    ANOTHER label's text.
+
+    Endpoints are ``runtime/endpoints`` in QSettings now, resolved through ``EndpointRegistry``, and
+    the local one comes from ``RuntimeProfile`` -- which is the single site allowed to name a host or
+    a port, because a resolver has to name the things it resolves between.
+
+    WHAT IT CANNOT SEE: a host assembled from parts, a port read from a variable, and the Python
+    side (``comfy_endpoint.py`` names 127.0.0.1:8188 deliberately, as ITS resolver).
+    """
+    if _ENDPOINT_RESOLVER.search(text):
+        return []
+    out: list[Violation] = []
+    for index, line in enumerate(text.split(chr(10)), start=1):
+        stripped = line.strip()
+        if stripped.startswith(("//", "*", "/*")):
+            continue
+        match = _ENDPOINT_LITERAL.search(line)
+        if not match:
+            continue
+        out.append(Violation(
+            path=path,
+            line=index,
+            key=f"endpoint:{match.group(0)}",
+            detail=(f"names a ComfyUI endpoint ({match.group(0)}) in the C++ -- ask "
+                    "EndpointRegistry, whose local entry comes from RuntimeProfile"),
+        ))
+    return out
+
+
+R_HARDCODED_ENDPOINT = Rule(
+    name="no-hardcoded-endpoint-literal",
+    citation=(
+        "The second machine was a string literal. ManagerPage.cpp printed "
+        "\"192.168.1.127:8188 SpellNode\" into a QLabel and, three hundred lines later, issued a "
+        "QNetworkAccessManager GET at the same host spelled a second time -- so SpellVision could "
+        "only ever talk to ONE other computer, the one whose IP a developer had typed, and pointing "
+        "it at another needed a rebuild. The reply handler then decided whether the LOCAL master was "
+        "healthy by reading another QLabel's text for \"healthy=yes\", which is a fact stored in a "
+        "widget. Endpoints are QSettings data now; the only site allowed to name a host or a port is "
+        "the resolver that owns the local one."
+    ),
+    select=sources.cpp_sources,
+    check=_check_hardcoded_endpoint_literal,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2541,6 +2992,11 @@ ALL_RULES: tuple[Rule, ...] = (
     R_LAYOUT_SWITCH_IS_NOT_A_REBUILD,
     R_NO_BLOCKING_WAIT,
     R_PROGRESS_NOT_INVENTED,
+    R_SAMPLING_DEFAULTS_ARE_DATA,
+    R_RESOLVED_FIELDS_ARE_WATCHED,
+    R_ARGV_NAMED,
+    R_ONE_WORKFLOW_MODE_RESOLVER,
+    R_HARDCODED_ENDPOINT,
 )
 
 

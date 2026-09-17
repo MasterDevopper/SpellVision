@@ -699,6 +699,29 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
         if command == "classify_models":
             emitter.emit(ws.handle_classify_models_command(req))
             return
+        if command in {
+            "model_intel_get",
+            "model_intel_refresh",
+            "model_intel_cancel",
+            "model_intel_set_user",
+            "model_recommended_settings",
+            "model_roots_status",
+        }:
+            import model_intelligence_commands as mic
+
+            if command == "model_intel_refresh":
+                emitter.emit(mic.handle_model_intel_refresh_command(req, emitter))
+            elif command == "model_intel_cancel":
+                emitter.emit(mic.handle_model_intel_cancel_command(req))
+            elif command == "model_intel_get":
+                emitter.emit(mic.handle_model_intel_get_command(req))
+            elif command == "model_intel_set_user":
+                emitter.emit(mic.handle_model_intel_set_user_command(req))
+            elif command == "model_recommended_settings":
+                emitter.emit(mic.handle_model_recommended_settings_command(req))
+            else:
+                emitter.emit(mic.handle_model_roots_status_command(req))
+            return
         if command == "resolve_component_stack":
             emitter.emit(_ws().handle_resolve_component_stack_command(req))
             return
@@ -782,6 +805,16 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
             return
         if command == "install_recommended_video_nodes":
             emitter.emit(ws.handle_install_recommended_video_nodes_command(req))
+            return
+        if command == "optimization_results":
+            import optimization_commands
+
+            emitter.emit(optimization_commands.handle_optimization_results_command(req))
+            return
+        if command == "endpoint_capability":
+            import endpoint_commands
+
+            emitter.emit(endpoint_commands.handle_endpoint_capability_command(req))
             return
         if command == "resolve_missing_models":
             import model_resolution_commands

@@ -180,6 +180,9 @@ runtime/proofs/
 runtime/state/
 runtime/style/
 runtime/tmp_inpaint_smoke/
+# The optimization harness's own plates: one matrix run writes dozens of PNG/MP4 whose only purpose
+# is to be measured. The measurement itself lives in runtime/state/optimization_results.jsonl.
+runtime/optimization_renders/
 
 # Local secrets + smoke-test caches. Never commit.
 **/credentials.json

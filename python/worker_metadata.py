@@ -18,7 +18,8 @@ from history_schema import attach_mode_payload
 from worker_service_state import JobRecord, JobState, utc_now_iso
 from comfy_graph_helpers import _first_nonempty_text
 from worker_durable_state import worker_state_root
-from worker_runtime import runtime_prep_metadata
+from worker_runtime import CAST_FP32_TO_FP16, runtime_prep_metadata
+import optimization_provenance
 
 VIDEO_OUTPUT_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif"}
 VIDEO_COMMANDS = {"t2v", "i2v", "v2v", "ti2v", "video"}
@@ -317,6 +318,7 @@ def build_history_entry(job: "JobRecord", request_snapshot: dict[str, Any]) -> d
         "backend_name": result.get("backend_name"),
         "detected_pipeline": result.get("detected_pipeline"),
         "generation_time_sec": result.get("generation_time_sec"),
+        "optimizations": result.get("optimizations"),
         "source_job_id": job.source_job_id,
         "retry_count": job.retry_count,
         "affinity_signature": _ws().affinity_signature_for_request(request_snapshot),
@@ -621,6 +623,55 @@ def sampling_provenance_from_graph(graph: Any) -> dict[str, Any]:
     return {"applied": False}
 
 
+# Native-video families whose sampling actually runs through the kijai wrapper nodes
+# (WanVideoModelLoader / HyVideoModelLoader), which call sageattn THEMSELVES and so read their own
+# per-request "attention_mode" rather than ComfyUI's global --use-sage-attention flag. Recording
+# native_video_graphs._wrapper_attention_mode's answer only for these families keeps a diffusers or
+# LTX/Mochi render from claiming a wrapper setting that never applied to it.
+_WRAPPER_ATTENTION_FAMILIES = frozenset({"wan", "hunyuan_video"})
+
+
+def _optimizations_block(req: dict[str, Any]) -> dict[str, Any]:
+    """Which build, and which switches, actually produced this render.
+
+    Two request-side switches the app can already see are folded in alongside the probed argv:
+    ``vae_tiling`` (what the request asked ComfyUI's decode node to do) and ``fp16_cast`` (the
+    diffusers cast, not per-request today, but still worth recording per render in case that
+    changes). ``wrapper_attention_mode`` is populated only for the families whose kijai wrapper
+    nodes actually consult it -- see ``_WRAPPER_ATTENTION_FAMILIES``.
+
+    Never raises: a probe failure must degrade the block, not the render.
+    """
+    try:
+        from comfy_endpoint import comfy_endpoint
+
+        provenance = optimization_provenance.probe(comfy_endpoint(req))
+    except Exception as exc:  # noqa: BLE001 -- telemetry must never break a render
+        provenance = {
+            "comfy_version": None, "comfy_argv": [], "attention_backend": "unknown",
+            "fast_flags": [], "dynamic_vram": None, "reserve_vram_gb": None, "torch": None,
+            "cuda": None, "python": None,
+            "packages": {"sageattention": None, "triton": None, "comfy_kitchen": None, "comfy_aimdo": None},
+            "probed_at": datetime.now().isoformat(), "probe_error": str(exc),
+        }
+
+    wrapper_attention_mode = None
+    if req.get("resolved_native_video_family") in _WRAPPER_ATTENTION_FAMILIES:
+        try:
+            from native_video_graphs import _wrapper_attention_mode
+
+            wrapper_attention_mode = _wrapper_attention_mode(req)
+        except Exception:
+            wrapper_attention_mode = None
+
+    return {
+        **provenance,
+        "vae_tiling": req.get("enable_vae_tiling"),
+        "fp16_cast": CAST_FP32_TO_FP16,
+        "wrapper_attention_mode": wrapper_attention_mode,
+    }
+
+
 def build_metadata_payload(
     req: dict[str, Any],
     image_path: str,
@@ -705,6 +756,9 @@ def build_metadata_payload(
         "generation_time_sec": round(elapsed, 2),
         "steps_per_sec": round(steps_per_sec, 2),
         "cache_hit": cache_hit,
+        # What build made this number. See _optimizations_block -- the arm is read from the
+        # running process's argv, never from what the launcher intended.
+        "optimizations": _optimizations_block(req),
         "job_id": job.job_id if job else req.get("job_id"),
         "state": metadata_state,
         "timestamps": metadata_timestamps,

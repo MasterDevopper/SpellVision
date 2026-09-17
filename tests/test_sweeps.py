@@ -13,6 +13,7 @@ legitimately different carries a REASON rather than being silently out of scope.
 """
 from __future__ import annotations
 
+import ast
 import collections
 import sys
 from pathlib import Path
@@ -219,6 +220,47 @@ def test_the_layout_switch_rule_reads_a_noexcept_definition():
     assert caught == [1, 2, 3, 4], caught
 
 
+def test_the_endpoint_rule_catches_both_spellings_and_spares_the_resolver():
+    """`no-hardcoded-endpoint-literal` ships carrying seven, and a number is only worth what the
+    rule can see.
+
+    Written as a self-test rather than trusted, because the wave that added it had two rules running
+    at once and a rule whose self-test was skipped was caught by a final review with a regex that
+    matched nothing. This one nearly went the same way: the resolver exemption was first written
+    with a ``\b`` that the generator ate, so the rule reported RuntimeProfile.h -- the one file it
+    must not report -- and the count still looked plausible.
+
+    Lines 1-4 must fire: the private-range address that WAS the second machine, the same address as
+    label text, the port in a URL, and the port as a bare argument. Lines 5-7 are the counterweight:
+    a comment (the fix's own citation names the literal, and a rule that read comments would report
+    itself forever), a year-like number that merely contains no boundary, and a version string that
+    happens to hold the digits.
+    """
+    probe = chr(10).join([
+        'QNetworkRequest r(QUrl(QStringLiteral("http://192.168.1.127:8188/system_stats")));',  # 1
+        'label->setText(QStringLiteral("192.168.1.127 SpellNode"));',                          # 2
+        'QUrl url(QStringLiteral("http://127.0.0.1:8188/queue"));',                            # 3
+        'resolveLiveComfyRoot(root, QStringLiteral("127.0.0.1"), 8188);',                      # 4
+        '// it used to GET http://192.168.1.127:8188/system_stats here',                       # 5
+        'const int wide = 81880;',                                                             # 6
+        'const QString v = QStringLiteral("v8188.2");',                                        # 7
+    ])
+    caught = [v.line for v in
+              rules._check_hardcoded_endpoint_literal(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4], caught
+
+    # And the resolver may name what it resolves between, or it stops being one. Identified by
+    # DEFINING the profile, not by its filename -- a rule may not name a file.
+    resolver = chr(10).join([
+        "struct RuntimeProfile",
+        "{",
+        '    QString comfyHost = QStringLiteral("127.0.0.1");',
+        "    quint16 comfyPort = 8188;",
+        "};",
+    ])
+    assert rules._check_hardcoded_endpoint_literal(Path("qt_ui/shell/Probe.h"), resolver) == []
+
+
 def test_the_qss_rule_sees_the_frame_the_style_draws():
     """`qss-draws-a-control` reported zero while five stylesheets painted QFrames.
 
@@ -371,6 +413,38 @@ def test_the_blocking_wait_rule_reports_at_the_planted_line():
     assert caught == [1, 2, 3, 4, 5], caught
 
 
+def test_reachability_resolves_a_relative_import_from_a_packages_own_init():
+    """`_import_edges` got `node.level` right and its caller wrong.
+
+    `_module_name` reduces `model_intelligence/__init__.py` to `"model_intelligence"` -- a name
+    with NO DOT in it. `_import_edges` used to derive the owning package with
+    `name.rsplit(".", 1)[0] if "." in name else ""`, which fell to the empty-string branch for
+    exactly that name. `level == 1` inside a package's own `__init__.py` means the package
+    ITSELF (`from .hashing import x` -> `pkg.hashing`), not its parent, so `pkg=""` turned the
+    edge into `.hashing` -- a leading-dot string matching no module in the graph -- and the real
+    target was silently dropped. A module reached only through a relative import from its
+    package's `__init__.py` read as unreachable, and the rule's count was never the true count:
+    an entire import form was invisible to it while it kept reporting green.
+
+    Two trees, same source text (`from .hashing import thing`), told apart only by `is_package`
+    -- the fact `_module_name` already threw away and the caller now has to hand back in:
+    `pkg/__init__.py`'s edge must land on `pkg.hashing`, and `pkg/mod.py`'s edge (the case the
+    first fix already got right) must still land on `pkg.hashing` too, not on `pkg.mod`'s own
+    non-existent sibling package.
+    """
+    tree = ast.parse("from .hashing import thing\n")
+
+    init_edges = rules._import_edges("model_intelligence", tree, is_package=True)
+    assert "model_intelligence.hashing" in init_edges, init_edges
+    assert not any(e.startswith(".") for e in init_edges), init_edges
+
+    sibling_edges = rules._import_edges("model_intelligence.other", tree, is_package=False)
+    assert "model_intelligence.hashing" in sibling_edges, sibling_edges
+
+    nested_init_edges = rules._import_edges("model_intelligence.sub", tree, is_package=True)
+    assert "model_intelligence.sub.hashing" in nested_init_edges, nested_init_edges
+
+
 def test_the_progress_floor_rule_reports_at_the_planted_line():
     """minimumProgressForRank( is the floor. A comment and a different name stay silent."""
     probe = "\n".join([
@@ -381,3 +455,263 @@ def test_the_progress_floor_rule_reports_at_the_planted_line():
     ])
     caught = [v.line for v in rules._check_progress_not_invented(Path("qt_ui/Probe.cpp"), probe)]
     assert caught == [1], caught
+def test_the_sampling_rule_sees_all_three_forms_of_the_function_it_is_named_after():
+    """Plan Task 7 Step 3's self-test, written the way `_import_edges`' regression test was.
+
+    The rule guards a DELETION: applyOptimalVideoSamplingDefaults' wan/ltx/flux3 blocks, which held
+    sampling numbers duplicating the operating-point table and had already drifted from it. It
+    shipped matching spin-box `setValue` only -- so of the three forms that function used, it saw
+    the numbers and was blind to the CANVAS and to the SAMPLER, both of which its own citation
+    names. The final review planted exactly that function's shape and scored zero violations.
+
+    This is the plant, held in place. Line 1 is the canvas; line 4 is a literal sampler pushed into
+    a video sampler combo; line 5 is a number the rule already caught.
+    """
+    probe = "\n".join([
+        'widthSpin_->setValue(832);',
+        'heightSpin_->setValue(480);',
+        'frameCountSpin_->setValue(49);',
+        'selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("uni_pc"));',
+        'sampling_->cfgSpin()->setValue(5.0);',
+    ])
+    caught = [v.line for v in rules._check_sampling_defaults_are_data(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4, 5], caught
+
+
+def test_the_sampling_rule_still_ignores_a_value_it_was_handed():
+    """LITERALS ONLY, and this is the half that keeps the rule usable.
+
+    The correct implementation -- the one this whole wave exists to produce -- writes what the
+    resolver answered. If the widened rule flagged that, it would be widened back by exemption
+    until it measured nothing, which is the failure mode the exemptions module was written about.
+    A comment, a sampler read from a variable, and an unrelated spin box all stay silent.
+    """
+    probe = "\n".join([
+        'widthSpin_->setValue(width.toInt());',
+        'heightSpin_->setValue(values.value("height").toInt());',
+        'selectComboValue(samplerTarget, sampler);',
+        'selectComboValue(sampling_->videoSamplerCombo(), resolved);',
+        '// widthSpin_->setValue(832);',
+        'selectComboValue(workflowCombo_, QStringLiteral("Default Canvas"));',
+        'denoiseSpin_->setValue(0.55);',
+    ])
+    caught = [v.line for v in rules._check_sampling_defaults_are_data(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [], caught
+
+
+def test_the_watched_fields_rule_fires_on_a_write_with_no_watcher():
+    """`highNoiseStepsSpin_` was written by applyResolvedSettings and watched by nothing, so a
+    hand-set 20/8 MoE split was reset to 14/14 on the next Simple/Advanced toggle -- while the
+    ledger recorded ruling W2-E3 ("one flag per field the wave writes") as satisfied.
+
+    The two bodies are paired here rather than compared to a list, so the next field added to the
+    applier cannot repeat it. `sampling_->stepsSpin()` is the case that first made this rule lie: an
+    earlier alternation matched the `sampling_` in it and reported steps and CFG -- watched since
+    the day the function was written -- as unwatched.
+    """
+    probe = "\n".join([
+        "void ImageGenerationPage::watchForUserEdits()",
+        "{",
+        "    watchSpin(widthSpin_, ResolvedField::Width);",
+        "    watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);",
+        "    watchDouble(sampling_->cfgSpin(), ResolvedField::Cfg);",
+        "}",
+        "",
+        "void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)",
+        "{",
+        "    widthSpin_->setValue(w);",
+        "    sampling_->stepsSpin()->setValue(s);",
+        "    sampling_->cfgSpin()->setValue(c);",
+        "    highNoiseStepsSpin_->setValue(half);",
+        "    lowNoiseStepsSpin_->setValue(half);",
+        "}",
+    ])
+    found = rules._check_resolved_fields_are_watched(Path("qt_ui/Probe.cpp"), probe)
+    assert [v.line for v in found] == [13, 14], [(v.line, v.key) for v in found]
+    assert {v.key for v in found} == {
+        "applyResolvedSettings:highNoiseStepsSpin_",
+        "applyResolvedSettings:lowNoiseStepsSpin_",
+    }
+
+
+def test_the_watched_fields_rule_is_silent_when_every_write_is_watched():
+    probe = "\n".join([
+        "void ImageGenerationPage::watchForUserEdits()",
+        "{",
+        "    watchSpin(widthSpin_, ResolvedField::Width);",
+        "    watchSpin(highNoiseStepsSpin_, ResolvedField::SplitSteps);",
+        "}",
+        "",
+        "void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)",
+        "{",
+        "    widthSpin_->setValue(w);",
+        "    highNoiseStepsSpin_->setValue(half);",
+        "}",
+    ])
+    assert rules._check_resolved_fields_are_watched(Path("qt_ui/Probe.cpp"), probe) == []
+
+
+def test_the_watched_fields_rule_says_nothing_about_a_file_with_no_applier():
+    """Most of qt_ui has neither function. A rule that reported every other file as missing a
+    watcher would be noise with a baseline, which is the shape of a ratchet nobody reads."""
+    assert rules._check_resolved_fields_are_watched(
+        Path("qt_ui/Probe.cpp"), "void Other::thing() { spin_->setValue(3); }") == []
+
+
+def test_the_argv_rule_fires_on_a_dict_with_no_arm():
+    """W3 Task 1's self-test -- required, not optional: W2 shipped a ratchet whose self-test was
+    never written and the final review caught it.
+
+    generation_time_sec with no optimizations beside it is the exact shape of the defect the rule
+    exists to catch: job_archive.json's third, unlabelled sage arm at 159.27s, discovered only
+    because a human happened to notice it -- nothing structural would have.
+    """
+    probe = "\n".join([
+        "def build_payload():",
+        "    return {",
+        '        "ok": True,',
+        '        "generation_time_sec": round(elapsed, 2),',
+        '        "steps_per_sec": round(steps_per_sec, 2),',
+        "    }",
+    ])
+    found = rules._check_argv_named(Path("python/probe.py"), probe)
+    assert [v.line for v in found] == [2], [(v.line, v.key) for v in found]
+    assert found[0].key == "build_payload"
+
+
+def test_the_argv_rule_is_silent_when_the_arm_is_recorded():
+    probe = "\n".join([
+        "def build_payload():",
+        "    return {",
+        '        "generation_time_sec": round(elapsed, 2),',
+        '        "optimizations": _optimizations_block(req),',
+        "    }",
+    ])
+    assert rules._check_argv_named(Path("python/probe.py"), probe) == []
+
+
+def test_the_argv_rule_says_nothing_about_a_dict_with_no_seconds():
+    """A rule that fired on every dict literal would be noise, not a ratchet."""
+    probe = "def other():\n    return {\"ok\": True, \"cache_hit\": False}\n"
+    assert rules._check_argv_named(Path("python/probe.py"), probe) == []
+
+
+def test_the_one_resolver_rule_fires_on_the_filename_guess_it_was_written_from():
+    """W4 Task 1's self-test -- required, not optional: W2 shipped a ratchet whose self-test was
+    never written and the final review caught it.
+
+    This is `HomePage::inferModeFromWorkflowProfile`, restored verbatim. It read the workflow's own
+    task keys, then -- when they said nothing -- looked for "i2v"/"t2v"/"i2i"/"t2i" as SUBSTRINGS OF
+    THE FILE PATH, and then returned t2i regardless. A workflow whose classification failed therefore
+    opened a cockpit chosen by its filename, holding a graph that does not belong there, and nothing
+    told the user: the page just looked wrong.
+
+    Checked against the real deleted function too, not only this probe -- run over `git show
+    HEAD~1:qt_ui/HomePage.cpp` it reports lines 128 and 156, which are the two it was written for.
+    """
+    probe = "\n".join([
+        "QString inferModeFromWorkflowProfile(const QJsonObject &profile)",
+        "{",
+        '    const QString directTask = normalizedModeId(profile.value(QStringLiteral("task_command")).toString());',
+        "    if (!directTask.isEmpty())",
+        "        return directTask;",
+        '    const QString mediaType = profile.value(QStringLiteral("media_type")).toString();',
+        '    if (mediaType == QStringLiteral("video"))',
+        '        return QStringLiteral("t2v");',
+        '    const QString workflowPath = profile.value(QStringLiteral("workflow_path")).toString().toLower();',
+        '    for (const QString &candidate : {QStringLiteral("i2v"), QStringLiteral("t2i")})',
+        "    {",
+        "        if (workflowPath.contains(candidate))",
+        "            return candidate;",
+        "    }",
+        '    return QStringLiteral("t2i");',
+        "}",
+    ])
+    found = rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+    assert [v.line for v in found] == [1], [(v.line, v.key) for v in found]
+    assert found[0].key == "inferModeFromWorkflowProfile"
+    assert "t2i" in found[0].detail and "t2v" in found[0].detail, found[0].detail
+
+
+def test_the_one_resolver_rule_fires_on_a_derivation_that_spells_no_mode_at_all():
+    """The second of the three merged resolvers looked nothing like the first.
+
+    `WorkflowLibraryPage::loadWorkflowRecord` named no mode anywhere -- it read the classification
+    keys straight into `record.modeId` through a normaliser. The literal-only half of this rule
+    scored ZERO on that file, which is exactly the "a plant of the defect's own shape scores zero"
+    result the sampling rule was widened for. So the rule has two halves, and this is the second.
+    """
+    probe = "\n".join([
+        "WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath)",
+        "{",
+        "    WorkflowRecord record;",
+        "    record.modeId = normalizedModeId(safeObjectString(object, {",
+        '        QStringLiteral("mode_id"),',
+        '        QStringLiteral("task_command")',
+        "    }));",
+        "    return record;",
+        "}",
+    ])
+    found = rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+    assert [v.line for v in found] == [1], [(v.line, v.key) for v in found]
+    assert "record.modeId" in found[0].detail, found[0].detail
+
+
+def test_the_one_resolver_rule_is_silent_on_carrying_a_mode_it_did_not_decide():
+    """The false-positive counterweight, and the reason the rule is written this narrowly.
+
+    Writing a mode OUT under a classification key, and COMPARING against one, are things dozens of
+    sites in qt_ui legitimately do -- the launch request builder, isImageMode, the rail specs. A rule
+    that flagged them would be exempted until it measured nothing, which is the shape of a ratchet
+    nobody reads.
+    """
+    probe = "\n".join([
+        "QJsonObject buildLaunchRequest(const WorkflowRecord &record)",
+        "{",
+        "    QJsonObject request;",
+        '    request.insert(QStringLiteral("workflow_task_command"), record.modeId);',
+        '    request.insert(QStringLiteral("task_command"), record.modeId);',
+        '    if (normalizedModeId(record.modeId) != QStringLiteral("v2v"))',
+        '        request.insert(QStringLiteral("draftable"), true);',
+        "    return request;",
+        "}",
+    ])
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe) == []
+
+
+def test_the_one_resolver_rule_says_nothing_about_a_function_that_never_asks():
+    """Most of qt_ui names no classification key at all. A rule that reported every function holding
+    a mode string would be noise with a baseline."""
+    probe = "\n".join([
+        "void MainWindow::switchToMode(const QString &modeId)",
+        "{",
+        '    if (modeId == QStringLiteral("t2i"))',
+        '        currentModeId_ = QStringLiteral("t2i");',
+        "}",
+    ])
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe) == []
+
+
+def test_the_one_resolver_rule_exempts_only_the_resolver_itself():
+    """The owner is allowed to derive a mode -- that is what it is for -- and nothing else is. The
+    owner is named in sources.py, not here, for the same reason no rule may name a file."""
+    probe = "\n".join([
+        "QString derive(const QJsonObject &source)",
+        "{",
+        '    if (!source.value(QStringLiteral("inferred_task_command")).toString().isEmpty())',
+        '        return QStringLiteral("i2v");',
+        '    return QStringLiteral("t2i");',
+        "}",
+    ])
+    owner = sources.ROOT / "qt_ui" / "workflows" / (sources.WORKFLOW_MODE_RESOLVER + ".cpp")
+    assert rules._check_one_workflow_mode_resolver(owner, probe) == []
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+
+
+def test_the_one_resolver_rule_is_at_zero_and_stays_there(findings):
+    """No baseline, and it did not need one: all four live sites were routed through the resolver
+    rather than exempted. Three were the resolvers the wave set out to merge; the fourth --
+    OutputCardModel::buildOutput, which labelled a gallery card by "it is a video file, therefore
+    t2v" -- the rule found, and nothing else had."""
+    assert findings["one-workflow-mode-resolver"] == [], "\n".join(
+        str(v) for v in findings["one-workflow-mode-resolver"])

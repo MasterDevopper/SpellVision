@@ -4,6 +4,11 @@
 #include "generation/OutputPathHelpers.h"
 #include "generation/UpscaleController.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "generation/EndpointRouting.h"
+#include "shell/EndpointProbe.h"
+#include "shell/EndpointRegistry.h"
+#include "shell/RuntimeProfile.h"
+#include "shell/ProjectRoot.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -362,7 +367,18 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
     if (taskRemapped)
         lastAutoPopulatedModel_.clear();
     if (modelChanged)
+    {
         clearGenerationError();
+        // Picking a different checkpoint is a request for THAT checkpoint's settings. Carrying the
+        // previous model's hand-edits across would be the mirror image of the defect the flags
+        // exist to stop: the numbers on screen would belong to a model that is no longer selected.
+        //
+        // The CONTENT-derived marks deliberately survive this. A canvas taken from the image the
+        // user staged is not a stale opinion about the old checkpoint; the image is still staged
+        // and its shape is still the shape they asked for. Only clearContentDerivedFields() --
+        // called when that content itself changes -- drops those.
+        clearUserEditedFields();
+    }
     refreshSelectedModelUi();
     updatePrimaryActionAvailability();
     // A2: resolve the compatible component stack OFF the current signal-handler stack. The worker
@@ -919,9 +935,107 @@ void ImageGenerationPage::applyThemeStyling()
         negativeToggleButton_->setChecked(negativeRow_ && negativeRow_->isVisible());
 }
 
+// "Run on": Auto / this machine / a named endpoint.
+//
+// The row is built HERE, lazily, rather than in buildUi(): buildUi() lives in
+// ImageGenerationPage.cpp, which is over its 3000-line ceiling, and a feature is not a reason to
+// push a file further past a limit it already fails. It is inserted into the Output card's existing
+// layout directly after Prefix.
+//
+// Simple is always Auto. The control is Advanced-only and the STORED value still drives the route,
+// so a page left on SpellNode and then switched to Simple keeps rendering there -- hide-not-delete,
+// the same rule every other Advanced control on this page follows. What Simple does not do is
+// silently change where the job goes.
+void ImageGenerationPage::ensureRunOnRow()
+{
+    const QString projectRoot = spellvision::shell::resolveProjectRoot();
+    const spellvision::shell::RuntimeProfile profile =
+        spellvision::shell::RuntimeProfile::load(projectRoot);
+    const QString localBaseUrl = QStringLiteral("http://%1:%2")
+                                     .arg(profile.comfyHost)
+                                     .arg(profile.comfyPort);
+    const spellvision::shell::EndpointRegistry registry =
+        spellvision::shell::EndpointRegistry::load(localBaseUrl);
+
+    if (!runOnRow_)
+    {
+        if (!prefixRow_ || !prefixRow_->parentWidget())
+            return;
+        auto *card = prefixRow_->parentWidget();
+        auto *cardLayout = qobject_cast<QBoxLayout *>(card->layout());
+        if (!cardLayout)
+            return;
+
+        runOnCombo_ = new spellvision::widgets::ClickOnlyComboBox(card);
+        runOnCombo_->setEditable(false);
+        configureComboBox(runOnCombo_);
+        // A machine name is not a length this page controls, and a long one must not widen the
+        // inspector. Same rule as every other combo in the cockpit.
+        runOnCombo_->setMinimumContentsLength(10);
+
+        runOnRow_ = new QWidget(card);
+        runOnRow_->setObjectName(QStringLiteral("OutputQueueBodyRow"));
+        runOnRow_->setMinimumHeight(30);
+        auto *rowLayout = new QHBoxLayout(runOnRow_);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+        auto *label = new QLabel(QStringLiteral("Run on"), runOnRow_);
+        label->setObjectName(QStringLiteral("CompactFieldLabel"));
+        label->setMinimumWidth(48);
+        label->setMaximumWidth(72);
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+        label->setToolTip(QStringLiteral(
+            "Which machine renders this job.\n\n"
+            "Auto uses the first free machine in Runtime order, so a free local GPU always wins. A "
+            "named machine that cannot run the job is refused before anything is queued."));
+        runOnCombo_->setParent(runOnRow_);
+        runOnCombo_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        rowLayout->addWidget(label);
+        rowLayout->addWidget(runOnCombo_, 1);
+        cardLayout->insertWidget(cardLayout->indexOf(prefixRow_) + 1, runOnRow_);
+
+        connect(runOnCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+            if (!runOnCombo_)
+                return;
+            spellvision::generation::persistRunOnChoice(modeKey(),
+                                                        runOnCombo_->currentData().toString());
+        });
+    }
+
+    const QString stored = spellvision::generation::persistedRunOnChoice(modeKey());
+    const QSignalBlocker blocker(runOnCombo_);
+    runOnCombo_->clear();
+    runOnCombo_->addItem(QStringLiteral("Auto"), spellvision::generation::autoEndpointChoice());
+    for (const spellvision::shell::Endpoint &endpoint : registry.entries())
+        runOnCombo_->addItem(endpoint.label, endpoint.id);
+    const int index = runOnCombo_->findData(stored);
+    // A stored pick whose endpoint has been removed falls back to Auto HERE, in the picker, so the
+    // user sees it. The routing decision refuses rather than falling back, because by then the
+    // difference between "Auto" and "the machine you asked for" is a job that has already started.
+    runOnCombo_->setCurrentIndex(index >= 0 ? index : 0);
+
+    // Only one endpoint exists on a single-machine install, so the control would be a dropdown with
+    // one real answer. Hidden until there is a choice to make.
+    runOnRow_->setVisible(advanced_ && registry.count() > 1);
+
+    // Keep the picture warm. The refusal at submit time is made on what the endpoints last
+    // answered, and a status nothing ever collected would refuse every remote job as "has not
+    // answered a health check yet" -- correct, fail-closed, and useless.
+    if (registry.count() > 1)
+        spellvision::shell::EndpointProbe::instance().refresh(registry);
+}
+
+QString ImageGenerationPage::runOnEndpointId() const
+{
+    if (runOnCombo_ && runOnCombo_->count() > 0)
+        return runOnCombo_->currentData().toString();
+    return spellvision::generation::persistedRunOnChoice(modeKey());
+}
+
 void ImageGenerationPage::updateDisclosure(bool advanced)
 {
     advanced_ = advanced;
+    ensureRunOnRow();
 
     // Phase 7 step 2: Output-tab raw knobs are Advanced-only (Width / Height / Batch / Prefix);
     // Preset (Quality) stays Simple. HIDE-not-delete -- the rows keep their values and the request
@@ -1656,6 +1770,7 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
     // 2026-09-02: the spin boxes start at 0 and only a preset or a saved value ever set them, so a
     // fresh I2I (even one reached through "Prep for I2I") and a fresh T2V were dead on arrival.
     QSize size = isVideoMode() ? QSize(832, 480) : QSize(1024, 1024);
+    bool fromTheUsersImage = false;
     if (inputImageEdit_)
     {
         const QString inputPath = inputImageEdit_->text().trimmed();
@@ -1665,11 +1780,31 @@ void ImageGenerationPage::ensureCanvasSizeDefault()
             // Video keyframes stay within 1280 on the long edge; images within 2048.
             const QSize fromInput = snapCanvas(source, 16, isVideoMode() ? 1280 : 2048);
             if (fromInput.isValid())
+            {
                 size = fromInput;
+                fromTheUsersImage = true;
+            }
         }
     }
-    widthSpin_->setValue(size.width());
-    heightSpin_->setValue(size.height());
+    {
+        // The mode fallback is the app choosing, so it is guarded and a model may replace it. A
+        // size taken from the image the USER staged is not: they chose that image, its shape is the
+        // shape they asked for, and a checkpoint picked afterwards must not resize their input out
+        // from under them.
+        const ProgrammaticWrite guard(this);
+        widthSpin_->setValue(size.width());
+        heightSpin_->setValue(size.height());
+    }
+    if (fromTheUsersImage)
+    {
+        // markContentDerived, NOT markUserEdited -- and the difference is the whole of this
+        // comment being true. Both used to go into one set, and setSelectedModel cleared that set
+        // on every model change: stage a 1280x720 keyframe on I2V, then pick a wan checkpoint, and
+        // 832x480 was written over the shape of the user's own input. The sentence above was in the
+        // tree, describing a protection the next click removed.
+        markContentDerived(ResolvedField::Width);
+        markContentDerived(ResolvedField::Height);
+    }
 }
 
 QString ImageGenerationPage::readinessBlockReason() const
@@ -1827,6 +1962,10 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
 
 void ImageGenerationPage::clearForm()
 {
+    // Reset is the user asking for a blank page, so the record of what they typed goes with the
+    // values -- otherwise the flags would outlive the numbers and silence the next model.
+    const ProgrammaticWrite guard(this);
+    clearUserEditedFields();
     if (presetCombo_)
         presetCombo_->setCurrentText(QStringLiteral("Balanced"));
 
@@ -2054,6 +2193,10 @@ void ImageGenerationPage::saveSnapshot()
 
 void ImageGenerationPage::restoreSnapshot()
 {
+    // Everything below is the app replaying a saved page, not a human typing into it, so none of it
+    // may mark a field as user-edited. If it did, a returning user would be frozen on last
+    // session's numbers and the model they pick next would never be able to state its own.
+    const ProgrammaticWrite guard(this);
     QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
     // Last-chose sampler/steps/CFG are Advanced memory. Simple must start on the family OP
     // (krea2 raw ≠ turbo). Reading the global toggle — this page group does not store it.

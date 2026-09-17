@@ -14,7 +14,15 @@ def test_full_catalog_refresh_runs_on_immutable_background_inputs() -> None:
         "QString ImageGenerationPage::catalogSignature", 1
     )[0]
     assert "QtConcurrent::run" in refresh
-    assert "[modelsRoot, videoMode]" in refresh
+    # The PROPERTY is what matters: the background task captures immutable scan inputs BY VALUE and
+    # never captures `this`, because the page can die while the scan runs. Pinning the exact capture
+    # list instead made this fail the day a third input was added -- a correct change, reported as a
+    # regression, on a clean tree. Assert what the rule is, not how many things it currently covers.
+    capture = refresh.split("QtConcurrent::run(", 1)[1].split("]", 1)[0] + "]"
+    assert "modelsRoot" in capture
+    assert "videoMode" in capture
+    assert "this" not in capture
+    assert "&" not in capture, f"the scan must capture by value, not by reference: {capture}"
     assert "[this]" not in refresh
     assert "rescanModelCatalog();" not in refresh
 

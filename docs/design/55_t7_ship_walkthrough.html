@@ -134,6 +134,15 @@
       text-transform: uppercase;
     }
     .st { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; }
+    /* The document has carried <p class="warn"> since its first pass with no rule behind it, so
+       every warning in it rendered as an ordinary paragraph. */
+    .warn {
+      border-left: 3px solid var(--warn);
+      background: rgba(232, 178, 58, 0.07);
+      padding: 14px 18px;
+      margin: 20px 0 8px;
+      color: var(--ink);
+    }
     .open { color: var(--warn); }
     .shut { color: var(--ready); }
     .block { color: var(--bad); }
@@ -233,11 +242,11 @@
           <tbody>
             <tr><td>Grade S</td><td class="st open">OPEN</td><td>T2I, I2I, Wan T2V, Wan I2V-following, LTX T2V, Character, Comic, Concept, Dataset dests pictured. Owner: every page × every family, or S is impossible. T1–T6 still not green.</td></tr>
             <tr><td>T1 Train</td><td class="st shut">PARKED 1.1</td><td>External Sohya launcher hidden from v1 rail (`kV1HiddenModes`). In-app trainer is 1.1. `SPELLVISION_SHOW_ALL_MODES=1` still shows it.</td></tr>
-            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>Owner Pro Grade v17 imported 2026-09-12 (<code>krea2-pro-grade-v17</code>, 313 nodes, 15 pack installs, 4 unresolved LC Bypasser). Civitai 2726952. Drop dialog not photographed.</td></tr>
-            <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>Library pictured 2026-09-12 (759 assets). Not Stage-2 LoRA Manager.</td></tr>
-            <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>krea2 T2I cold A/B: sage 120.72s vs SDPA 124.01s (same seed/size/steps). Sage ~3% on this image job. Wan unopt not timed. LTX sage used, not vs unopt.</td></tr>
-            <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>Simple pictured 2026-09-12 on T2V LTX: Frames 81 / FPS 16, Steps/CFG hidden (distilled). Full family×page Simple=OP matrix not proven.</td></tr>
-            <tr><td>T6 Dual-PC</td><td class="st block">NOT GREEN</td><td>Runtime pictured 2026-09-12: Enable Distributed button + SpellNode fail-closed. Pack not on disk until Enable. No VRAM pooling.</td></tr>
+            <tr><td>T2 Drop</td><td class="st open">PARTIAL</td><td>2026-09-17, W4: dropped on the title bar, the rail and Flows; routed to T2I / I2I by classification; cockpit populated from the graph; <strong>dest generated</strong> from a dropped workflow; Download dialog and the v2v refusal photographed; <code>safe_to_submit</code> plant-and-revert proven live. <strong>5 of 90</strong> owner workflows drop-tested, no video, and a first import with missing node packs still times out at 120 s. See T2.</td></tr>
+            <tr><td>T3 Models</td><td class="st open">PARTIAL</td><td>2026-09-17, W5: eleven kind tabs with counts; a LoRA identified live by hash showing its site name, quantisation chip, six fetched pictures and trigger words; a user picture surviving a real refresh; Refresh metadata with progress and cancel. <strong>Only 14 of 759 identified</strong> (a full pass is ~79 min, started for the shot and cancelled). No download or URL drop pictured. Not Stage-2 LoRA Manager.</td></tr>
+            <tr><td>T4 Opts</td><td class="st open">PARTIAL</td><td>2026-09-17: measured, <a href="60_t4_optimization_results.md">Doc 60</a>. <strong>The old ~3% sage claim is WITHDRAWN</strong> &mdash; the archive held an unrecorded third arm at 159.27s, and the first arm of a session runs 7-8% slow after its cold render is discarded. Corrected: sage <strong>&minus;0.3% on krea2 images, &minus;10.2% on LTX video</strong>; <strong>DynamicVRAM off makes LTX 22&times; slower</strong>. Two families measured, not all; wan and hunyuan untimed.</td></tr>
+            <tr><td>T5 Defaults</td><td class="st open">PARTIAL</td><td>2026-09-16, W2: a model's OWN published settings are the default. krea2 house checkpoint lands <strong>10 steps / cfg 1.0</strong> where the family table said 52 / 3.5, in Simple <em>and</em> Advanced, captioned &ldquo;from this model's CivitAI examples &middot; 10 of 10 agree&rdquo;; dest 67.47s against 179.9s. <strong>One page, one family.</strong> clip_skip and guidance are resolved and discarded (no widget). Full family&times;page matrix not proven.</td></tr>
+            <tr><td>T6 Dual-PC</td><td class="st open">PARTIAL</td><td>2026-09-17, W6: <strong>gate PASSED</strong> &mdash; SDXL rendered on the SpellNode 3090 Ti in <strong>80.3s</strong>, dest fetched over <code>/view</code>; capability check cleared a present model and refused an absent one <em>by name</em>. ComfyUI-Distributed <strong>dropped</strong> (it silently falls back to the master when the worker is offline); native routing instead, no pack on either box. <strong>SDXL gated only</strong> &mdash; every other family needs its own gate render there. VRAM still does not pool.</td></tr>
             <tr><td>T7 Walkthrough</td><td class="st open">THIS FILE</td><td>Pictures exist. Ship claim is forbidden until the rows above are green.</td></tr>
           </tbody>
         </table>
@@ -382,6 +391,19 @@
 
       <section id="t4">
         <h2>T4 — optimizations, generate-proven</h2>
+        <p class="warn">
+          <strong>CORRECTED 2026-09-17 — the sage-vs-SDPA figures below are withdrawn.</strong>
+          The full measurement is <a href="60_t4_optimization_results.md">Doc 60</a>. Two things the
+          numbers below could not know: <code>runtime/state/job_archive.json</code> holds a
+          <strong>third arm at 159.27 s</strong> that this section never mentions, so the published
+          gap was smaller than the spread between two runs of the <em>same</em> arm; and the first
+          arm measured in a session runs <strong>7-8% slow</strong> even after its cold render is
+          discarded, which is more than twice the effect being claimed.
+          On a warm baseline SageAttention is worth <strong>−0.3% on krea2 images</strong> (nothing)
+          and <strong>−10.2% on LTX video</strong>. The largest finding in the matrix is not an
+          optimization at all: <strong>LTX with DynamicVRAM disabled is 22× slower</strong>
+          (895.96 s against 40.11 s).
+        </p>
         <p>Sage was installed but not in argv on the adopted Comfy. Restarted with <code>--use-sage-attention</code>. krea2 T2I completed. Dest landed. Cold A/B on the same job (prompt golden-hour landscape, seed 7, 1024×1024, 52/3.5, krea2 utopic v20, Comfy restarted between arms): sage <strong>120.72s</strong> vs SDPA <strong>124.01s</strong>. Sage is ~3% on this image job — not the Wan −25% figure. Do not quote 25% for T2I.</p>
         <figure>
           <img src="55_t7_assets/t4_krea2_dest.png" alt="Dest still from sage krea2 T2I: goblin witch girl, pastel lavender costume">
@@ -410,20 +432,84 @@
 
       <section id="t2">
         <h2>T2 — workflow drop</h2>
-        <p>Drop path no longer auto-submits. Missing node classes and missing models share one dialog. Nothing fetches until <strong>Download</strong>. Keys prompt only when the store is empty; create-key URLs are in the same dialog. Retry stamps <code>civitai_api_key</code> and <code>hf_token</code>. Worker now forwards <code>hf_token</code> (<code>ed673a4</code>).</p>
+        <p>The owner's ask was one sentence: <em>&ldquo;T2 should allow dropping a workflow into the window, load it, then auto-populate it on the correct page.&rdquo;</em> Before W4 none of those three verbs happened. A <code>.json</code> dropped anywhere but a cockpit found no drop target and vanished in silence; one dropped on a cockpit stayed on whatever page the mouse was over; and the draft it produced carried file paths and a warning, with <code>safe_to_submit</code> hard-coded <code>false</code>. W4 landed the window-level drop target, one mode resolver, the draft builder, the coordinator that chains import &rarr; classify &rarr; compile &rarr; draft, and the launch-readiness verdict on the import reply.</p>
+        <p class="muted">This pass drove the built <code>SpellVision.exe</code> through real OLE drag-and-drop (<code>scripts/dev/uia/svdrop.ps1</code> &mdash; a real drag-source window, a real button press, <code>DoDragDrop</code>, and the cursor walked onto the target), against the live worker on :8765 and ComfyUI v0.34.0 on :8188. Every picture below is the window, at 1:1, on this machine, 2026-09-17.</p>
+
+        <h3>Dropped where there is no cockpit</h3>
         <figure>
-          <img src="55_t7_assets/session_flows.png" alt="Flows workflow library 84 imported graphs">
-          <figcaption>2026-09-12 · Flows library · 84 imported · 23 Ready. Not a live drop of an owner workflow JSON.</figcaption>
+          <img src="55_t7_assets/t2_drop_overlay_home.png" alt="Drag-enter overlay over the Home page while the cursor is on the title bar">
+          <figcaption>Home &middot; cursor on the <strong>title bar</strong> &middot; <code>krea2 compact t2i v10.json</code>. &ldquo;Drop to load &hellip; &mdash; SpellVision opens it on the page its graph belongs to.&rdquo; Captured DURING the drag; the overlay does not exist a frame later.</figcaption>
         </figure>
         <figure>
-          <img src="55_t7_assets/session_t2_prograde.png" alt="krea2-pro-grade-v17 in Flows after import">
-          <figcaption>2026-09-12 23:02 · filter krea2-pro · <code>krea2-pro-grade-v17</code> selected · I2I · Missing dependencies · 62 missing nodes · library 85 workflows. Civitai 2726952. Auto-install off. Canvas drop dialog still not photographed.</figcaption>
+          <img src="55_t7_assets/t2_drop_landed_t2i_krea2compact.png" alt="krea2 compact t2i v10 landed on T2I with prompt, checkpoint and LoRA filled in">
+          <figcaption>Landed on <strong>T2I</strong> from a title-bar drop. Prompt, checkpoint <code>loxsUtopicWorldKrea2_v20Quants</code>, LoRA <code>krea2_turbo_lora_rank_64_bf16</code> @ 0.95, 1024&times;1024, 8 steps, cfg 1.0, seed 999999999 &mdash; all out of the owner's graph. Generate is <strong>closed</strong>: readiness found 3 of its 4 models absent.</figcaption>
         </figure>
-        <p class="muted">Owner graph imported 2026-09-12 via <code>import_workflow</code> (same command the T2I drop uses): <code>krea2ProGradeWImageEditStyleTransfer_v17Overhaul.json</code> → slug <code>krea2-pro-grade-v17</code>. 313 nodes. Classified i2i. Node plan: 15 pack install actions, 4 unresolved (<code>LC Bypasser</code>, <code>LC Bypasser Panel</code>, <code>LC Groups Bypasser</code>, <code>LCBypassRelay</code>). Auto-install off. Civitai 2726952. Canvas drop dialog not photographed.</p>
-        <p class="muted">Also imported 2026-09-12: <code>krea2-compact-t2i-v10</code> (Civitai 2773170) — 2 packs installed (<code>D2-nodes-ComfyUI</code>, <code>ComfyUI-Krea2T-Enhancer</code>), classes live after Comfy restart. Remapped house UNET/CLIP/LoRA to this library (<code>krea2_turbo_fp8_scaled</code>, <code>qwen3vl_4b_fp8_scaled</code>, <code>krea2_turbo_lora_rank_64_bf16</code>). <strong>Launch dest landed</strong> ~71s. <code>krea2-character-forge-sheet</code> (Civitai 2877997) imported; 0 missing node classes. Pro Grade run stays 1.1.</p>
         <figure>
-          <img src="55_t7_assets/session_compact_t2i_dest.png" alt="Compact T2I v10 dest after local model remap">
-          <figcaption>2026-09-12 · imported Compact T2I v10 · queue_4ad008770c33 · ~71s · remapped to local turbo krea2 + qwen3vl. Dest exists. Canvas drop dialog still not photographed.</figcaption>
+          <img src="55_t7_assets/t2_drop_overlay_rail.png" alt="Drag-enter overlay over the T2I cockpit while the cursor is on the rail">
+          <figcaption>T2I cockpit &middot; cursor on the <strong>activity rail</strong>, below Prefs, on no button at all &middot; <code>krea2 character forge sheet.json</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_landed_i2i_forgesheet.png" alt="Character forge sheet landed on I2I">
+          <figcaption>Dropped on the rail from T2I, landed on <strong>I2I</strong> &mdash; routed by the graph's classification, not by the page in front. Prompt and checkpoint filled; Generate closed on the i2i gate (&ldquo;Add an input image to generate&rdquo;), which is the page's own requirement, not readiness.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_overlay_flows.png" alt="Drag-enter overlay over the Flows workflow library">
+          <figcaption>Flows &middot; cursor over the workflow library itself &middot; <code>asteral.json</code>. 90 workflows, 24 Ready.</figcaption>
+        </figure>
+
+        <h3>A ready workflow, and a dest</h3>
+        <figure>
+          <img src="55_t7_assets/t2_drop_landed_t2i_asteral_ready.png" alt="asteral landed on T2I with four LoRAs and Generate enabled">
+          <figcaption>Dropped on Flows, landed on <strong>T2I</strong>. Checkpoint <code>nova3DCGXL_ilV70</code>, <strong>four</strong> LoRAs with their weights (2.00 / 2.00 / 1.00 / 0.50), 1080&times;1920, 30 steps, cfg 4.0. Readiness said 5/5 models present, so <strong>Generate is open</strong> and the strip reads &ldquo;Ready to generate.&rdquo; This is the state that did not exist before W4.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_dest_asteral.png" alt="Dest rendered from the dropped workflow">
+          <figcaption>Generate clicked with nothing typed &mdash; the dropped graph's own values. Dest in 23 s, on canvas and in the session strip. The image is a blown-out smear <em>because those are the graph's values</em> (four LoRAs, two at 2.00, cfg 4.0): the draft is faithful, including to choices that make a poor picture. Fidelity proven; quality is the graph's business.</figcaption>
+        </figure>
+
+        <h3>When it needs something, and when it refuses</h3>
+        <figure>
+          <img src="55_t7_assets/t2_drop_download_dialog.png" alt="Download missing dialog listing four LC Bypasser node classes">
+          <figcaption><code>krea2 pro grade v17.json</code> (313 nodes) &middot; &ldquo;Nothing is downloaded until you click Download.&rdquo; &middot; the four <code>LC Bypasser</code> classes this machine does not have. First photograph of this dialog from a real drop &mdash; Doc 55 has said &ldquo;canvas drop dialog not photographed&rdquo; since 2026-09-12.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_declined_landed_i2i.png" alt="Pro Grade v17 opened on I2I after declining the download">
+          <figcaption><strong>Not now</strong> still opens the workflow, on <strong>I2I</strong>, for review. Checkpoint carried. <strong>But the draft is thin</strong>: no prompt, 100&times;100, cfg 0.0 &mdash; the extractor found this graph's checkpoint and nothing else. Landing on the right page with the right model and an empty prompt is not the same as auto-population, and Pro Grade is the owner's headline graph.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_refusal_v2v.png" alt="Refusal naming v2v as having no generation page">
+          <figcaption><code>rife interp.json</code> dropped on the rail. &ldquo;This workflow is classified as v2v, which has no generation page in SpellVision. It can be inspected in Flows, but not opened as a draft.&rdquo; The old Home resolver would have matched the filename and put it on T2I.</figcaption>
+        </figure>
+
+        <h3>The plant: <code>safe_to_submit</code> is the worker's verdict, not a literal</h3>
+        <p>Forced <code>ready = False</code> in <code>_write_recheck_into_profile</code> &mdash; the one function both the import reply and <code>check_workflow_launch_readiness</code> answer from &mdash; restarted the worker, and dropped the workflow that had been Ready twenty minutes earlier. Nothing else changed: same file, same machine, same build.</p>
+        <figure>
+          <img src="55_t7_assets/t2_drop_plant_notready.png" alt="Same workflow with a planted not-ready verdict: Generate greyed">
+          <figcaption>PLANTED &middot; the drop still <strong>lands</strong> and still <strong>populates</strong> &mdash; that is the point, a state you cannot inspect is worse than one you cannot run &mdash; and Generate is grey beside a &ldquo;Resolve workfl&hellip;&rdquo; button, with &ldquo;Readiness &mdash; Resolve workflow draft review items.&rdquo; Clicking Generate queued nothing: Queue stayed 0, status stayed Idle.</figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/t2_drop_plant_reverted_ready.png" alt="Reverted: the same drop is ready to generate again">
+          <figcaption>REVERTED &middot; worker restarted, same file dropped again &middot; Generate open, &ldquo;Ready to generate.&rdquo; &middot; and the click queued a job (Queue: 1 | Running). The gate tracks the verdict in both directions.</figcaption>
+        </figure>
+
+        <h3>What this does NOT prove</h3>
+        <p class="warn">
+          <strong>T2 is not green.</strong> Five of the owner's ninety imported workflows were drop-tested:
+          <code>krea2-compact-t2i-v10</code>, <code>krea2-character-forge-sheet</code>, <code>krea2-pro-grade-v17</code>,
+          <code>asteral-json</code> and <code>rife-interp-json</code> (plus <code>ltx-api-json</code> as a second refusal).
+          The owner's bar is their real workflows drop-tested, and eighty-four of them have not been.
+        </p>
+        <ul class="tight">
+          <li><strong>A first-ever import of a workflow with missing node classes times out in the UI.</strong> The installed-node snapshot shells out to ComfyUI-Manager's <code>cm-cli</code>, measured <strong>128.0 s</strong> cold on this machine against a 120 s request timeout; the drop comes back as &ldquo;the worker did not complete the import.&rdquo; W4 cut two of the three calls (skipped when there is nothing to resolve, cached per ComfyUI &mdash; 0.00 s afterwards), so the <em>second</em> drop of the same workflow works &mdash; which is exactly how the Download dialog above was photographed. The first one still does not. Pictured: <code>t2_drop_import_timeout.png</code>.</li>
+          <li><strong>The Download dialog cannot see a UI graph's missing models.</strong> It is driven by the import's own model plan, and a UI-graph export hides model names in positional <code>widgets_values</code>, so that plan is empty. Readiness now compiles in memory and <em>does</em> see them (that is why krea2-compact's Generate is closed above) &mdash; but the user is told, not offered the download. Only an API-prompt graph reaches the model half of that dialog.</li>
+          <li><strong>A file that is not a workflow at all is not recognised as one.</strong> A hand-written two-key JSON is treated as an API-prompt graph, goes through full dependency resolution, and comes back as the same 120 s timeout rather than &ldquo;this is not a ComfyUI graph.&rdquo; The refusal is honest but it names the wrong cause.</li>
+          <li><strong>Pro Grade v17's draft is a checkpoint and nothing else</strong> (above). The 313-node graph's prompt and sampler are not where the extractor looks.</li>
+          <li><strong>Video was not drop-tested.</strong> Every landing here is t2i or i2i. T2V/I2V routing is asserted in <code>tests/test_workflow_drop_contract.py</code> against <code>wan-simple-t2v-json</code> and <code>wan-simple-i2v-json</code>, not driven in the app.</li>
+          <li><strong>UIA reports Generate as enabled while the app refuses the click.</strong> Under the plant, <code>IsEnabled</code> was <code>True</code> and the click queued nothing. A rig that asserted on that property rather than on the outcome would have read a working gate as broken, or a broken one as working.</li>
+        </ul>
+        <figure>
+          <img src="55_t7_assets/t2_drop_import_timeout.png" alt="Refusal dialog reading the worker did not complete the import">
+          <figcaption>The first-import timeout, in its own words. This is what a drop of an unseen workflow with missing node packs looks like today: 120 s, then &ldquo;This workflow could not be imported: the worker did not complete the import.&rdquo; Honest, and not good enough.</figcaption>
         </figure>
       </section>
 
@@ -447,6 +533,107 @@
           <img src="55_t7_assets/session_t2i_simple_nostill.png" alt="T2I Simple showing 52 steps CFG 3.5">
           <figcaption>2026-09-12 · T2I · Simple · canvas strip 832×1216 | 52 steps | cfg 3.5 | krea2 utopic v20. Denoise gone. Matches krea2_image raw table. Not a full family×page matrix.</figcaption>
         </figure>
+        <h2>W2 — the model's OWN settings, not just its family's (2026-09-16)</h2>
+        <p>
+          Everything above this line is the family table. W2 changed what T5 means: a page now shows
+          what <em>this model's author publishes about this model</em>, and says where the number came
+          from. The family table is the floor under that, not the answer.
+        </p>
+        <p>
+          The case that motivated it is the owner's own house checkpoint.
+          <code>loxsUtopicWorldKrea2_v20Quants</code> ships <strong>10 steps / CFG 1 / er_sde / simple</strong>
+          across <strong>10 of 10</strong> of its author's example images on CivitAI. The row above
+          records SpellVision rendering it at <strong>52 / 3.5</strong>, because that is the family's
+          <code>raw</code> operating point and nothing read the model. A live library refresh
+          identified 34 of 35 weights on the F: root and every Lox variant on disk agreed on 10.
+        </p>
+        <figure>
+          <img src="55_t7_assets/w2_t2i_simple_sampling_krea2.png" alt="T2I Simple mode showing 10 steps, cfg 1.0 and the provenance caption">
+          <figcaption>
+            2026-09-16 · T2I · <strong>Simple</strong> · krea2 <code>loxsUtopicWorldKrea2_v20Quants</code> ·
+            canvas strip <code>1024 × 1024 | 10 steps | cfg 1.0</code> · caption
+            “Defaults from this model's CivitAI examples · 10 of 10 agree”.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w2_t2i_advanced_sampling_krea2.png" alt="T2I Advanced mode showing the same 10 steps and caption">
+          <figcaption>
+            2026-09-16 · T2I · <strong>Advanced</strong> · the same model, the same 10 / 1.0, the same
+            caption. Applying in both modes is a ruling, not an accident: Simple applies because the
+            user will not change it, Advanced applies because a pre-filled correct value is the point
+            and the house rule is that Advanced reveals in place. A C++ test plants the tempting
+            shortcut — apply only in Simple — and fails on this case.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w2_dest_astrolabe_10steps.png" alt="Dest rendered at the model's own 10 steps">
+          <figcaption>
+            2026-09-16 18:07 · live dest <code>plate_queue_2c1824878970.png</code> · sidecar records
+            <code>steps 10 · cfg 1 · er_sde · simple · 1024×1024 · 67.47 s</code>. The comparable
+            pictured krea2 dest above ran <strong>52 steps in 179.9 s</strong>. Same model, same box:
+            <strong>2.7× faster</strong>, at the settings its author actually uses. The engraved
+            graduation marks resolve, so 10 steps is this checkpoint's operating point rather than a
+            degradation — which is the whole claim.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>T5 is still OPEN and this does not close it.</strong> What is proven here is one page
+          (T2I) and one family (krea2), plus the mechanism. The owner's bar is every page × every
+          family. Also still open, and recorded rather than hidden:
+        </p>
+        <ul class="tight">
+          <li><code>clip_skip</code> and <code>guidance</code> are resolved by the worker and then
+            <strong>discarded</strong> — no widget exists for either anywhere in <code>qt_ui/</code>.
+            Carried to the Models/UI wave.</li>
+          <li>A user-chosen preset and a model's own defaults can both write steps and CFG, so which
+            one the user sees depends on the order they touched them. Recorded, not resolved.</li>
+          <li>Models with no CivitAI match (an HF-origin file, since HuggingFace has no by-hash
+            endpoint) fall back to the family point and the caption says so.</li>
+        </ul>
+        <p>
+          Mechanism, for the record: the values come from <code>model_recommended_settings</code>, whose
+          precedence is user &gt; the model's own example images &gt; its card &gt; the family operating
+          point &gt; the family's published floor. The C++ that used to hold wan/ltx/flux3 sampling
+          numbers is deleted, and a ratchet (<code>sampling-defaults-are-data</code>) keeps them in data.
+          Deleting it found that the two copies had already drifted: the table said wan was CFG 4.0 on
+          euler while the C++ said 5.0 on uni_pc, so the cockpit had been showing a pair the render was
+          never going to use.
+        </p>
+        <h2>T6 — the second machine, gated for real (2026-09-17)</h2>
+        <p>
+          The row above records T6 as <strong>NOT GREEN</strong> with a Distributed pack that was never
+          installed. That approach was dropped. SpellVision now routes <strong>whole jobs</strong> itself,
+          with no ComfyUI extension on either machine — the reasoning is in Doc 61 §6 and the research it
+          cites, and the short version is that ComfyUI-Distributed <em>silently runs the job on the master</em>
+          when the worker is unreachable, which is the opposite of what this row asks for.
+        </p>
+        <p>
+          <strong>Capability check, live against <code>192.168.1.127:8188</code>:</strong> a real SDXL graph
+          naming a checkpoint the node reports cleared all three checks (health → models → nodes). The same
+          graph naming <code>no_such_model_xyz.safetensors</code> was <strong>refused by name</strong> —
+          “http://192.168.1.127:8188 does not have no_such_model_xyz.safetensors” — and stopped after the
+          models check, because the checks run in cost order and there was already a reason.
+        </p>
+        <figure>
+          <img src="55_t7_assets/t6_spellnode_sdxl_gate.png" alt="SDXL image rendered on the SpellNode 3090 Ti and fetched back over /view">
+          <figcaption>
+            2026-09-17 · rendered <strong>on the RTX 3090 Ti</strong> (ComfyUI 0.34.0, Linux, torch 2.13+cu130,
+            130 checkpoints visible) · <code>sdxl/LuxuriousPrisma_v30</code> · 1024×1024 · 20 steps · CFG 7.0 ·
+            <strong>80.3 s</strong> · fetched back through <code>GET /view</code>, 2,002,262 bytes. The job was
+            submitted over HTTP and the result pulled back over HTTP; no disk path crossed the machines.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>SDXL is gated on SpellNode. Nothing else is.</strong> The Families checklist for an endpoint
+          starts empty and the app fills it from successes — you can untick a family, you cannot tick one that
+          has never rendered there. Krea2, Flux and every video family need their own gate render on that
+          machine. Ampere has no fp8 tensor cores, so an fp8 checkpoint loads and dequantises per layer: it
+          works, it saves VRAM, it does not save time.
+        </p>
+        <p class="warn">
+          <strong>VRAM does not pool.</strong> 32 GB and 24 GB are two machines. Nothing in this design adds
+          them, and the Runtime page says so.
+        </p>
       </section>
 
       <section id="t1">
@@ -465,6 +652,204 @@
           <img src="55_t7_assets/session_models.png" alt="Models library grid Stage-1">
           <figcaption>2026-09-12 · MODEL LIBRARY · Stage-1 inventory. Not LoRA Manager.</figcaption>
         </figure>
+        <p class="muted">W1 model-intelligence live proof, 2026-09-16: <code>F:/AI_ASSETS/models</code> reported readable, 35 weights examined, 34 identified by hash against Civitai, 1 no-match (<code>sd3.5_medium</code> — HF-origin; HF has no by-hash endpoint, exactly as predicted), 0 errors, 466s elapsed, 123 preview images fetched. Every <code>Lox's Utopic World</code> variant on disk (5 of them) resolves to the same render settings, read from the site's own example images rather than guessed at:</p>
+        <table>
+          <thead><tr><th>Source</th><th>Steps</th><th>CFG</th><th>Sampler</th><th>Scheduler</th></tr></thead>
+          <tbody>
+            <tr><td>Site example images (<code>site:image-meta-mode</code>, n=10/10 on three of five variants)</td><td>10</td><td>1</td><td>er_sde</td><td>simple</td></tr>
+            <tr><td><code>family_operating_points</code> default point (<code>raw</code>), what SpellVision renders today</td><td>52</td><td>3.5</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p class="muted"><strong>W1 only stores this.</strong> The sidecar per weight now carries the site-published settings, but no generation page reads it yet — T2I/I2I still render every krea2 checkpoint at the family table's 52/3.5 regardless of which one is selected. Wiring a generation page to prefer a model's own sidecar over the family default is the next wave (W2), not this one.</p>
+
+        <h2>W5 &mdash; the page becomes a library, and the refresh has a button (2026-09-17)</h2>
+        <p>
+          W1 stored the intelligence and no surface read it. W5 Tasks 1&ndash;3 gave the page tabs from the
+          classifier, cards that show what the site says, and an inspector. Tasks 4&ndash;6, below, add the
+          action that makes the rest usable: <strong>Refresh metadata</strong>, run from inside the app.
+          Everything in this block was driven through the built <code>SpellVision.exe</code> against the
+          real library on <code>D:/AI_ASSETS/models</code>, with the live CivitAI API and
+          <strong>no account and no API key</strong>. ComfyUI was not running for any of it.
+        </p>
+
+        <h3>The library, by kind</h3>
+        <figure>
+          <img src="55_t7_assets/w5_models_page_tabs.png" alt="Models page with kind tabs and counts over 759 assets">
+          <figcaption>
+            2026-09-17 05:00 &middot; MODEL LIBRARY &middot; 759 assets, 17 families, root <code>D:/AI_ASSETS/models</code> &middot;
+            tabs <strong>All 759 &middot; Checkpoints 131 &middot; Diffusion models 51 &middot; LoRAs 498 &middot; VAE 20 &middot;
+            Text encoders 18 &middot; Vision 7 &middot; Embeddings 8 &middot; Upscalers 6 &middot; Style models 2 &middot; Other 18</strong>.
+            The counts add to All, which is the conservation law the tabs are tested on: a model in no tab
+            is, from the user's chair, a model that is not installed. Most cards read
+            <em>Not identified yet</em>, and that is the honest state of this root &mdash; it holds no
+            sidecars at all, which is exactly the situation the button below exists for.
+          </figcaption>
+        </figure>
+
+        <h3>Refresh metadata, on one model, with no key</h3>
+        <figure>
+          <img src="55_t7_assets/w5_identified_triggers.png" alt="An identified LoRA with its site name, six pictures, trigger words and recommended settings">
+          <figcaption>
+            2026-09-17 05:07 &middot; <code>3DRedmond-3DRenderStyle-3DRenderAF.safetensors</code>, a weight
+            that was <em>Not identified yet</em> a minute earlier. One click on the inspector's
+            <strong>Refresh metadata</strong> hashed that one file, asked CivitAI by hash and wrote the
+            sidecar: site name <strong>3D.Redmond - 3D Render Style for SD XL</strong>, the quantisation
+            chip <code>bf16</code>, six example pictures fetched into
+            <code>models/.spellvision/previews/</code>, <strong>Triggers: 3D Render Style, 3DRenderAF</strong>,
+            <em>Licence: not stated by the site</em>, and the outcome line
+            <strong>Examined 1 &middot; 1 identified</strong>. No credential was configured and none was asked for.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_recommended_provenance.png" alt="Recommended settings with a provenance caption on every value">
+          <figcaption>
+            The Recommended-settings panel, cropped. Every value carries where it came from &mdash;
+            <code>Steps: 40 (from 10 of 10 example images on the site)</code> through to
+            <code>Prompt prefix: 3D Render Style, 3DRenderAF (the trigger words the site lists)</code>.
+            A number with no source invites the user to trust the wrong one; this is the difference
+            between &ldquo;the author renders it this way&rdquo; and &ldquo;our family table guessed&rdquo;.
+          </figcaption>
+        </figure>
+
+        <h3>A picture of your own, across a refresh</h3>
+        <figure>
+          <img src="55_t7_assets/w5_user_picture_before.png" alt="The user's own picture set as the model cover">
+          <figcaption>
+            2026-09-17 05:11 &middot; <strong>Use my picture&hellip;</strong> &rarr; a deliberately
+            unmistakable magenta plate, chosen from inside the model roots. Status:
+            <em>Your picture is now this model's cover.</em> It sits first in the gallery, ahead of the six
+            the site published.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_user_picture_survives.png" alt="The same model after a second refresh, still showing the user's picture">
+          <figcaption>
+            2026-09-17 05:12 &middot; the <em>same</em> model after a second full
+            <strong>Refresh metadata</strong> (<code>Examined 1 &middot; 1 identified</code>, site pictures
+            re-fetched). The card cover and the first gallery tile are still the user's plate. This is the
+            promise three docstrings made and nothing held until W5 Task 3, and it can fail in two
+            independent ways &mdash; the sidecar entry and the bytes on disk &mdash; so it is asserted at
+            both ends.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>Read this before trusting a live check of this behaviour.</strong> The first live run of
+          exactly this sequence FAILED &mdash; the picture was replaced by the site's cover &mdash; and the
+          code was not the reason. The worker on <code>:8765</code> had been started the previous evening,
+          hours before the fix landed, so it was serving the old <code>sidecar.merge</code> out of memory.
+          The same sequence run head-on against the modules on disk passed at once. Python is not compiled,
+          so a long-running worker is a stale binary in every sense that matters: restart it before you
+          measure it.
+        </p>
+
+        <h3>The whole library: background, progress, cancel</h3>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_progress.png" alt="Library-wide refresh running with a progress row and a Stop button">
+          <figcaption>
+            2026-09-17 05:12 &middot; the toolbar's <strong>Refresh metadata</strong> against all 759 files.
+            Progress row: <code>3 of 759 &middot; lazypos.safetensors</code>, a <strong>Stop</strong> button,
+            both refresh buttons disabled, inspector status <em>Reading the library&hellip;</em>. The request
+            carries <code>"background": true</code>, so the reply is the job id and the progress arrives over
+            <code>subscribe</code> &mdash; a foreground pass would hold the connection for the ~79 minutes
+            this library takes and be indistinguishable from a hung worker.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_progress2.png" alt="The same refresh a few seconds later at 13 of 759">
+          <figcaption>
+            Four seconds later: <code>13 of 759 &middot; skinny_fat_v2_loraholic.safetensors</code>. Smallest
+            file first, by design, so the library fills in visibly instead of starting on a 6 GB checkpoint.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="55_t7_assets/w5_library_refresh_cancelled.png" alt="The refresh stopped, reporting how far it got">
+          <figcaption>
+            <strong>Stop</strong> &rarr; <code>model_intel_cancel</code> with the job id &rarr;
+            <strong>Stopped after 14 of 759 &middot; 14 identified</strong>. A cancelled run still returns the
+            counts it reached rather than nothing, the progress row retires, and the user's picture is still
+            the cover. Cancel is addressed <em>by job id</em>, which only the started event carries, so the
+            button is not offered in the window before that id arrives &mdash; a cancel with no id cancels
+            every running refresh.
+          </figcaption>
+        </figure>
+
+        <h3>The sentence W2 had to delete</h3>
+        <figure>
+          <img src="55_t7_assets/w5_cockpit_caption_crop.png" alt="The cockpit caption naming Refresh metadata again">
+          <figcaption>
+            2026-09-17 05:18 &middot; T2I &middot; Sampling &middot; a checkpoint with no sidecar
+            (<code>novaExanimeXL_ilV50</code>) &middot;
+            <strong>&ldquo;Family defaults &middot; run Refresh metadata on the Models page to use this
+            model's own&rdquo;</strong>. W2 wrote that sentence, could not make it true, and deleted it
+            (ruling W2-F1: &ldquo;there is no such control and nothing in <code>qt_ui/</code> starts a
+            <code>model_intel_refresh</code> at all&rdquo;). It is restored here in the words the button
+            uses, and the button is two clicks away in the shots above.
+          </figcaption>
+        </figure>
+
+        <h3>Downloads land in the library</h3>
+        <p>
+          Separately, and not pictured: <code>beginModelDownload</code> is the only place this app builds a
+          <code>start_download</code>, and it never sent <code>models_root</code>. W1's post-download hook is
+          explicit that without it &ldquo;the file stays wherever the materializer put it&rdquo; &mdash;
+          <code>python/.cache/assets/</code>, a directory the Models page does not scan. So every download
+          this app has ever started, from the page's own button and from a Civitai or Hugging Face link
+          dropped on the page, completed successfully into a folder the library cannot see. It now names the
+          library, the lane places and identifies the file, and the page rescans when the lane drains. Held
+          by <code>tests/test_models_download_lands.py</code>, which drives the real worker command over a
+          real <code>DownloadManager</code> and asserts the weight arrives under
+          <code>&lt;root&gt;/checkpoints/</code> with its sidecar &mdash; plus two cases that hold the two UI
+          call sites to sending the field, because the hook, the command and the manager were all already
+          correct and complete.
+        </p>
+        <p class="warn">
+          <strong>Not pictured, and therefore not claimed:</strong> a real multi-gigabyte download from the
+          page, end to end. The lane is exercised from the worker command down, not from the click through
+          the network.
+        </p>
+
+        <h3>T3 is NOT green</h3>
+        <p>The owner's bar, quoted rather than paraphrased:</p>
+        <blockquote>
+          <p>&ldquo;<strong>Source green &ne; done.</strong> Each wave ends with a live, pictured proof on
+          this box written into <code>docs/design/55_t7_ship_walkthrough.html</code> under the T's section,
+          with the queue id and dest path. A wave whose live proof cannot be taken &hellip; ships its code
+          and records the gate as <strong>PENDING</strong>, never green.&rdquo; &mdash; spec R0.4</p>
+          <p>&ldquo;<strong>Not in scope (1.1.0, Doc 58):</strong> recipes, favorites sync, CivitAI/HF
+          <em>browse</em> inside the app, LoRA Manager parity.&rdquo; &mdash; spec &sect;5.1</p>
+        </blockquote>
+        <p>What the pictures above prove, and nothing more:</p>
+        <ul class="tight">
+          <li>The tabs, counts and cards are real over the owner's 759-file library.</li>
+          <li>One weight identified live by hash with no key, showing its site name, its pictures, its
+            trigger words and its published settings with a provenance on every value.</li>
+          <li>A user-chosen picture surviving a real refresh &mdash; entry and bytes.</li>
+          <li>A library-wide refresh reporting progress and stopping on demand, with its counts.</li>
+          <li>The cockpit caption restored and true.</li>
+        </ul>
+        <p>What is still open:</p>
+        <ul class="tight">
+          <li><strong>The library is 14 of 759 identified.</strong> The full pass was started and
+            deliberately cancelled after fourteen files; nobody has run the ~79 minutes. Most cards on this
+            root still read <em>Not identified yet</em>, and that is what the page honestly shows.</li>
+          <li><strong>No download was pictured</strong> &mdash; see above.</li>
+          <li><strong>A dropped URL was not pictured either.</strong> It routes through the same request a
+            test now holds, but drag-and-drop was not driven through the UI in this pass.</li>
+          <li><code>clip_skip</code> and <code>guidance</code> are still resolved by the worker and then
+            <strong>discarded</strong>: no widget exists for either in <code>qt_ui/</code>. Carried from W2,
+            still carried.</li>
+          <li>A preset and a model's own defaults can both write steps and CFG, and which one the user sees
+            still depends on the order they touched them. Recorded in W2, not resolved here.</li>
+          <li>The refresh surfaces no rate-limit backoff. A throttled CivitAI reply is counted as
+            <code>lookup_failed</code> and the summary says so, which is honest but is not a retry.</li>
+          <li>This is Stage-2 shaped. Recipes, favourites sync, in-app CivitAI/HF browsing and LoRA Manager
+            parity are 1.1.0/1.2.0 and none of them exist.</li>
+        </ul>
+        <p class="warn">
+          <strong>T3 gate: still PARTIAL.</strong> The surface is real and the action that fills it exists
+          and works. The library itself is not identified, and &ldquo;the Models page is a library&rdquo;
+          will be true for this box when a full pass has actually been run against it.
+        </p>
       </section>
 
       <section id="t6">

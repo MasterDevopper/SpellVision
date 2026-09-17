@@ -25,6 +25,23 @@ def _ws():
     return ws
 
 
+def _undetermined_readiness(reason: str) -> dict[str, Any]:
+    """Readiness's third answer, in the one shape every reply uses.
+
+    `ready: None` is not `False`. Not-ready cries wolf on a workflow that is probably fine; ready is
+    the bug this state exists to kill. Every import reply carries a block, including a failed one,
+    so a reader never has to tell "the worker said nothing" apart from "the worker has no such key".
+    """
+    return {
+        "ready": None,
+        "readiness_determined": False,
+        "undetermined_reason": reason,
+        "summary": f"Launch readiness was not established: {reason}",
+        "missing_node_classes": [],
+        "missing_runtime_assets": [],
+    }
+
+
 def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
     try:
         from workflow_importer import import_workflow
@@ -34,6 +51,7 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
             "ok": False,
             "action": "import_workflow",
             "error": f"workflow_importer import failed: {exc}",
+            "launch_readiness": _undetermined_readiness("the workflow importer could not be loaded"),
         }
 
     source = str(req.get("source") or req.get("workflow_path") or "").strip()
@@ -43,6 +61,7 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
             "ok": False,
             "action": "import_workflow",
             "error": "import_workflow requires source",
+            "launch_readiness": _undetermined_readiness("no workflow source was given"),
         }
 
     destination_root = str(req.get("destination_root") or _ws().imported_workflows_root()).strip()
@@ -73,6 +92,7 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
                 "action": "import_workflow",
                 "source_url": source,
                 "error": str(exc),
+                "launch_readiness": _undetermined_readiness("the workflow could not be fetched"),
             }
         source_url = fetched.source_url
         fetch_notes = list(fetched.notes)
@@ -121,6 +141,15 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
 
         payload["type"] = "workflow_import_result"
         payload["action"] = "import_workflow"
+        payload["launch_readiness"] = _launch_readiness_for_import(
+            payload,
+            comfy_root=comfy_root,
+            node_catalog=node_catalog,
+            python_executable=python_executable,
+            model_cache_root=model_cache_root,
+            civitai_api_key=civitai_api_key,
+            api_url=comfy_endpoint(req),
+        )
         if source_url:
             payload["source_url"] = source_url
             if fetch_notes:
@@ -134,7 +163,68 @@ def handle_import_workflow_command(req: dict[str, Any]) -> dict[str, Any]:
             "action": "import_workflow",
             "error": str(exc),
             "traceback": traceback.format_exc(),
+            "launch_readiness": _undetermined_readiness(f"the import raised {type(exc).__name__}"),
         }
+
+
+def _launch_readiness_for_import(
+    payload: dict[str, Any],
+    *,
+    comfy_root: str,
+    node_catalog: str,
+    python_executable: str,
+    model_cache_root: str,
+    civitai_api_key: str | None,
+    api_url: str | None,
+) -> dict[str, Any]:
+    """The launch-readiness verdict, on the import reply.
+
+    The importer answered "what is in this graph" and stopped. Whether the graph can RUN HERE was a
+    separate command that only Flows called, so everything else -- the drop path above all -- had to
+    guess or make a second round trip, and the drop path's `safe_to_submit` was the literal `false`
+    with a comment blaming the importer. The verdict is not new; only its absence from this reply
+    was. It is computed by the SAME function `check_workflow_launch_readiness` returns, so there is
+    one author and the two replies cannot drift into disagreeing about the same workflow.
+
+    It never fails the import: an import that succeeded has produced its artifacts whatever the
+    readiness pass then says, so a failure here is reported as UNDETERMINED (`ready: None`) rather
+    than as a failed import or, worse, as not-ready.
+    """
+    undetermined = _undetermined_readiness
+
+    if not payload.get("ok", False):
+        return undetermined("the import did not complete")
+
+    artifacts = payload.get("artifacts")
+    import_root_str = str((artifacts or {}).get("import_root") or "").strip() if isinstance(artifacts, dict) else ""
+    if not import_root_str:
+        return undetermined("the import reply carries no import root")
+    import_root = Path(import_root_str)
+    if not import_root.is_dir():
+        return undetermined(f"import root {import_root_str} is not a directory")
+
+    try:
+        report, node_plan, model_plan, live_models, models_measured = _recheck_workflow_dependencies(
+            import_root,
+            comfy_root=comfy_root,
+            node_catalog=node_catalog,
+            python_executable=python_executable,
+            model_cache_root=model_cache_root,
+            civitai_api_key=civitai_api_key,
+            api_url=api_url,
+        )
+        return _write_recheck_into_profile(
+            import_root,
+            comfy_root,
+            node_plan,
+            model_plan,
+            applied=False,
+            live_models=live_models,
+            report=report,
+            models_measured=models_measured,
+        )
+    except Exception as exc:
+        return undetermined(f"the readiness pass raised {type(exc).__name__}: {exc}")
 
 
 def handle_list_workflow_profiles_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -247,7 +337,7 @@ def _recheck_workflow_dependencies(
     api_url: str | None = None,
 ):
     """Re-scan the imported workflow + rebuild node/model plans against the live comfy_root.
-    Returns (report, node_plan, model_plan, live_models).
+    Returns (report, node_plan, model_plan, live_models, models_measured).
 
     Model literals come from the CONVERTED API-prompt graph (prompt_api.json = exactly what
     run_comfy_workflow submits at launch), because a raw UI-graph hides them in positional
@@ -268,9 +358,11 @@ def _recheck_workflow_dependencies(
     # reported as missing custom nodes and permanently disabled the Launch button.
     live_classes: set[str] | None = None
     live_display_names: set[str] | None = None
+    live_object_info: dict[str, Any] | None = None
     try:
         object_info = _ws()._comfy_object_info(api_url)
         if isinstance(object_info, dict) and object_info:
+            live_object_info = object_info
             live_classes = set(object_info.keys())
             # A graph can store the human-readable node name in `type`. The converter rewrites those
             # at submit time, so detection has to agree or Launch stays disabled on a workflow that
@@ -289,17 +381,45 @@ def _recheck_workflow_dependencies(
     # API-prompt form, where MODEL_FIELD_MAP reads named inputs. api_report.nodes carry the class_types
     # the live /object_info validation needs. An API-prompt import (e.g. ltx-api-json) already has
     # model_references from the raw scan -> left untouched (the positive control).
+    #
+    # models_measured says whether the model half of the verdict was ACTUALLY LOOKED AT. A UI graph
+    # hides its model literals in positional widgets_values, so scan_workflow yields
+    # model_references=[] -- and zero references read as "no models missing" and made the whole
+    # verdict `ready`. krea2-compact-t2i-v10 carried exactly that: `"ok": true` alongside
+    # `models 0/0 present`, a green badge on a workflow whose checkpoints had never been checked.
+    # Compiling here is not a second widgets_values mapping: it is the same convert_ui_graph the
+    # compile command and the launch path use, run in memory against the /object_info this function
+    # has already fetched. When there is no schema to compile against, the answer is UNDETERMINED,
+    # which is the third state the readiness reply now carries.
+    from comfy_graph_converter import is_ui_graph
+
     model_report = report
-    api_prompt = import_root / "prompt_api.json"
-    if not report.model_references and api_prompt.is_file():
-        try:
-            _, api_payload = load_workflow_source(str(api_prompt))
-            api_report = scan_workflow(api_payload)
-            if api_report.model_references:
-                report.model_references = api_report.model_references
-                model_report = api_report
-        except Exception:
-            pass
+    models_measured = True
+    if not report.model_references:
+        api_report = None
+        api_prompt = import_root / "prompt_api.json"
+        if api_prompt.is_file():
+            try:
+                _, api_payload = load_workflow_source(str(api_prompt))
+                api_report = scan_workflow(api_payload)
+            except Exception:
+                api_report = None
+        if api_report is None and is_ui_graph(payload):
+            if live_object_info is None:
+                models_measured = False
+            else:
+                try:
+                    from comfy_graph_converter import convert_ui_graph
+
+                    converted = convert_ui_graph(payload, live_object_info)
+                    api_report = scan_workflow(converted.prompt) if converted.prompt else None
+                    if api_report is None:
+                        models_measured = False
+                except Exception:
+                    models_measured = False
+        if api_report is not None and api_report.model_references:
+            report.model_references = api_report.model_references
+            model_report = api_report
 
     # Node packs resolve from what the workflow itself declares (properties.cnr_id / aux_id / ver)
     # before any name match against the starter catalog. search_undeclared consults the cached
@@ -319,10 +439,14 @@ def _recheck_workflow_dependencies(
         civitai_api_key=civitai_api_key,
     )
     live_models = _validate_models_against_object_info(model_report, api_url) if api_url else None
-    return report, node_plan, model_plan, live_models
+    if live_models is None:
+        # ComfyUI could not answer, so the disk plan is the fallback -- and a disk plan built from
+        # zero model references is not a measurement either.
+        models_measured = models_measured and bool(report.model_references)
+    return report, node_plan, model_plan, live_models, models_measured
 
 
-def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool, live_models: dict[str, Any] | None = None, report=None) -> dict[str, Any]:
+def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, model_plan, applied: bool, live_models: dict[str, Any] | None = None, report=None, models_measured: bool = True) -> dict[str, Any]:
     """Persist the live re-check into the imported profile so the UI's
     loadWorkflowRecord reflects reality. The UI counts missing nodes from
     scan_report.json, so that file is the authoritative one to rewrite.
@@ -388,18 +512,45 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
     # known about subgraphs here", which must not read as "there are none" -- but it also must not
     # invent a blocker, so the conjunction below is unaffected when it is None.
     unresolved_subgraphs = list(getattr(report, "unresolved_subgraphs", []) or []) if report is not None else []
-    ready = not missing_nodes and models_ok and not unresolved_subgraphs
+
+    # THREE answers, not two. `ready` is None when the model half was never measured -- a UI graph
+    # with no compiled prompt and no live schema to compile one against. Collapsing that into False
+    # cries wolf on a workflow that is probably fine; collapsing it into True is the bug this state
+    # exists to kill, and it shipped: a workflow reported READY over `models 0/0 present` because
+    # the scan could not see inside widgets_values. Callers read `ready` as a tri-state and the C++
+    # drop path already treats a non-boolean as unknown, which keeps submission closed.
+    undetermined_reason = ""
+    if models_measured:
+        ready: bool | None = not missing_nodes and models_ok and not unresolved_subgraphs
+    else:
+        ready = None
+        undetermined_reason = (
+            "the models this workflow needs could not be read: it is a UI graph whose model names "
+            "live in positional widget values, and ComfyUI was not reachable to compile it. "
+            "Readiness is unknown rather than ready."
+        )
 
     verb = "Applied installs, then re-checked" if applied else "Re-checked"
     ambiguous_note = f", {model_counts.get('ambiguous', 0)} ambiguous" if model_counts.get("ambiguous") else ""
+    model_clause = (
+        f"models {model_counts['already_present']}/{model_counts['checked']} present, "
+        f"{model_counts['missing']} missing{ambiguous_note}."
+        if models_measured
+        else f"models NOT CHECKED — {undetermined_reason}"
+    )
     summary = (
         f"{verb} against live ComfyUI: nodes {node_counts['already_installed']}/{node_counts['checked']} "
         f"already installed, {node_counts['installable']} installable, {node_counts['unresolved']} unresolved; "
-        f"models {model_counts['already_present']}/{model_counts['checked']} present, {model_counts['missing']} missing{ambiguous_note}."
+        f"{model_clause}"
     )
+    if undetermined_reason:
+        model_warnings.append(f"launch readiness is undetermined — {undetermined_reason}")
 
     readiness_block = {
-        "ok": ready,
+        # `ok` stays a bool for every reader that already has one: undetermined is not ready.
+        "ok": bool(ready),
+        # ... and the tri-state lives beside it, so a reader that wants the difference can have it.
+        "determined": models_measured,
         "summary": summary,
         "missing_node_classes": missing_nodes,
         "missing_runtime_assets": missing_assets,
@@ -447,7 +598,11 @@ def _write_recheck_into_profile(import_root: Path, comfy_root: str, node_plan, m
             pass
 
     return {
+        # None when undetermined: the reply then carries a JSON null, which every three-state reader
+        # (WorkflowDropCoordinator::readinessOf) already treats as "could not be established".
         "ready": ready,
+        "readiness_determined": models_measured,
+        "undetermined_reason": undetermined_reason,
         "summary": summary,
         "missing_node_classes": missing_nodes,
         "missing_runtime_assets": missing_assets,
@@ -476,7 +631,7 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
         civitai_api_key = str(req.get("civitai_api_key") or os.environ.get("CIVITAI_API_KEY") or "").strip() or None
         api_url = comfy_endpoint(req)
 
-        report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+        report, node_plan, model_plan, live_models, models_measured = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
@@ -485,7 +640,7 @@ def handle_check_workflow_launch_readiness_command(req: dict[str, Any]) -> dict[
             civitai_api_key=civitai_api_key,
             api_url=api_url,
         )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False, live_models=live_models, report=report)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=False, live_models=live_models, report=report, models_measured=models_measured)
         return {
             "type": "workflow_readiness_result",
             "ok": True,
@@ -694,7 +849,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
         api_url = comfy_endpoint(req)
 
         # 1) Live re-check FIRST.
-        report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+        report, node_plan, model_plan, live_models, models_measured = _recheck_workflow_dependencies(
             import_root,
             comfy_root=comfy_root,
             node_catalog=node_catalog,
@@ -729,7 +884,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
 
         # 3) Re-check AFTER install to capture the post-install state, then persist.
         if applied:
-            report, node_plan, model_plan, live_models = _recheck_workflow_dependencies(
+            report, node_plan, model_plan, live_models, models_measured = _recheck_workflow_dependencies(
                 import_root,
                 comfy_root=comfy_root,
                 node_catalog=node_catalog,
@@ -738,7 +893,7 @@ def handle_retry_workflow_dependencies_command(req: dict[str, Any]) -> dict[str,
                 civitai_api_key=civitai_api_key,
                 api_url=api_url,
             )
-        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied, live_models=live_models, report=report)
+        result = _write_recheck_into_profile(import_root, comfy_root, node_plan, model_plan, applied=applied, live_models=live_models, report=report, models_measured=models_measured)
         return {
             "type": "workflow_dependency_retry_result",
             "ok": not apply_errors,

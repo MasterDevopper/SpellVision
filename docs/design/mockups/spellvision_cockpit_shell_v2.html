@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpellVision Cockpit Shell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&display=swap">
+<style>
+  /* ArcaneGlass — the 26 canonical tokens (Doc 16), plus the structural platinum from the token spec. */
+  :root{
+    --void:#0A0B12; --panel:#13161F; --raised:#171B27; --overlay:#1D2230;
+    --text:#E9EBF4; --text2:#9DA3B8; --text3:#646A82; --text-dis:#454A5E;
+    --violet:#7C5CFF; --violet-hi:#9A7DFF; --violet-deep:#5B4BD6; --violet-tint:#C6B6FF;
+    --violet-glow:rgba(124,92,255,.35); --violet-soft:rgba(124,92,255,.10);
+    --hair:rgba(150,160,186,.14); --hair2:rgba(150,160,186,.22); --hair0:rgba(150,160,186,.08);
+    --plat:#C3C9DC; --plat-hi:rgba(228,232,244,.12);
+    --ready:#34D6E6; --warn:#E8B23A; --err:#D85D73;
+    --ui:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+    --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    --r-ctl:6px; --r-plate:10px;
+    --title-h:42px; --rail-w:74px; --insp-w:340px; --status-h:30px;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;background:var(--void);color:var(--text);font:13px/1.4 var(--ui);-webkit-font-smoothing:antialiased;overflow:hidden}
+  button,input,textarea{font-family:inherit}
+  :focus-visible{outline:2px solid var(--violet-hi);outline-offset:2px}
+  svg{display:block}
+
+  /* ---------- the page: a slim mockup bar, then the app ---------- */
+  .page{height:100vh;height:100dvh;display:grid;grid-template-rows:30px 1fr;min-height:0;position:relative}
+  .mockbar{display:flex;align-items:center;gap:14px;padding:0 12px;background:#050609;border-bottom:1px solid var(--hair0);font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden}
+  .mockbar .name{color:var(--text);font-weight:500}
+  .mockbar .note{overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .mockbar .spacer{flex:1}
+  .mockbar button{height:22px;padding:0 10px;border:1px solid var(--hair);border-radius:4px;background:none;color:var(--text2);font:500 11.5px/1 var(--ui);cursor:pointer}
+  .mockbar button:hover,.mockbar button[aria-expanded="true"]{color:var(--text);border-color:var(--hair2)}
+  .notes{position:absolute;top:34px;right:10px;width:460px;z-index:30;background:var(--overlay);border:1px solid var(--hair2);border-radius:8px;padding:14px 16px 12px;box-shadow:0 20px 50px rgba(0,0,0,.55);font-size:12px;color:var(--text2);line-height:1.5}
+  .notes h2{margin:0 0 8px;font:500 13px/1.3 var(--ui);color:var(--text)}
+  .notes ul{margin:0 0 10px;padding-left:16px}
+  .notes li{margin:0 0 4px}
+  .notes table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px}
+  .notes td{padding:4px 6px 4px 0;border-top:1px solid var(--hair0);vertical-align:top}
+  .notes td:first-child{color:var(--text);white-space:nowrap}
+  .notes .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:6px;border:1px solid var(--hair2)}
+  .viewport{min-height:0;overflow:auto}
+  .app{height:100%;min-width:1120px;min-height:640px;display:grid;grid-template-rows:var(--title-h) 1fr var(--status-h);position:relative}
+
+  /* ---------- title bar ---------- */
+  .titlebar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 6px 0 12px;background:var(--panel);border-bottom:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--plat-hi)}
+  .brand{display:flex;align-items:center;gap:8px;min-width:0}
+  .badge{width:24px;height:24px;border-radius:6px;background:var(--void);border:1px solid var(--hair2);display:grid;place-items:center;box-shadow:inset 0 1px 0 var(--plat-hi)}
+  .badge svg{width:16px;height:16px}
+  .badge .iris{filter:drop-shadow(0 0 3px var(--violet))}
+  .wordmark{font:500 15px/1 var(--serif);letter-spacing:-.005em;color:var(--text)}
+  .crumb-sep{width:12px;height:12px;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .crumb{font-size:12px;color:var(--text2)}
+  .search{width:380px;height:26px;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;background:var(--void);border:1px solid var(--hair);border-radius:var(--r-ctl);color:var(--text3);font-size:12px;cursor:text;text-align:left}
+  .search:hover{border-color:var(--hair2)}
+  .search svg{width:13px;height:13px;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round}
+  .search span{flex:1}
+  kbd{font:500 10.5px/1 var(--ui);color:var(--text3);border:1px solid var(--hair);border-radius:4px;padding:3px 5px;background:var(--panel)}
+  .title-right{display:flex;align-items:center;gap:10px;justify-self:end}
+  .seg{display:flex;border:1px solid var(--hair);border-radius:var(--r-ctl);padding:2px;background:var(--void)}
+  .seg button{font:500 11.5px/1 var(--ui);color:var(--text2);background:none;border:0;border-radius:4px;padding:5px 10px;cursor:pointer}
+  .seg button:hover{color:var(--text)}
+  .seg button.on{color:var(--text);background:var(--raised);box-shadow:inset 0 0 0 1px var(--hair2)}
+  .iconbtn{width:26px;height:26px;display:grid;place-items:center;border:0;background:none;color:var(--text3);border-radius:4px;cursor:pointer}
+  .iconbtn:hover{background:rgba(255,255,255,.04);color:var(--text2)}
+  .iconbtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .win{display:flex;gap:2px;margin-left:4px}
+  .win .close:hover{background:var(--err);color:#fff}
+
+  /* ---------- body ---------- */
+  .body{display:grid;grid-template-columns:var(--rail-w) 1fr var(--insp-w);min-height:0;position:relative}
+
+  /* rail */
+  .rail{background:var(--panel);border-right:1px solid var(--hair);display:flex;flex-direction:column;align-items:center;padding:6px 0 8px;gap:2px;overflow-y:auto;scrollbar-width:none}
+  .rail::-webkit-scrollbar{display:none}
+  .rail-sec{width:56px;font-size:10px;color:var(--text3);letter-spacing:.02em;padding:9px 0 3px 4px;border-top:1px solid var(--hair0);margin-top:4px}
+  .rail-sec:first-child{border-top:0;margin-top:0;padding-top:2px}
+  .tile{position:relative;width:56px;height:44px;flex:none;border:0;border-radius:8px;background:none;color:var(--text2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font:500 10.5px/1 var(--ui);cursor:pointer}
+  .tile svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .tile:hover{background:rgba(255,255,255,.04);color:var(--text)}
+  .tile.on{color:var(--text);background:rgba(255,255,255,.05)}
+  .tile.on::before{content:"";position:absolute;left:-9px;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--violet);box-shadow:0 0 8px var(--violet-glow)}
+
+  /* content column */
+  .content{display:grid;grid-template-rows:auto 1fr auto auto;gap:10px;padding:10px 12px;min-height:0;min-width:0}
+  .prompt-card{display:grid;grid-template-columns:48px 1fr auto;gap:10px;align-items:start;padding:8px;background:var(--raised);border:1px solid var(--hair);border-radius:var(--r-ctl);box-shadow:inset 0 1px 0 var(--plat-hi)}
+  .src-chip{width:48px;height:48px;border:1px dashed var(--hair2);border-radius:var(--r-ctl);background:none;color:var(--text3);font:500 11px/1 var(--ui);cursor:pointer}
+  .src-chip:hover{border-color:var(--plat);color:var(--text2)}
+  .prompt-fields{display:flex;flex-direction:column;min-width:0}
+  .prompt-fields textarea{width:100%;resize:none;background:none;border:0;color:var(--text);font:13px/1.45 var(--ui);padding:5px 2px;outline:none}
+  .prompt-fields textarea::placeholder{color:var(--text3)}
+  .prompt-fields textarea.neg{border-top:1px solid var(--hair0);margin-top:4px;padding-top:8px;color:var(--text2)}
+  .neg-toggle{align-self:center;height:28px;display:flex;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--hair);border-radius:var(--r-ctl);background:none;color:var(--text2);font:500 12px/1 var(--ui);cursor:pointer}
+  .neg-toggle svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+  .neg-toggle:hover{color:var(--text);border-color:var(--hair2)}
+  .neg-toggle.on{color:var(--text);border-color:var(--hair2);background:rgba(255,255,255,.04)}
+
+  .plate{position:relative;min-height:0;background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-plate);display:grid;place-items:center;overflow:hidden;box-shadow:inset 0 1px 0 var(--plat-hi)}
+  .plate-empty{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;max-width:440px;padding:24px}
+  .plate-empty::before{content:"";position:absolute;inset:-40% -30%;background:radial-gradient(ellipse at 50% 38%,var(--violet-soft),transparent 60%);pointer-events:none;transition:opacity .4s}
+  .sigil{width:176px;height:176px;position:relative}
+  .sigil .ring-fill{transition:stroke-dashoffset .12s linear}
+  .sigil .iris{transition:fill-opacity .4s}
+  .plate-empty.busy .iris{fill-opacity:.9;filter:drop-shadow(0 0 5px var(--violet))}
+  .plate-empty.busy .ring-fill{filter:drop-shadow(0 0 2px var(--violet))}
+  .plate-title{margin:0;font:italic 500 22px/1.2 var(--serif);color:var(--text);text-wrap:balance;position:relative}
+  .plate-empty p{margin:0;font-size:12.5px;color:var(--text2);line-height:1.5;position:relative;font-variant-numeric:tabular-nums}
+  .plate-result{display:block;border-radius:4px;box-shadow:0 0 0 1px var(--hair)}
+  .plate-corner{position:absolute;left:10px;bottom:10px;display:flex;gap:10px;font-size:11.5px;color:var(--text2);background:rgba(10,11,18,.78);border:1px solid var(--hair);border-radius:4px;padding:4px 8px;font-variant-numeric:tabular-nums}
+  .plate-tools{position:absolute;right:10px;bottom:10px;display:flex;gap:4px}
+  .plate-tools .mini{background:rgba(10,11,18,.78)}
+
+  .strip{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:14px;height:104px;padding:8px 10px;border:1px solid var(--hair0);border-radius:var(--r-ctl)}
+  .strip-label{font-size:11.5px;color:var(--text3);line-height:1.4;width:76px}
+  .strip-label b{display:block;font:500 13px/1.2 var(--ui);color:var(--text2);font-variant-numeric:tabular-nums}
+  .strip-row{display:flex;gap:8px;height:88px;overflow-x:auto;scrollbar-width:thin;min-width:0}
+  .strip-row canvas{height:88px;width:auto;flex:none;border-radius:4px;box-shadow:0 0 0 1px var(--hair);cursor:pointer}
+  .strip-row canvas:hover{box-shadow:0 0 0 1px var(--plat)}
+
+  .action-row{display:flex;align-items:center;gap:8px}
+  .chips{display:flex;gap:6px;flex:1;flex-wrap:wrap}
+  .chip{font-size:11.5px;color:var(--text2);border:1px solid var(--hair);border-radius:4px;padding:4px 8px;font-variant-numeric:tabular-nums;background:var(--panel)}
+  .btn{height:32px;padding:0 14px;border:1px solid var(--hair);border-radius:var(--r-ctl);background:rgba(255,255,255,.03);color:var(--text);font:500 12.5px/1 var(--ui);cursor:pointer}
+  .btn:hover{border-color:var(--hair2);background:rgba(255,255,255,.06)}
+  .btn.primary{border:0;border-radius:8px;padding:0 20px;font-weight:600;color:#fff;background:linear-gradient(180deg,var(--violet-hi),var(--violet));box-shadow:inset 0 1px 0 rgba(198,182,255,.35),0 6px 18px -6px var(--violet-glow)}
+  .btn.primary:hover{background:linear-gradient(180deg,#A78DFF,var(--violet-hi))}
+  .btn.primary[disabled]{opacity:.65;cursor:progress}
+
+  /* inspector */
+  .inspector{background:var(--panel);border-left:1px solid var(--hair);display:grid;grid-template-rows:auto 1fr auto;min-height:0;box-shadow:inset 0 1px 0 var(--plat-hi)}
+  .tabs{display:flex;border-bottom:1px solid var(--hair);padding:0 6px}
+  .tab{position:relative;flex:1;height:36px;border:0;background:none;color:var(--text2);font:500 12.5px/1 var(--ui);cursor:pointer}
+  .tab:hover,.tab.on{color:var(--text)}
+  .tab.on::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;background:var(--violet);box-shadow:0 0 8px var(--violet-glow)}
+  .panes{min-height:0;overflow-y:auto;padding:0 14px;scrollbar-width:thin}
+  .pane{display:none}
+  .pane.on{display:block}
+  .row{padding:10px 0;border-bottom:1px solid var(--hair0)}
+  .row.two{display:grid;grid-template-columns:104px 1fr;align-items:center;gap:10px;padding:7px 0}
+  .row-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .lbl{font-size:12px;color:var(--text2)}
+  .val{font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .val.muted{color:var(--text3)}
+  .sub{font-size:11.5px;color:var(--text3);margin-top:3px}
+  .row p{margin:0;font-size:12.5px;color:var(--text2);line-height:1.55}
+  .row p b{font-weight:500;color:var(--text);font-variant-numeric:tabular-nums}
+  .row-actions{display:flex;gap:4px}
+  .mini{height:22px;padding:0 8px;border:1px solid var(--hair);border-radius:4px;background:none;color:var(--text2);font:500 11px/1 var(--ui);cursor:pointer;white-space:nowrap}
+  .mini:hover{color:var(--text);border-color:var(--hair2)}
+  .select{height:28px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 8px;background:var(--void);border:1px solid var(--hair);border-radius:var(--r-ctl);font-size:12.5px;color:var(--text);cursor:pointer;min-width:0}
+  .select span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .select svg{width:12px;height:12px;stroke:var(--text3);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .select:hover{border-color:var(--hair2)}
+  .num-in{width:100%;height:28px;padding:0 8px;background:var(--void);border:1px solid var(--hair);border-radius:var(--r-ctl);color:var(--text);font:12.5px var(--ui);font-variant-numeric:tabular-nums;outline:none}
+  .num-in:focus{border-color:var(--violet-hi)}
+  .num-in:disabled{color:var(--text3)}
+  .seed{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+  .check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);white-space:nowrap;cursor:pointer}
+  .check input{accent-color:var(--violet);margin:0}
+  .switch{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--text);cursor:pointer}
+  .switch i{width:28px;height:16px;border-radius:8px;background:var(--void);border:1px solid var(--hair2);position:relative;flex:none}
+  .switch i::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--text3)}
+  .switch.on i::after{left:14px;background:var(--plat)}
+  .chipset{display:flex;gap:4px;margin-top:6px}
+  .chipset button{height:26px;padding:0 10px;border:1px solid var(--hair);border-radius:4px;background:none;color:var(--text2);font:500 11.5px/1 var(--ui);cursor:pointer}
+  .chipset button:hover{color:var(--text)}
+  .chipset button.on{color:var(--text);border-color:var(--hair2);background:rgba(255,255,255,.05)}
+  .lora{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .lora .num{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+  .slider{height:4px;background:var(--void);border-radius:2px;margin-top:8px;border:1px solid var(--hair0)}
+  .slider i{display:block;height:100%;background:var(--plat);opacity:.55;border-radius:2px}
+  .readiness{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-top:1px solid var(--hair);font-size:12px;color:var(--text)}
+  .readiness .sub{margin:0 0 0 auto;font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ready);box-shadow:0 0 6px rgba(52,214,230,.5);flex:none}
+
+  /* disclosure: Advanced reveals in place. Nothing moves; rows appear where they already live. */
+  .app[data-disclosure="simple"] .adv{display:none}
+  .app[data-disclosure="advanced"] .simple-only{display:none}
+
+  /* status bar */
+  .status{display:flex;align-items:center;gap:18px;background:var(--panel);border-top:1px solid var(--hair);padding:0 6px 0 12px;font-size:11.5px;color:var(--text3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
+  .st{display:flex;align-items:center;gap:6px;min-width:0}
+  .st b{font-weight:500;color:var(--text2);overflow:hidden;text-overflow:ellipsis}
+  .st.ready b{color:var(--ready)}
+  .st.ready.busy b{color:var(--text)}
+  .st.ready.busy .dot{background:var(--violet);box-shadow:0 0 6px var(--violet-glow)}
+  .st.grow{flex:1}
+  .st .dot{width:7px;height:7px}
+  .progress{width:120px;height:6px;flex:none;border-radius:3px;background:var(--void);border:1px solid var(--hair0);overflow:hidden}
+  .progress i{display:block;height:100%;width:0;background:var(--violet);box-shadow:0 0 8px var(--violet);transition:width .12s linear}
+  .drawer-btn{height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--hair);border-radius:4px;background:none;color:var(--text2);font:500 11.5px/1 var(--ui);cursor:pointer;flex:none}
+  .drawer-btn:hover{color:var(--text);border-color:var(--hair2)}
+  .drawer-btn svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+  .app[data-drawer="open"] .drawer-btn svg{transform:rotate(180deg)}
+
+  /* bottom drawer (Queue, Details, Logs) — rises over the content column, never a separate window */
+  .drawer{position:absolute;left:var(--rail-w);right:var(--insp-w);bottom:0;height:200px;background:var(--overlay);border-top:1px solid var(--hair2);box-shadow:0 -12px 30px rgba(0,0,0,.45);display:grid;grid-template-rows:32px 1fr;transform:translateY(100%);transition:transform .2s ease;visibility:hidden}
+  .app[data-drawer="open"] .drawer{transform:none;visibility:visible}
+  .dtabs{display:flex;align-items:center;gap:2px;padding:0 8px;border-bottom:1px solid var(--hair)}
+  .dtab{height:32px;padding:0 10px;border:0;background:none;color:var(--text2);font:500 12px/1 var(--ui);cursor:pointer;position:relative}
+  .dtab.on{color:var(--text)}
+  .dtab.on::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;background:var(--violet)}
+  .dpane{display:none;padding:8px 12px;overflow:auto;font-size:12px;color:var(--text2)}
+  .dpane.on{display:block}
+  .dpane table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  .dpane th{text-align:left;font-weight:500;color:var(--text3);font-size:11px;padding:4px 8px 6px 0;border-bottom:1px solid var(--hair)}
+  .dpane td{padding:6px 8px 6px 0;border-bottom:1px solid var(--hair0);color:var(--text2)}
+  .dpane td:first-child{color:var(--text)}
+  .dpane .empty{color:var(--text3);padding:10px 0}
+  .dpane .log{font-size:11.5px;line-height:1.6;color:var(--text2);margin:0;white-space:pre-wrap;font-variant-numeric:tabular-nums}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="mockbar">
+    <span class="name">Cockpit shell v2</span>
+    <span class="note">Approval mockup. Everything below is the app: Simple and Advanced, the tabs, Negative, Generate and the drawer all work.</span>
+    <span class="spacer"></span>
+    <button type="button" id="notesBtn" aria-expanded="false" aria-controls="notes">Notes for the Qt build</button>
+    <button type="button" id="resetBtn">Reset</button>
+  </div>
+  <div class="notes" id="notes" hidden>
+    <h2>What this page commits to</h2>
+    <ul>
+      <li>One light. Violet is on exactly five things: the iris, the active rail edge, the active tab underline, Generate, and the focus ring. Nothing else is tinted.</li>
+      <li>Metal, not cards. Platinum hairlines divide the inspector and the status bar. Two radii by role: 6 px on controls, 10 px on the canvas plate. Only Generate rounds to 8.</li>
+      <li>The eye is the progress indicator. The inner ring of the shipped sigil closes as the sampler runs, then the plate resolves. Painted widget in Qt, no new asset.</li>
+      <li>No backdrop blur anywhere. Panels are a solid fill with a 1 px platinum top highlight, which is the approximation the token spec already prescribes.</li>
+      <li>Type is IBM Plex Sans with tabular figures for every number. IBM Plex Serif italic appears twice: the wordmark and the empty-canvas line. Register both through QFontDatabase.</li>
+      <li>Simple hides rows in place. Switch to Advanced and watch the Sampling tab: the rows appear under the summary, nothing relocates.</li>
+    </ul>
+    <table>
+      <tr><td><i class="sw" style="background:#0A0B12"></i>Surface0</td><td>app ground, inputs, search</td></tr>
+      <tr><td><i class="sw" style="background:#13161F"></i>Surface1</td><td>title bar, rail, inspector, plate, status</td></tr>
+      <tr><td><i class="sw" style="background:#171B27"></i>Surface2</td><td>prompt card, active segment</td></tr>
+      <tr><td><i class="sw" style="background:#1D2230"></i>Surface3</td><td>drawer, this panel</td></tr>
+      <tr><td><i class="sw" style="background:#7C5CFF"></i>Accent</td><td>iris, rail edge, tab underline, Generate, progress</td></tr>
+      <tr><td><i class="sw" style="background:#C3C9DC"></i>Border at .14 / .22</td><td>every hairline, chip and slider fill</td></tr>
+      <tr><td><i class="sw" style="background:#34D6E6"></i>Success</td><td>ready dots only</td></tr>
+    </table>
+  </div>
+
+  <div class="viewport">
+  <div class="app" id="app" data-disclosure="simple" aria-label="SpellVision cockpit shell mockup">
+
+    <!-- title bar -->
+    <header class="titlebar">
+      <div class="brand">
+        <span class="badge" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M24 6 L31 14 L24 14 Z M24 6 L17 14 L24 14 Z M7 24 C13 16 35 16 41 24 C35 32 13 32 7 24 Z M24 42 L31 34 L24 34 Z M24 42 L17 34 L24 34 Z" stroke="#C3C9DC" stroke-opacity=".7" stroke-width="2" stroke-linejoin="round"/>
+            <circle class="iris" cx="24" cy="24" r="6.5" fill="#7C5CFF" fill-opacity=".8"/>
+            <circle cx="24" cy="24" r="2.4" fill="#0A0B12"/>
+          </svg>
+        </span>
+        <span class="wordmark">SpellVision</span>
+        <svg class="crumb-sep" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+        <span class="crumb">Text to Image</span>
+      </div>
+      <button type="button" class="search" aria-label="Search commands and models">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        <span>Search commands, models…</span>
+        <kbd>Ctrl+K</kbd>
+      </button>
+      <div class="title-right">
+        <div class="seg" role="group" aria-label="Disclosure">
+          <button type="button" class="on" data-mode="simple">Simple</button>
+          <button type="button" data-mode="advanced">Advanced</button>
+        </div>
+        <button type="button" class="iconbtn" title="Toggle rail"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <button type="button" class="iconbtn" title="Toggle drawer" id="drawerBtnTop"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15h18"/></svg></button>
+        <button type="button" class="iconbtn" title="Toggle inspector"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        <div class="win" aria-hidden="true">
+          <button type="button" class="iconbtn" tabindex="-1"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+          <button type="button" class="iconbtn" tabindex="-1"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg></button>
+          <button type="button" class="iconbtn close" tabindex="-1"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- rail -->
+      <nav class="rail" aria-label="Activity rail">
+        <div class="rail-sec">Create</div>
+        <button type="button" class="tile" title="Home, Ctrl+1"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5"/><path d="M6.5 9.5V20h11V9.5"/></svg>Home</button>
+        <button type="button" class="tile on" aria-current="page" title="Text to Image, Ctrl+3"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M8 14.5 10.8 11.7 14.2 15.1 16.6 12.7 20 16.1"/><circle cx="9" cy="9" r="1.2"/></svg>T2I</button>
+        <button type="button" class="tile" title="Image to Image, Ctrl+4"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M7.5 14.5 10.5 11.5 13.1 14.1"/><path d="M14.8 9.2h4.2v4.2"/><path d="M18.7 9.3 14.2 13.8"/></svg>I2I</button>
+        <button type="button" class="tile" title="Text to Video, Ctrl+5"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="m11 9 4 3-4 3Z"/><path d="M7 8v8"/><path d="M17 8v8"/></svg>T2V</button>
+        <button type="button" class="tile" title="Image to Video, Ctrl+6"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M7.5 15 10.5 12 13 14.5"/><path d="m15 9 3.5 3-3.5 3Z"/></svg>I2V</button>
+        <button type="button" class="tile" title="Character Studio"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c1.4-3.4 3.9-5 6.5-5s5.1 1.6 6.5 5"/><path d="M17.5 9.5c1.2.4 2 .9 2 2.2 0 1.6-1.8 2.3-3.5 2.3"/></svg>Char</button>
+        <button type="button" class="tile" title="Concept Reference Lab"><svg viewBox="0 0 24 24"><path d="M12 3.5 14.2 9.2 20 11l-5.8 1.8L12 18.5l-2.2-5.7L4 11l5.8-1.8L12 3.5z"/><path d="M18.5 16.5 19.4 18.8 21.8 19.6l-2.4.8-.9 2.3-.9-2.3-2.4-.8 2.4-.8.9-2.3z"/></svg>Concept</button>
+        <button type="button" class="tile" title="Comic Studio"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.2"/><path d="M6 7h2.5M15.5 16.5h2.5"/></svg>Comic</button>
+        <div class="rail-sec">Manage</div>
+        <button type="button" class="tile" title="Dataset Generator"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v4c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6"/><path d="M4.5 10v4c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-4"/><path d="M4.5 14v4c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-4"/></svg>Dataset</button>
+        <button type="button" class="tile" title="Workflows, Ctrl+7"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="5" height="5" rx="1.5"/><rect x="15" y="5" width="5" height="5" rx="1.5"/><rect x="9.5" y="14" width="5" height="5" rx="1.5"/><path d="M9 7.5h6"/><path d="M12 10v4"/></svg>Flows</button>
+        <button type="button" class="tile" title="History, Ctrl+8"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.8 2.3"/></svg>History</button>
+        <button type="button" class="tile" title="Inspiration, Ctrl+9"><svg viewBox="0 0 24 24"><path d="m12 4 2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.2l5-.7Z"/></svg>Inspire</button>
+        <button type="button" class="tile" title="Models, Ctrl+0"><svg viewBox="0 0 24 24"><path d="M12 4 19 7.5 12 11 5 7.5 12 4Z"/><path d="M5 12l7 3.5 7-3.5"/><path d="M5 16.5 12 20l7-3.5"/></svg>Models</button>
+        <div class="rail-sec">System</div>
+        <button type="button" class="tile" title="Runtime"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.75" y="9.75" width="4.5" height="4.5" rx="1"/><path d="M9.5 3v3"/><path d="M14.5 3v3"/><path d="M9.5 18v3"/><path d="M14.5 18v3"/><path d="M3 9.5h3"/><path d="M3 14.5h3"/><path d="M18 9.5h3"/><path d="M18 14.5h3"/></svg>Runtime</button>
+        <button type="button" class="tile" title="Train"><svg viewBox="0 0 24 24"><path d="M4 4.5v15h15.5"/><path d="M7.5 16 11 11.5l3 2.5 4.5-6.5"/><path d="M15.5 7.5h3.5V11"/></svg>Train</button>
+        <button type="button" class="tile" title="Settings, Ctrl+,"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M12 4.5v2.2"/><path d="M12 17.3v2.2"/><path d="m6.7 6.7 1.6 1.6"/><path d="m15.7 15.7 1.6 1.6"/><path d="M4.5 12h2.2"/><path d="M17.3 12h2.2"/><path d="m6.7 17.3 1.6-1.6"/><path d="m15.7 8.3 1.6-1.6"/></svg>Prefs</button>
+      </nav>
+
+      <!-- content column: prompt, plate, session strip, action row. Fits the viewport, never scrolls. -->
+      <main class="content">
+        <section class="prompt-card" aria-label="Prompt">
+          <button type="button" class="src-chip" title="Drop a source image">IMG</button>
+          <div class="prompt-fields">
+            <textarea rows="2" aria-label="Prompt">cinematic portrait of a mage, arcane glass armour, violet eye glow, platinum filigree, soft volumetric light, 85mm</textarea>
+            <textarea rows="1" class="neg" id="negField" aria-label="Negative prompt" placeholder="Negative prompt" hidden>blurry, extra fingers, watermark, text</textarea>
+          </div>
+          <button type="button" class="neg-toggle" id="negToggle" aria-expanded="false" aria-controls="negField">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/></svg>Negative
+          </button>
+        </section>
+
+        <section class="plate" id="plate" aria-label="Canvas">
+          <div class="plate-empty" id="plateEmpty">
+            <svg class="sigil" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <circle cx="24" cy="24" r="22" stroke="#96A0BA" stroke-opacity=".18" stroke-width=".4"/>
+              <circle cx="24" cy="24" r="18" stroke="#96A0BA" stroke-opacity=".14" stroke-width=".5"/>
+              <circle class="ring-fill" id="ringFill" cx="24" cy="24" r="18" stroke="#7C5CFF" stroke-width=".9" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" transform="rotate(-90 24 24)"/>
+              <path d="M24 6 L31 14 L24 14 Z M24 6 L17 14 L24 14 Z M7 24 C13 16 35 16 41 24 C35 32 13 32 7 24 Z M24 42 L31 34 L24 34 Z M24 42 L17 34 L24 34 Z" stroke="#C3C9DC" stroke-opacity=".5" stroke-width=".6" stroke-linejoin="round"/>
+              <circle class="iris" cx="24" cy="24" r="6" fill="#7C5CFF" fill-opacity=".35"/>
+              <circle cx="24" cy="24" r="6" stroke="#C6B6FF" stroke-opacity=".4" stroke-width=".4"/>
+              <circle cx="24" cy="24" r="2.2" fill="#0A0B12"/>
+            </svg>
+            <h2 class="plate-title" id="plateTitle">No image yet.</h2>
+            <p id="plateHint">Generate to see it here. Everything you make this session collects in the strip below.</p>
+          </div>
+          <canvas class="plate-result" id="plateResult" hidden></canvas>
+          <div class="plate-corner" id="plateCorner" hidden><span id="cornerSize"></span><span id="cornerSteps"></span><span id="cornerSeed"></span></div>
+          <div class="plate-tools" id="plateTools" hidden>
+            <button type="button" class="mini">Fit</button>
+            <button type="button" class="mini">1:1</button>
+            <button type="button" class="mini">Send to Image to Image</button>
+            <button type="button" class="mini">Send to Character</button>
+          </div>
+        </section>
+
+        <section class="strip" aria-label="Outputs this session">
+          <div class="strip-label">This session<b id="stripCount">3</b></div>
+          <div class="strip-row" id="stripRow"></div>
+        </section>
+
+        <section class="action-row">
+          <div class="chips" aria-label="What will run">
+            <span class="chip" id="chipSize">1024 × 1024</span>
+            <span class="chip" id="chipSteps">28 steps</span>
+            <span class="chip" id="chipCfg">CFG 7.0</span>
+            <span class="chip" id="chipSeed">Seed random</span>
+          </div>
+          <button type="button" class="btn">Queue</button>
+          <button type="button" class="btn primary" id="generate">✦ Generate</button>
+        </section>
+      </main>
+
+      <!-- inspector -->
+      <aside class="inspector" aria-label="Inspector">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab on" role="tab" aria-selected="true" data-tab="model">Model</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="sampling">Sampling</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="output">Output</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="advanced">Advanced</button>
+        </div>
+        <div class="panes">
+          <section class="pane on" data-pane="model" role="tabpanel">
+            <div class="row">
+              <div class="row-head"><span class="lbl">Checkpoint</span><span class="row-actions"><button type="button" class="mini">Browse</button><button type="button" class="mini">Clear</button></span></div>
+              <div class="val" title="sdxl/juggernautXL_v9.safetensors">juggernautXL_v9.safetensors</div>
+              <div class="sub">SDXL, 6.6 GB</div>
+            </div>
+            <div class="row">
+              <div class="row-head"><span class="lbl">Workflow profile</span></div>
+              <div class="select" role="button" tabindex="0"><span>Default canvas</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+            </div>
+            <div class="row">
+              <div class="row-head"><span class="lbl">LoRA stack</span><span class="row-actions"><button type="button" class="mini">Add LoRA</button><button type="button" class="mini">Clear stack</button></span></div>
+              <div class="lora"><span class="val">detail_tweaker_xl</span><span class="num">0.80</span></div>
+              <div class="slider"><i style="width:80%"></i></div>
+            </div>
+            <div class="row adv">
+              <div class="row-head"><span class="lbl">Embeddings</span><span class="row-actions"><button type="button" class="mini">Add</button></span></div>
+              <div class="sub">None</div>
+            </div>
+          </section>
+
+          <section class="pane" data-pane="sampling" role="tabpanel">
+            <div class="row">
+              <p><b id="sumQ">Balanced</b> quality runs <b id="sumSteps">28</b> steps at CFG <b id="sumCfg">7.0</b>, Euler ancestral on Karras. <span class="simple-only">Advanced reveals each control here.</span></p>
+            </div>
+            <div class="row two adv"><span class="lbl">Steps</span><input class="num-in" id="inSteps" type="number" min="1" max="150" value="28"></div>
+            <div class="row two adv"><span class="lbl">CFG</span><input class="num-in" id="inCfg" type="number" min="0" max="30" step="0.5" value="7"></div>
+            <div class="row two adv"><span class="lbl">Sampler</span><div class="select" role="button" tabindex="0"><span>Euler ancestral</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+            <div class="row two adv"><span class="lbl">Scheduler</span><div class="select" role="button" tabindex="0"><span>Karras</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+            <div class="row two adv"><span class="lbl">Seed</span><div class="seed"><input class="num-in" id="inSeed" type="number" value="0" disabled aria-label="Seed"><label class="check"><input type="checkbox" id="ckRandom" checked> Random</label></div></div>
+          </section>
+
+          <section class="pane" data-pane="output" role="tabpanel">
+            <div class="row">
+              <span class="lbl">Orientation</span>
+              <div class="chipset" data-key="orient"><button type="button" data-v="portrait">Portrait</button><button type="button" data-v="landscape">Landscape</button><button type="button" class="on" data-v="square">Square</button></div>
+            </div>
+            <div class="row">
+              <span class="lbl">Quality</span>
+              <div class="chipset" data-key="quality"><button type="button" data-v="draft">Draft</button><button type="button" class="on" data-v="balanced">Balanced</button><button type="button" data-v="high">High</button></div>
+            </div>
+            <div class="row two adv"><span class="lbl">Width</span><input class="num-in" id="inW" type="number" min="64" max="4096" step="8" value="1024"></div>
+            <div class="row two adv"><span class="lbl">Height</span><input class="num-in" id="inH" type="number" min="64" max="4096" step="8" value="1024"></div>
+            <div class="row two adv"><span class="lbl">Batch size</span><div class="select" role="button" tabindex="0"><span>1 image</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+            <div class="row two adv"><span class="lbl">Save to</span><div class="val" title="D:/AI_ASSETS/output">D:/AI_ASSETS/output</div></div>
+            <div class="row two adv"><span class="lbl">Filename prefix</span><input class="num-in" type="text" value="sv"></div>
+          </section>
+
+          <section class="pane" data-pane="advanced" role="tabpanel">
+            <div class="row simple-only"><p>Switch to Advanced to set CLIP skip, denoise, VAE, runtime cast and upscale. They live here, in this tab, in both modes.</p></div>
+            <div class="row two adv"><span class="lbl">CLIP skip</span><input class="num-in" type="number" min="1" max="12" value="2"></div>
+            <div class="row two adv"><span class="lbl">Denoise</span><div class="val muted">1.00, applies to Image to Image</div></div>
+            <div class="row two adv"><span class="lbl">VAE</span><div class="select" role="button" tabindex="0"><span>Auto, from checkpoint</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+            <div class="row two adv"><span class="lbl">Runtime cast</span><label class="switch on"><span>fp32 to fp16 on load</span><i></i></label></div>
+            <div class="row two adv"><span class="lbl">Upscale</span><div class="select" role="button" tabindex="0"><span>Off</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+          </section>
+        </div>
+        <div class="readiness"><i class="dot"></i><span>Ready to generate</span><span class="sub">checkpoint and components resolved</span></div>
+      </aside>
+
+      <!-- drawer -->
+      <div class="drawer" id="drawer" aria-label="Queue, details and logs">
+        <div class="dtabs" role="tablist">
+          <button type="button" class="dtab on" data-dtab="queue">Queue</button>
+          <button type="button" class="dtab" data-dtab="details">Details</button>
+          <button type="button" class="dtab" data-dtab="logs">Logs</button>
+        </div>
+        <div class="dpane on" data-dpane="queue">
+          <table id="queueTable" hidden>
+            <thead><tr><th>Job</th><th>Mode</th><th>State</th><th>Steps</th><th>Size</th></tr></thead>
+            <tbody id="queueBody"></tbody>
+          </table>
+          <div class="empty" id="queueEmpty">Queue is empty. Generate adds a job here and the status bar counts it.</div>
+        </div>
+        <div class="dpane" data-dpane="details">
+          <table>
+            <tbody>
+              <tr><td>Checkpoint</td><td>juggernautXL_v9.safetensors, SDXL, fp32 on disk, cast to fp16 on load</td></tr>
+              <tr><td>LoRA</td><td>detail_tweaker_xl at 0.80, applied as a named adapter, not fused</td></tr>
+              <tr><td>VAE</td><td>from checkpoint</td></tr>
+              <tr><td>Route</td><td>diffusers, shared-weight pipeline, 6.6 GB resident</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="dpane" data-dpane="logs"><pre class="log" id="logPane">worker  ready on 127.0.0.1:8765
+comfy   ready on 127.0.0.1:8188, core v0.34.0
+models  D:/AI_ASSETS/models, 214 files indexed</pre></div>
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <footer class="status" aria-label="Status">
+      <span class="st ready" id="stReadyWrap"><i class="dot"></i><b id="stReady">Ready</b></span>
+      <span class="st">Text to Image</span>
+      <span class="st">Worker <i class="dot"></i> Comfy <i class="dot"></i></span>
+      <span class="st">Queue <b id="stQueue">0</b></span>
+      <span class="st">VRAM <b>6.6 / 32 GB</b></span>
+      <span class="st grow">Model <b>juggernautXL_v9</b></span>
+      <span class="st">LoRA <b>detail_tweaker_xl</b></span>
+      <span class="st"><b id="stState">Idle</b></span>
+      <span class="st"><b id="stEta"></b></span>
+      <span class="progress" aria-hidden="true"><i id="stProg"></i></span>
+      <button type="button" class="drawer-btn" id="drawerBtn" aria-expanded="false" aria-controls="drawer">Queue, Details, Logs <svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
+    </footer>
+
+  </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+  const app=$('#app');
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ORIENT={portrait:[896,1152],landscape:[1152,896],square:[1024,1024]};
+  const QUAL={draft:[16,5.5],balanced:[28,7],high:[40,7.5]};
+  const QNAME={draft:'Draft',balanced:'Balanced',high:'High'};
+  const HINT='Generate to see it here. Everything you make this session collects in the strip below.';
+  const S={orient:'square',quality:'balanced',steps:28,cfg:7,w:1024,h:1024,random:true,seed:0,running:false,session:0};
+
+  /* ---- disclosure (global Simple / Advanced) ---- */
+  function setMode(m){
+    app.dataset.disclosure=m;
+    $$('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+    try{localStorage.setItem('sv.mock.disclosure',m)}catch(e){}
+  }
+  let saved='simple'; try{saved=localStorage.getItem('sv.mock.disclosure')||'simple'}catch(e){}
+  setMode(saved==='advanced'?'advanced':'simple');
+  $$('.seg button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+
+  /* ---- inspector tabs ---- */
+  function setTab(k){
+    $$('.tab').forEach(t=>{const on=t.dataset.tab===k;t.classList.toggle('on',on);t.setAttribute('aria-selected',String(on))});
+    $$('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===k));
+  }
+  $$('.tab').forEach(t=>t.addEventListener('click',()=>setTab(t.dataset.tab)));
+
+  /* ---- negative prompt: retract hides, never clears ---- */
+  const negBtn=$('#negToggle'), neg=$('#negField');
+  negBtn.addEventListener('click',()=>{neg.hidden=!neg.hidden;negBtn.classList.toggle('on',!neg.hidden);negBtn.setAttribute('aria-expanded',String(!neg.hidden));if(!neg.hidden)neg.focus()});
+
+  /* ---- intent chips (Simple) drive the raw values (Advanced) ---- */
+  $$('.chipset').forEach(set=>set.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    $$('button',set).forEach(x=>x.classList.toggle('on',x===b));
+    const k=set.dataset.key; S[k]=b.dataset.v;
+    if(k==='orient'){[S.w,S.h]=ORIENT[S.orient]}
+    if(k==='quality'){[S.steps,S.cfg]=QUAL[S.quality]}
+    render(true);
+  }));
+  const inSteps=$('#inSteps'),inCfg=$('#inCfg'),inW=$('#inW'),inH=$('#inH'),inSeed=$('#inSeed'),ckRandom=$('#ckRandom');
+  inSteps.addEventListener('input',()=>{S.steps=Math.max(1,+inSteps.value||1);render(false)});
+  inCfg.addEventListener('input',()=>{S.cfg=Math.max(0,+inCfg.value||0);render(false)});
+  inW.addEventListener('input',()=>{S.w=Math.max(64,+inW.value||64);render(false)});
+  inH.addEventListener('input',()=>{S.h=Math.max(64,+inH.value||64);render(false)});
+  ckRandom.addEventListener('change',()=>{S.random=ckRandom.checked;inSeed.disabled=S.random;if(!S.random&&!S.seed){S.seed=1337;inSeed.value=S.seed}render(false)});
+  inSeed.addEventListener('input',()=>{S.seed=(+inSeed.value||0)>>>0;render(false)});
+  function render(sync){
+    if(sync){inSteps.value=S.steps;inCfg.value=S.cfg;inW.value=S.w;inH.value=S.h}
+    $('#chipSize').textContent=S.w+' × '+S.h;
+    $('#chipSteps').textContent=S.steps+' steps';
+    $('#chipCfg').textContent='CFG '+S.cfg.toFixed(1);
+    $('#chipSeed').textContent=S.random?'Seed random':'Seed '+S.seed;
+    $('#sumQ').textContent=QNAME[S.quality];
+    $('#sumSteps').textContent=S.steps;
+    $('#sumCfg').textContent=S.cfg.toFixed(1);
+  }
+  render(true);
+
+  /* ---- procedural plates: stand-ins for renders, seeded so a seed always paints the same plate ---- */
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+  const PAL=['#7C5CFF','#5B4BD6','#C6B6FF','#3A2F8C','#8B92A8','#2A2140','#0E1220','#E4E8F4','#4A3F8F'];
+  function paintRender(cv,seed,w,h,scale){
+    const W=Math.max(48,Math.round(w*scale)),H=Math.max(48,Math.round(h*scale));
+    cv.width=W;cv.height=H;
+    const g=cv.getContext('2d'),r=mulberry32(seed);
+    g.fillStyle='#0B0A14';g.fillRect(0,0,W,H);
+    for(let i=0;i<9;i++){
+      const x=r()*W,y=r()*H,rad=(0.25+r()*0.6)*Math.max(W,H);
+      const gr=g.createRadialGradient(x,y,0,x,y,rad);
+      gr.addColorStop(0,PAL[Math.floor(r()*PAL.length)]);gr.addColorStop(1,'rgba(0,0,0,0)');
+      g.globalAlpha=0.16+r()*0.38;g.globalCompositeOperation=r()<0.5?'lighter':'source-over';
+      g.fillStyle=gr;g.fillRect(0,0,W,H);
+    }
+    g.globalCompositeOperation='source-over';g.globalAlpha=1;
+    const fx=W*0.5,fy=H*0.64;
+    const fg=g.createRadialGradient(fx,fy,0,fx,fy,Math.min(W,H)*0.5);
+    fg.addColorStop(0,'rgba(10,11,18,0.9)');fg.addColorStop(1,'rgba(10,11,18,0)');
+    g.fillStyle=fg;g.beginPath();g.ellipse(fx,fy,W*0.22,H*0.4,0,0,Math.PI*2);g.fill();
+    const ex=W*(0.44+r()*0.12),ey=H*0.36;
+    const eg=g.createRadialGradient(ex,ey,0,ex,ey,Math.min(W,H)*0.14);
+    eg.addColorStop(0,'rgba(198,182,255,0.95)');eg.addColorStop(0.3,'rgba(124,92,255,0.6)');eg.addColorStop(1,'rgba(124,92,255,0)');
+    g.fillStyle=eg;g.fillRect(0,0,W,H);
+    const vg=g.createRadialGradient(W/2,H/2,Math.min(W,H)*0.3,W/2,H/2,Math.max(W,H)*0.78);
+    vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(3,4,9,0.82)');
+    g.fillStyle=vg;g.fillRect(0,0,W,H);
+    const id=g.getImageData(0,0,W,H),d=id.data;
+    for(let i=0;i<d.length;i+=4){const n=(r()-0.5)*14;d[i]+=n;d[i+1]+=n;d[i+2]+=n}
+    g.putImageData(id,0,0);
+  }
+
+  /* ---- session strip ---- */
+  const stripRow=$('#stripRow'),stripCount=$('#stripCount');
+  function addThumb(seed,w,h,front){
+    const c=document.createElement('canvas');
+    paintRender(c,seed,w,h,0.14);
+    c.title='Example output, '+w+' × '+h+', seed '+seed;
+    c.setAttribute('role','img');c.setAttribute('aria-label',c.title);
+    if(front) stripRow.prepend(c); else stripRow.append(c);
+    S.session=stripRow.children.length;stripCount.textContent=S.session;
+  }
+  addThumb(3141592,896,1152,false);addThumb(2718281,1024,1024,false);addThumb(1618033,1152,896,false);
+
+  /* ---- result fit: the plate never squeezes the picture, the picture never overflows the plate ---- */
+  const plate=$('#plate'),result=$('#plateResult');
+  function fitResult(){
+    if(result.hidden) return;
+    const pad=24,bw=plate.clientWidth-pad,bh=plate.clientHeight-pad,ar=S.lastW/S.lastH;
+    let w=bw,h=w/ar; if(h>bh){h=bh;w=h*ar}
+    result.style.width=Math.floor(w)+'px';result.style.height=Math.floor(h)+'px';
+  }
+  new ResizeObserver(fitResult).observe(plate);
+
+  /* ---- drawer ---- */
+  const drawerBtn=$('#drawerBtn');
+  function toggleDrawer(force){
+    const open=force!==undefined?force:app.dataset.drawer!=='open';
+    app.dataset.drawer=open?'open':'';
+    drawerBtn.setAttribute('aria-expanded',String(open));
+  }
+  drawerBtn.addEventListener('click',()=>toggleDrawer());
+  $('#drawerBtnTop').addEventListener('click',()=>toggleDrawer());
+  $$('.dtab').forEach(t=>t.addEventListener('click',()=>{
+    $$('.dtab').forEach(x=>x.classList.toggle('on',x===t));
+    $$('.dpane').forEach(p=>p.classList.toggle('on',p.dataset.dpane===t.dataset.dtab));
+  }));
+  const queueBody=$('#queueBody'),queueTable=$('#queueTable'),queueEmpty=$('#queueEmpty'),logPane=$('#logPane');
+  let row=null;
+  function addQueueRow(seed,w,h){
+    row=document.createElement('tr');
+    row.innerHTML='<td>sv_'+seed.toString(16).padStart(8,'0').slice(0,6)+'</td><td>Text to Image</td><td class="qs">Submitting</td><td class="qp">0 / '+S.steps+'</td><td>'+w+' × '+h+'</td>';
+    queueBody.prepend(row);queueTable.hidden=false;queueEmpty.hidden=true;
+    logPane.textContent+='\njob     '+row.firstChild.textContent+' submitted, '+w+'x'+h+', '+S.steps+' steps, seed '+seed;
+  }
+
+  /* ---- generate: the eye closes as the sampler runs, then the plate resolves ---- */
+  const gen=$('#generate'),plateEmpty=$('#plateEmpty'),ring=$('#ringFill'),corner=$('#plateCorner'),tools=$('#plateTools');
+  const title=$('#plateTitle'),hint=$('#plateHint');
+  const st={ready:$('#stReady'),wrap:$('#stReadyWrap'),state:$('#stState'),queue:$('#stQueue'),eta:$('#stEta'),prog:$('#stProg')};
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  async function generate(){
+    if(S.running) return; S.running=true;
+    const seed=S.random?(Math.random()*4294967295)>>>0:S.seed, w=S.w, h=S.h, steps=S.steps;
+    gen.disabled=true;gen.textContent='Generating…';
+    result.hidden=true;corner.hidden=true;tools.hidden=true;plateEmpty.hidden=false;plateEmpty.classList.add('busy');
+    title.textContent='Sampling.';hint.textContent='Step 0 of '+steps+'. The iris closes as the sampler runs.';
+    st.ready.textContent='Busy';st.wrap.classList.add('busy');st.state.textContent='Submitting';st.queue.textContent='1';
+    addQueueRow(seed,w,h);
+    const per=reduced?0:Math.max(55,3400/steps);
+    await wait(reduced?0:350);
+    st.state.textContent='Running';if(row)row.querySelector('.qs').textContent='Running';
+    for(let i=1;i<=steps;i++){
+      await wait(per);
+      const p=i/steps;
+      ring.style.strokeDashoffset=String(100-100*p);
+      st.prog.style.width=(p*100)+'%';
+      st.eta.textContent='ETA '+Math.ceil((steps-i)*per/1000)+' s';
+      hint.textContent='Step '+i+' of '+steps+'. The iris closes as the sampler runs.';
+      if(row)row.querySelector('.qp').textContent=i+' / '+steps;
+    }
+    S.lastW=w;S.lastH=h;
+    paintRender(result,seed,w,h,0.5);
+    plateEmpty.hidden=true;plateEmpty.classList.remove('busy');ring.style.strokeDashoffset='100';
+    result.hidden=false;fitResult();
+    $('#cornerSize').textContent=w+' × '+h;$('#cornerSteps').textContent=steps+' steps';$('#cornerSeed').textContent='seed '+seed;
+    corner.hidden=false;tools.hidden=false;
+    addThumb(seed,w,h,true);
+    st.state.textContent='Completed';st.eta.textContent='';st.queue.textContent='0';
+    if(row){row.querySelector('.qs').textContent='Completed';}
+    logPane.textContent+='\njob     '+(row?row.firstChild.textContent:'')+' completed';
+    await wait(reduced?0:1200);
+    st.prog.style.width='0';st.state.textContent='Idle';st.ready.textContent='Ready';st.wrap.classList.remove('busy');
+    title.textContent='No image yet.';hint.textContent=HINT;
+    gen.disabled=false;gen.textContent='✦ Generate';S.running=false;
+  }
+  gen.addEventListener('click',generate);
+
+  /* ---- mockup chrome ---- */
+  const notes=$('#notes'),notesBtn=$('#notesBtn');
+  notesBtn.addEventListener('click',()=>{notes.hidden=!notes.hidden;notesBtn.setAttribute('aria-expanded',String(!notes.hidden))});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!notes.hidden){notes.hidden=true;notesBtn.setAttribute('aria-expanded','false')}});
+  $('#resetBtn').addEventListener('click',()=>{try{localStorage.removeItem('sv.mock.disclosure')}catch(e){}location.reload()});
+})();
+</script>
+</body>
+</html>

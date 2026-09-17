@@ -194,18 +194,28 @@ def test_pages_built_ahead_of_their_first_visit_are_parked_hidden() -> None:
 # --- 2026-09-02, the cheap-correctness lane: a value the UI did not choose the length of ----------
 
 _ELIDE_CALL = re.compile(r"\belidedText\s*\(")
-# Elision sites that are NOT widget text, keyed by site and valued by a REASON, which is the
-# repo's exemption convention (tests/sweeps/exemptions.py): adding one costs a reviewer reading a
-# sentence, and a boolean would not.
+
+# Elision sites that are NOT widget text, keyed by the FUNCTION they sit in and valued by a REASON,
+# which is the repo's exemption convention (tests/sweeps/exemptions.py): adding one costs a reviewer
+# reading a sentence, and a boolean would not.
 #
-# A heuristic was tried first and abandoned honestly: "the nearest column-0 function definition"
-# names a file-scope helper for a delegate's indented paint(), and "a QPainter within 1500
-# characters" misses both real painters because the QPainter is a parameter 50 lines up. Two known
-# sites do not need a classifier.
+# Keyed by function rather than by `file:line`, since 2026-09-17. It WAS `file:line`, and the key
+# went stale the first time the delegate grew: a favourite star and a licence badge pushed a
+# BYTE-IDENTICAL call from line 193 to line 264, and the rule then reported "a second elision
+# implementation" for a line that had merely moved. A line number is the position of the code, not
+# a property of it, so it fails in both directions -- it accuses a move, and it would have excused
+# a genuinely new call that happened to land on the old number.
+#
+# The enclosing function is found by brace-matching backwards (`_enclosing_function`), which is what
+# the earlier abandoned heuristic lacked: "the nearest column-0 definition" named a file-scope
+# helper for a delegate's `paint()` because it never checked CONTAINMENT, and "a QPainter within
+# 1500 characters" missed both real painters because the QPainter is a parameter 50 lines up. Both
+# of those questions are answered by the signature of the function the call is actually inside.
 _ELISION_EXEMPT = {
-    # 191 -> 193: Task 5 read the two radii from ThemeManager at the top of paint().
-    "qt_ui/assets/ModelCardDelegate.cpp:193": "delegate paint: elides into the QRect it is handed, and has no widget to measure",
-    "qt_ui/CommandPaletteDialog.cpp:105": "delegate paint: same -- the row is a rect in a view, not a widget",
+    "qt_ui/assets/ModelCardDelegate.cpp::ModelCardDelegate::paint":
+        "delegate paint: elides into the QRect it is handed, and has no widget to measure",
+    "qt_ui/CommandPaletteDialog.cpp::paint":
+        "delegate paint: same -- the row is a rect in a view, not a widget",
 }
 
 
@@ -217,8 +227,43 @@ def _strip_line_comments(text: str) -> str:
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
 
 
-def _paints_into_a_rect(text: str, offset: int) -> bool:
-    return "QPainter" in text[max(0, offset - _PAINTER_SCOPE_WINDOW):offset]
+# An access specifier is not a statement boundary, but it looks like the end of one; without this
+# the qualifier is eaten and `ModelCardDelegate::paint` comes back as the bare `paint`.
+_ACCESS_SPECIFIER = re.compile(
+    r"^\s*(?:public|private|protected|signals|slots|Q_SLOTS|Q_SIGNALS)\s*:", re.M)
+# `if (x)` followed by a brace is a parenthesised thing before a body, and otherwise reads as a call.
+_NOT_A_FUNCTION = frozenset({"if", "for", "while", "switch", "catch", "return", "sizeof", "else", "do"})
+_SIGNATURE = re.compile(
+    r"(?:^|[\s*&>])((?:\w+::)*~?\w+)\s*\((?:[^()]|\([^()]*\))*\)\s*"
+    r"(?:const\b\s*)?(?:noexcept\b\s*)?(?:override\b\s*)?(?:final\b\s*)?$")
+
+
+def _enclosing_function(text: str, offset: int) -> tuple[str, str]:
+    """(name, signature) of the innermost function whose body contains `offset`.
+
+    Walks outwards through balanced braces and reads the code immediately before each unmatched
+    `{`. A namespace, a class body and an `if` block all fail to look like a signature, so the walk
+    keeps climbing; a lambda has no name before its `(`, so a call inside one is attributed to the
+    function that owns the lambda -- which is the function that owns the elision decision too.
+    """
+    depth = 0
+    index = offset
+    while index > 0:
+        index -= 1
+        char = text[index]
+        if char == "}":
+            depth += 1
+        elif char == "{":
+            if depth:
+                depth -= 1
+                continue
+            head = _strip_line_comments(text[:index])
+            cut = max(head.rfind(";"), head.rfind("}"), head.rfind("{"))
+            signature = _ACCESS_SPECIFIER.sub("", head[cut + 1:]).strip()
+            match = _SIGNATURE.search(signature)
+            if match and match.group(1).rsplit("::", 1)[-1] not in _NOT_A_FUNCTION:
+                return match.group(1), signature
+    return "", ""
 
 
 def test_widget_text_elides_through_one_helper() -> None:
@@ -228,8 +273,9 @@ def test_widget_text_elides_through_one_helper() -> None:
 
     PAINTED elision is a different question and stays exempt: a delegate has a QRect, not a widget,
     so it cannot ask a widget for its width. The exemption is the enclosing function being a paint
-    routine -- measured, both of the two current sites are, and the count is pinned so a fourth
-    implementation cannot arrive quietly."""
+    routine -- and that is CHECKED here rather than taken on trust: an exempt site whose signature
+    stops taking a QPainter has stopped being the thing its reason describes. The set is pinned, so
+    a fourth implementation cannot arrive quietly."""
     widget_side = []
     seen_exempt = set()
     for path in sources.cpp_sources():
@@ -238,12 +284,18 @@ def test_widget_text_elides_through_one_helper() -> None:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in _ELIDE_CALL.finditer(text):
+            name, signature = _enclosing_function(text, match.start())
+            site = f"{rel}::{name}"
             line = text.count("\n", 0, match.start()) + 1
-            site = f"{rel}:{line}"
             if site in _ELISION_EXEMPT:
+                assert "QPainter" in signature, (
+                    f"{site} is exempt because it paints into a rect it was handed, but its "
+                    f"signature takes no QPainter ({signature!r}) -- the reason has stopped "
+                    f"describing the code"
+                )
                 seen_exempt.add(site)
             else:
-                widget_side.append(site)
+                widget_side.append(f"{site} ({rel}:{line})")
     assert not widget_side, f"a second elision implementation for widget text: {widget_side}"
     # An exemption that no longer matches anything is a stale reason nobody will re-read.
     assert seen_exempt == set(_ELISION_EXEMPT), f"stale elision exemptions: {set(_ELISION_EXEMPT) - seen_exempt}"

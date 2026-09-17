@@ -209,12 +209,475 @@ identity is left untouched and is not treated as a usable SpellVision worker.
 
 ------------------------------------------------------------------------
 
+## Model Intelligence Commands
+
+Six commands over `model_intelligence_commands.py` (W1): who a local weight is according to the
+site that hosts it, and the settings it wants. Four are `USER_FACING` in
+`worker_command_audience.py`: `model_recommended_settings` (the cockpit asks it on every checkpoint
+change -- `MainWindow::fetchModelDefaultsAsync`, W2), and `model_intel_refresh`,
+`model_intel_cancel` and `model_intel_set_user`, which W5 wired into the Models page as "Refresh
+metadata" (per-model from the inspector, library-wide from the toolbar), its Stop button, and
+"Use my picture...". `model_intel_get` and `model_roots_status` stay `DIAGNOSTIC` and that is not
+an oversight: the inspector reads `<stem>.spellvision.json` off disk rather than asking for it,
+and the page decides for itself which roots are scannable (`scannableModelsRoots`).
+
+### Model Intel Get Request
+
+Reads the sidecar for one weight, if one exists.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_get",
+  "path": "D:/AI_ASSETS/models/checkpoints/novaExanimeXL_ilV50.safetensors"
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_intel",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/novaExanimeXL_ilV50.safetensors",
+  "sidecar": null,
+  "recommended": {}
+}
+```
+
+`sidecar` is `null` and `recommended` is `{}` when no `<stem>.spellvision.json` exists yet --
+never invented, per `model_intelligence/recommended.py`.
+
+### Model Intel Refresh Request
+
+Walks the given roots, hashes what it finds, looks it up, and writes sidecars. The work runs on a
+background thread and is always cancellable by `model_intel_cancel`; a full library pass is close
+to 80 minutes, so a caller subsets `roots` rather than waiting for one giant result.
+
+Two modes. By default the handler streams `model_intel_progress` events on the open connection and
+replies with the result there, preceded by a `model_intel_refresh_started` event carrying the
+`job_id`. With `"background": true` the reply IS that started event -- it returns immediately --
+and progress plus the final `model_intel_refresh` result are published to `subscribe`rs instead.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_refresh",
+  "roots": ["D:/AI_ASSETS/models/loras"],
+  "files": ["D:/AI_ASSETS/models/loras/Detailer-KREA2.safetensors"],
+  "background": false
+}
+```
+
+`files` is optional and narrows the pass to exactly those weights -- what the Models inspector's
+"Refresh metadata" sends, because it is about one model rather than a library. The toolbar's
+library-wide button omits it and always sends `"background": true`; the per-model button sends both
+(`qt_ui/assets/ModelRefreshController.cpp`, W5). Each one must lie
+inside the named `roots`; a file outside them is refused with a reason rather than hashed. Without
+it every weight under `roots` is walked, smallest first.
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_refresh",
+  "ok": true,
+  "job_id": "mi_4f1c9a2b7de0",
+  "examined": 475,
+  "identified": 402,
+  "no_match": 73,
+  "lookup_failed": 0,
+  "cancelled": false,
+  "skipped_unreadable": [],
+  "errors": [],
+  "total": 475
+}
+```
+
+A root that cannot be read (missing, or BitLocker-locked) is named in `skipped_unreadable` rather
+than silently contributing zero files to the total.
+
+`no_match` and `lookup_failed` are different facts and are counted separately. `no_match` is the
+site answering that it does not know this hash, and it is recorded in the sidecar. `lookup_failed`
+is the lookup never completing -- offline, throttled, a malformed response -- and such a file
+keeps whatever a previous successful refresh established: its name, trigger words, sources and
+pictures are not overwritten by an empty answer.
+
+### Model Intel Cancel Request
+
+Stops a running refresh. The flag lives in `model_intelligence/jobs.py` rather than on either
+connection, because a cancel necessarily arrives on a different one from the refresh it stops --
+and in background mode the starting connection is already closed.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_cancel",
+  "job_id": "mi_4f1c9a2b7de0"
+}
+```
+
+Omit `job_id` to cancel every refresh that is running.
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_cancel",
+  "ok": true,
+  "job_id": "mi_4f1c9a2b7de0",
+  "cancelled": ["mi_4f1c9a2b7de0"],
+  "running": []
+}
+```
+
+`ok` is `false` with an `error` when no refresh is running under that id -- a caller told `ok`
+for the wrong id would watch the refresh continue and conclude cancel is broken. The cancelled
+run still returns its result, with `"cancelled": true` and the counts it reached.
+
+### Model Intel Set User Request
+
+Records a user override -- name, picture, notes, or a specific setting -- that a later refresh
+must never revert.
+
+#### Request
+
+``` json
+{
+  "command": "model_intel_set_user",
+  "path": "D:/AI_ASSETS/models/checkpoints/house_v1.safetensors",
+  "name": "My Favourite"
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_intel_set_user",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/house_v1.safetensors",
+  "changed": ["name"]
+}
+```
+
+`ok` is `false` with an `error` string when `path` does not carry a model extension (per
+`model_intelligence/hashing.py`), and -- when the request also names `roots` (or `models_roots`)
+-- when `path` or `picture` resolves outside every one of them.
+
+**Be precise about what that does and does not guarantee.** A request that names NO roots gets no
+location check at all: any path with a model extension is accepted, anywhere on the machine. That
+is the honest state of the code, and this paragraph exists because the previous version of it
+claimed the opposite -- it said a path outside the model roots was refused when only the extension
+was ever examined, and a test named for the location check passed on the extension. The surface is
+bounded instead by `worker_auth`: these commands are LOCAL_TRUSTED only, so a token holder is
+denied and `LOCAL_PROBE` gets `ping`. A caller promoted to USER_FACING must send its configured
+roots with every request: `MainWindow::fetchModelDefaultsAsync` (W2) sends `scannableModelsRoots`,
+which is what makes the containment above real for the cockpit's own asks. W5's Models-page callers
+must do the same when they land.
+
+### Model Recommended Settings Request
+
+Resolves the settings a model wants, through `model_intelligence/resolve.py` (W2): the sidecar
+first, then this project's own runtime operating-point table, then the family's published floor
+underneath it. A sampler or scheduler the family's graph cannot accept is dropped to the family's
+own default with a warning rather than offered; a canvas beyond a (deliberately heuristic) VRAM
+budget is snapped down with a warning instead of silently rendered smaller.
+
+#### Request
+
+``` json
+{
+  "command": "model_recommended_settings",
+  "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
+  "family": "krea2",
+  "mode": "t2i",
+  "live_samplers": ["euler", "er_sde"],
+  "live_schedulers": ["simple", "normal"],
+  "vram_gb": 24,
+  "host_ram_gb": 64
+}
+```
+
+`family`, `mode`, `live_samplers`, `live_schedulers`, `vram_gb` and `host_ram_gb` are all optional.
+`live_samplers`/`live_schedulers` narrow the family's own sampler/scheduler allowlist further (a
+live `/object_info` dump, when the caller has one); `vram_gb` is the only input that can trigger a
+canvas cap, and an absent/zero value means "hardware not known", which resolves with no cap and no
+opinion.
+
+#### Response
+
+``` json
+{
+  "type": "model_recommended_settings",
+  "ok": true,
+  "path": "D:/AI_ASSETS/models/checkpoints/krea2_base.safetensors",
+  "family": "krea2",
+  "operating_point": "raw",
+  "settings": {
+    "steps": {
+      "value": 52,
+      "provenance": "table:family-operating-point",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    }
+  },
+  "warnings": []
+}
+```
+
+A field's `provenance` is one of `user`, `site:image-meta-mode`, `site:trainedWords`,
+`card:frontmatter`, `card:snippet-regex`, `card:prose-regex`, `site:image-meta-weak`,
+`table:family-operating-point` or `table:family-default` -- the site's own example images outrank
+a card snippet, and this project's own render-tuned operating-point table outranks the family's
+published floor, per `model_intelligence/resolve.py`. A capped field keeps its provenance with
+`:capped` appended (e.g. `site:image-meta-mode:capped`), so the caption can say the number shown
+is not the number the model asked for. `operating_point` names the operating point (`raw` /
+`turbo` / `quality` / `fast` / ...) the settings were resolved against, `null` for a family with
+none -- the cockpit's Speed chip reads it so the two never disagree.
+
+### Model Roots Status Request
+
+Reports which of the given model roots can be read right now.
+
+#### Request
+
+``` json
+{
+  "command": "model_roots_status",
+  "roots": ["D:/AI_ASSETS/models"]
+}
+```
+
+#### Response
+
+``` json
+{
+  "type": "model_roots_status",
+  "ok": true,
+  "roots": [
+    {"path": "D:/AI_ASSETS/models", "readable": true, "reason": ""}
+  ]
+}
+```
+
+`reason` is `"missing"`, `"locked"` (BitLocker) or `"error"` when `readable` is `false`.
+
+------------------------------------------------------------------------
+
+## Comfy Runtime Commands
+
+### Restart Comfy Runtime Request
+
+Stops the managed ComfyUI process (if any) and starts it again. With no `arm`-shaped keys, this
+launches exactly as `start_comfy_runtime` always has -- the same environment-driven attention/VRAM
+defaults, unchanged. Naming any of `attention`, `fast`, `dynamic_vram` or `vram_headroom` launches
+that arm explicitly instead, for a measured A/B: the flag for whichever side is named is written to
+the command line rather than left to ComfyUI's own default, so a request for `sdpa` is
+distinguishable on the wire from "nothing was asked for and SDPA happened to run".
+
+#### Request
+
+``` json
+{
+  "command": "restart_comfy_runtime",
+  "startup_timeout_sec": 90,
+  "attention": "sdpa",
+  "fast": ["fp16_accumulation"],
+  "dynamic_vram": false,
+  "vram_headroom": 16
+}
+```
+
+All fields are optional. `startup_timeout_sec` defaults to 60. `attention` accepts the same
+spellings as `SPELLVISION_COMFY_ATTENTION` (`sage`/`sageattention`/`sage_attention`,
+`sdpa`/`pytorch`/`torch`/`none`/`off`/`default`); naming `sage` when the package is not importable
+in ComfyUI's own venv **fails the request** rather than silently launching SDPA -- a caller that
+asked for sage must be told it did not get sage, not be handed a mislabelled row. `fast` is a list
+of `comfy/cli_args.py` `PerformanceFeature` names (an empty list requests the bare `--fast`, which
+enables all of them). `dynamic_vram: false` passes `--disable-dynamic-vram`; omitting the key, or
+passing `true`, leaves DynamicVRAM on (this core's own default). `vram_headroom` is a number of GB
+to reserve for the OS via `--reserve-vram`; omitted or `null` means "ComfyUI's own OS-dependent
+reservation", which is not the same as reserving nothing.
+
+An arm is **remembered for the session**. Naming no arm key does not mean "launch the environment
+default" -- it means "keep whatever this session was last launched with", so a restart performed for
+some other reason cannot silently replace the configuration a caller asked for. (It did: a rewritten
+`extra_model_paths.yaml` restarts ComfyUI, and that restart used to re-resolve attention from the
+environment, turning an explicitly requested `sdpa` session into a `sage` one with nothing in the
+reply saying so.) The environment is the fallback only for the first launch of a session.
+
+To go back to the environment, send a nested empty arm -- `{"command": "restart_comfy_runtime",
+"arm": {}}`. The flat keys alone cannot express it, because "named no arm key" and "named an empty
+arm" look identical in that form; a nested `arm` object may also carry the same four keys, and wins
+over the flat ones when both are present.
+
+#### Response
+
+``` json
+{
+  "type": "comfy_runtime_ack",
+  "action": "restart_comfy_runtime",
+  "ok": true,
+  "state": "ready_managed",
+  "argv": [
+    "C:/sv_comfynext_v034/.venv/Scripts/python.exe", "C:/sv_comfynext_v034/ComfyUI/main.py",
+    "--listen", "127.0.0.1", "--port", "8188", "--dont-print-server",
+    "--use-pytorch-cross-attention", "--fast", "fp16_accumulation",
+    "--disable-dynamic-vram", "--reserve-vram", "16"
+  ],
+  "endpoint": "http://127.0.0.1:8188"
+}
+```
+
+`argv` is the command line this restart actually launched -- read back from the same
+`recommended_command`/`Popen` call, not recomputed from the request -- so a caller can verify the
+arm took rather than trust that the request was honoured. This matters because the Qt sage probe
+fails open to SDPA on a cold cache miss (`RuntimeProfile.cpp`): a request for `sage` can legitimately
+launch a process running SDPA, and only reading the process back (here, or via
+`optimization_provenance.probe()` against the running `/system_stats`) tells the two apart.
+
+------------------------------------------------------------------------
+
+## Optimization Results
+
+Reads the optimization ledger (`runtime/state/optimization_results.jsonl`), whose only writer is
+`scripts/dev/measure_optimizations.py`. DIAGNOSTIC: no UI route until W3 T6.
+
+**Request**
+
+```json
+{
+  "command": "optimization_results",
+  "family": "krea2",
+  "lever": "sage_attention",
+  "limit": 50
+}
+```
+
+`family`, `lever` and `limit` are all optional; with none of them the whole ledger comes back.
+
+**Reply**
+
+```json
+{
+  "type": "optimization_results",
+  "ok": true,
+  "rows": [
+    {
+      "family": "krea2", "mode": "t2i", "lever": "sage_attention", "arm": "sage",
+      "seconds": [120.72, 122.10], "mean": 121.41,
+      "baseline_mean": 124.01, "delta_pct": -2.1,
+      "warm": true,
+      "quality": {"guards": ["black_frame"], "status": "pass", "values": {}},
+      "memory": {"peak_vram_gb": null, "comparable": false, "reason": "no --reserve-vram was passed"},
+      "provenance": {"attention_backend": "sage", "comfy_argv": ["..."], "fast_flags": []},
+      "exclusions": [], "excluded_from_delta": false,
+      "dest": "...", "job_id": "...", "recorded_at": "2026-09-16T21:04:11"
+    }
+  ],
+  "families": ["krea2"],
+  "levers": ["sage_attention"],
+  "unmeasured_levers": ["vae_tiling"],
+  "blocked_levers": {"ck_int8_attention": "..."},
+  "cut_levers": {"nvfp4": "..."},
+  "path": "C:/.../runtime/state/optimization_results.jsonl"
+}
+```
+
+Four properties of a row are enforced by `python/optimization_results.py` rather than left to the
+writer, and each exists because a published number on this project violated it:
+
+* **`seconds` is a list, never a scalar.** A single timing is not a measurement; a row with one
+  timed run is recorded and excluded from every delta.
+* **`warm` is explicit.** The archive holds the same configuration at 159.27 s cold and 120.72 s
+  warm.
+* **`baseline_mean` travels with the row**, so a delta can never be computed against a baseline
+  from another session or another build. Nothing reads a baseline out of a different row.
+* **A row whose `provenance.attention_backend` is `unknown` is recorded and excluded from every
+  delta** -- the harness has to be able to say "this ran, and I cannot tell you on what".
+
+`excluded_from_delta` is therefore never a silent drop: `exclusions` names every reason, and
+`delta_pct` is `null` whenever it is set.
+
+------------------------------------------------------------------------
+
+## Workflow Import
+
+A dropped or pasted ComfyUI workflow is imported with one request.
+
+``` json
+{
+  "command": "import_workflow",
+  "source": "D:/drops/asteral.json",
+  "auto_apply_node_deps": false,
+  "auto_apply_model_deps": false
+}
+```
+
+`source` takes a file path, inline JSON, or a URL. Both `auto_apply_*` default **closed**: nothing
+is fetched until the user has seen what would be fetched and agreed to it, and the UI re-sends the
+same request with them true after consent.
+
+The reply is flat, with the on-disk paths under `artifacts`, and it answers two separate questions.
+What the graph **is** (`inferred_task_command`, `inferred_media_type`, `capability_report`,
+`supported_modes`, `classification_confidence`) and whether it **can run here**:
+
+``` json
+{
+  "type": "workflow_import_result",
+  "ok": true,
+  "import_slug": "asteral-json",
+  "inferred_task_command": "t2i",
+  "artifacts": { "import_root": "...", "profile_path": "...", "workflow_path": "..." },
+  "launch_readiness": {
+    "ready": true,
+    "readiness_determined": true,
+    "undetermined_reason": "",
+    "summary": "Re-checked against live ComfyUI: nodes 0/0 already installed, ... models 5/5 present, 0 missing.",
+    "missing_node_classes": [],
+    "missing_runtime_assets": [],
+    "node_counts": { "checked": 0, "already_installed": 0, "installable": 0, "unresolved": 0 },
+    "model_counts": { "checked": 5, "already_present": 5, "missing": 0, "ambiguous": 0 }
+  }
+}
+```
+
+`launch_readiness` is present on **every** import reply, including a failed one, and is computed by
+the same function `check_workflow_launch_readiness` returns -- so the two replies cannot disagree
+about the same workflow.
+
+### `ready` is a tri-state and must be read as one
+
+| value | meaning |
+|---|---|
+| `true` | every node class and every model this graph names is present on this machine |
+| `false` | something is genuinely missing; `missing_node_classes` / `missing_runtime_assets` say what |
+| `null` | **the verdict could not be established.** Not ready, not unready |
+
+`null` is not a formality. A UI-graph export keeps its model names in positional `widgets_values`,
+so a scan of the raw graph returns no model references at all -- and zero references read as "no
+models missing" and carried the whole verdict to `ready`. That shipped: an imported workflow stored
+`"ok": true` beside `models 0/0 present`, a green badge over checkpoints nobody had looked at. The
+readiness pass now compiles a UI graph in memory against the live `/object_info` so it can see them,
+and when there is no live schema to compile against it says `null` rather than guessing.
+
+A client that collapses `null` into either bool is wrong in one direction or the other. Treat it the
+way the drop path does: open the workflow for review, keep submission closed, and say why.
+
+------------------------------------------------------------------------
+
 ## Command Coverage
 
-**This document details 3 of 127 commands.** The two examples above are the shape
-every command follows, not the set of commands that exist -- and the difference matters, because a
-reader who took the old "Future Request Types" list at face value would have believed `t2v` and
-`i2v` were unimplemented. Both have been shipping and render-proven since 2026-08.
+**This document details 12 of 135 commands.** The two examples above the Model Intelligence
+Commands section are the shape every command follows, not the set of commands that exist -- and
+the difference matters, because a reader who took the old "Future Request Types" list at face
+value would have believed `t2v` and `i2v` were unimplemented. Both have been shipping and
+render-proven since 2026-08.
 
 The authoritative list is `python/worker_command_audience.py`, which classifies every command by who
 it is for. `tests/test_protocol_doc.py` asserts these counts against that module, so this section
@@ -222,10 +685,10 @@ cannot quietly go stale the way the "Planned commands" list did.
 
 | audience | count | what it means |
 |---|---|---|
-| user-facing | 57 | reachable from the UI by a normal user action |
-| diagnostic | 54 | for inspecting state; safe, but not part of a normal flow |
+| user-facing | 62 | reachable from the UI by a normal user action |
+| diagnostic | 57 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
-| **total** | **127** | |
+| **total** | **135** | |
 
 Commands not detailed here still follow the envelope and event model described above: a `command`
 field, an optional `job_id`, and the same status / progress / result / error events.

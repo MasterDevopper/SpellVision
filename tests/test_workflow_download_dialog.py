@@ -8,6 +8,30 @@ CPP = ROOT / "qt_ui" / "workflows" / "WorkflowDownloadDialog.cpp"
 CMAKE = ROOT / "CMakeLists.txt"
 
 
+def _drop_path_source() -> str:
+    """The workflow-drop import, wherever it lives.
+
+    These checks used to slice MainWindow.cpp between the ``workflowFileDropped`` connect and the
+    next connect under it -- that is, they sliced a LAMBDA by its neighbours. The moment the lambda
+    was lifted into a named function (it was 186 lines inside connectGenerationPage, and the window
+    -level drop needed a second caller for it) the slice came back EMPTY and all four checks failed,
+    with the behaviour they describe completely unchanged.
+
+    A grep that is anchored on what sits next to the code is measuring the neighbourhood. Look the
+    implementation up by name instead, and look in both homes: MainWindow while the import lives
+    there, and WorkflowDropCoordinator once the sequence moves into its own unit.
+    """
+    parts = []
+    coordinator = ROOT / "qt_ui" / "workflows" / "WorkflowDropCoordinator.cpp"
+    if coordinator.is_file():
+        parts.append(coordinator.read_text(encoding="utf-8"))
+    mw = MW.read_text(encoding="utf-8")
+    if "MainWindow::importDroppedWorkflow" in mw:
+        parts.append(mw.split("MainWindow::importDroppedWorkflow", 1)[1].split("\nvoid MainWindow::", 1)[0])
+    assert parts, "no workflow-drop implementation found in MainWindow.cpp or WorkflowDropCoordinator.cpp"
+    return "\n".join(parts)
+
+
 def test_workflow_download_dialog_exists_and_promises_no_fetch_until_click() -> None:
     assert HDR.is_file()
     assert CPP.is_file()
@@ -18,8 +42,7 @@ def test_workflow_download_dialog_exists_and_promises_no_fetch_until_click() -> 
 
 
 def test_cockpit_drop_opens_download_dialog_when_nodes_are_missing() -> None:
-    mw = MW.read_text(encoding="utf-8")
-    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    drop = _drop_path_source()
     assert "missing_custom_nodes" in drop
     assert "WorkflowDownloadDialog" in drop
     assert "auto_apply_node_deps" in drop
@@ -28,8 +51,7 @@ def test_cockpit_drop_opens_download_dialog_when_nodes_are_missing() -> None:
 def test_cockpit_drop_opens_download_dialog_when_models_are_missing() -> None:
     """Missing checkpoints/UNETs/VAEs must share the same Download dialog.
     Nodes-only dialog left models on Flows with no fetch path."""
-    mw = MW.read_text(encoding="utf-8")
-    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    drop = _drop_path_source()
     assert "dependency_plan" in drop
     assert "model_plan" in drop
     assert "install_actions" in drop
@@ -51,8 +73,7 @@ def test_download_dialog_asks_for_missing_keys_with_create_url() -> None:
     assert "askHfToken" in hdr
     assert "https://huggingface.co/settings/tokens" in cpp
     assert "https://civitai.com/user/account" in cpp
-    mw = MW.read_text(encoding="utf-8")
-    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    drop = _drop_path_source()
     assert "hasCredential" in drop
     assert "hf_token" in drop
     assert "civitai_api_key" in drop
@@ -60,8 +81,7 @@ def test_download_dialog_asks_for_missing_keys_with_create_url() -> None:
 
 def test_download_dialog_skips_already_installed_nodes() -> None:
     """BasicT2I_V23 listed 16 missing_custom_nodes whose packs were already_installed."""
-    mw = MW.read_text(encoding="utf-8")
-    drop = mw.split("workflowFileDropped", 1)[1].split("prepForI2IRequested", 1)[0]
+    drop = _drop_path_source()
     assert "already_installed" in drop
     assert "node_plan" in drop
     assert "class_name" in drop

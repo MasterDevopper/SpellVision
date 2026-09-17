@@ -3,6 +3,10 @@
 #include "ThemeManager.h"
 #include "shell/RuntimeProfile.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "shell/EndpointPanel.h"
+#include "shell/EndpointProbe.h"
+#include "shell/EndpointRegistry.h"
+#include "shell/OptimizationEvidence.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -286,9 +290,10 @@ ManagerPage::ManagerPage(QWidget *parent)
     nodeSummaryLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Nodes: not checked"));
     cacheSourceLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Cache source: none"));
     lastCheckedLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"), QStringLiteral("Last checked: never"));
-    workersLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"),
-                              QStringLiteral("Workers:\n127.0.0.1:8188 master — unknown\n192.168.1.127:8188 SpellNode — unknown\nWhole jobs only. VRAM does not add."));
-    workersLabel_->setWordWrap(true);
+    // The machines this install may render on. Was three hardcoded lines in a QLabel, one of them
+    // naming the second box by IP; the panel renders spellvision::shell::EndpointRegistry, which is
+    // QSettings data the user can edit, and each row says what that machine actually answered.
+    endpointPanel_ = new spellvision::shell::EndpointPanel(this);
 
     // ComfyUI version row. The installed version comes from /system_stats (previously fetched and
     // discarded); the latest comes from the Comfy-Org releases API. "Update available" is the only
@@ -326,25 +331,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     leftLayout->addWidget(nodeSummaryLabel_);
     leftLayout->addWidget(cacheSourceLabel_);
     leftLayout->addWidget(lastCheckedLabel_);
-    leftLayout->addWidget(workersLabel_);
-
-    dualPcConsentCheck_ = new QCheckBox(
-        QStringLiteral("Share dest with SpellNode (ComfyUI-Distributed; whole jobs only; VRAM does not add)"),
-        this);
-    dualPcConsentCheck_->setObjectName(QStringLiteral("ManagerDualPcConsent"));
-    dualPcShareEdit_ = new QLineEdit(this);
-    dualPcShareEdit_->setObjectName(QStringLiteral("ManagerDualPcShare"));
-    dualPcShareEdit_->setPlaceholderText(QStringLiteral("Browse a folder SpellNode may write dests into"));
-    dualPcShareBrowseButton_ = makeButton(QStringLiteral("Browse share…"));
-    enableDistributedButton_ = makeButton(QStringLiteral("Enable ComfyUI-Distributed…"));
-    auto *shareRow = new QHBoxLayout();
-    shareRow->setContentsMargins(0, 0, 0, 0);
-    shareRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    shareRow->addWidget(dualPcShareEdit_, 1);
-    shareRow->addWidget(dualPcShareBrowseButton_);
-    shareRow->addWidget(enableDistributedButton_);
-    leftLayout->addWidget(dualPcConsentCheck_);
-    leftLayout->addLayout(shareRow);
+    leftLayout->addWidget(endpointPanel_);
 
     auto *rightStatus = new QWidget(this);
     auto *rightLayout = new QVBoxLayout(rightStatus);
@@ -369,6 +356,51 @@ ManagerPage::ManagerPage(QWidget *parent)
         pathActions->addWidget(button);
     pathActions->addStretch(1);
     outer->addLayout(pathActions);
+
+    // --- optimization evidence ------------------------------------------------------------------
+    //
+    // Until this panel there was no way to tell, from inside the app, which optimizations a render
+    // had actually run on. That is not hypothetical: ComfyUI was running WITH SageAttention one
+    // morning, died, was relaunched WITHOUT it, and nothing said so -- renders on either side were
+    // indistinguishable afterwards. `sageattention` is installed in ComfyUI's venv either way, so
+    // "installed" answers a different question from "active", and only the second one is about the
+    // render that just happened.
+    //
+    // Every column is read, never assumed: installed from the venv probe, active from the LIVE
+    // argv, measured from the ledger, and a lever with no verified row says "not timed" rather than
+    // showing a blank that reads as zero.
+    auto *optimizationHeaderRow = new QHBoxLayout();
+    optimizationHeaderRow->setContentsMargins(0, 0, 0, 0);
+    optimizationHeaderRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    optimizationHeaderRow->addWidget(makeLabel(QStringLiteral("ManagerStatusLabel"),
+                                               QStringLiteral("Optimizations")));
+    refreshOptimizationButton_ = makeButton(QStringLiteral("Re-read evidence"));
+    refreshOptimizationButton_->setToolTip(QStringLiteral(
+        "Re-reads the running ComfyUI's command line and the measurement ledger.\n\n"
+        "Active is read from the process that is running right now, not from what the launcher "
+        "asked for. Those have diverged on this machine before."));
+    optimizationHeaderRow->addWidget(refreshOptimizationButton_);
+    optimizationHeaderRow->addStretch(1);
+    outer->addLayout(optimizationHeaderRow);
+
+    optimizationSummaryLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"),
+                                          QStringLiteral("Optimizations: not read yet."));
+    outer->addWidget(optimizationSummaryLabel_);
+
+    optimizationTable_ = new QTableWidget(this);
+    optimizationTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
+    optimizationTable_->setColumnCount(
+        static_cast<int>(spellvision::shell::OptimizationEvidence::columnHeadings().size()));
+    optimizationTable_->setHorizontalHeaderLabels(
+        spellvision::shell::OptimizationEvidence::columnHeadings());
+    optimizationTable_->horizontalHeader()->setStretchLastSection(true);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    optimizationTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    optimizationTable_->setAlternatingRowColors(true);
+    optimizationTable_->setMaximumHeight(240);
+    outer->addWidget(optimizationTable_);
 
     auto *familyRow = new QHBoxLayout();
     familyRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
@@ -484,15 +516,18 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
     connect(updateComfyButton_, &QPushButton::clicked, this, &ManagerPage::onUpdateComfyClicked);
     connect(buildNodeIndexButton_, &QPushButton::clicked, this, &ManagerPage::onBuildNodeIndexClicked);
-    connect(dualPcConsentCheck_, &QCheckBox::toggled, this, [this](bool) {
-        persistDualPcSettings();
-        updateDualPcEnableState();
-    });
-    connect(dualPcShareEdit_, &QLineEdit::editingFinished, this, &ManagerPage::persistDualPcSettings);
-    connect(dualPcShareBrowseButton_, &QPushButton::clicked, this, &ManagerPage::browseDualPcShare);
-    connect(enableDistributedButton_, &QPushButton::clicked, this, &ManagerPage::enableDistributedPack);
-    restoreDualPcSettings();
-    updateDualPcEnableState();
+    connect(refreshOptimizationButton_, &QPushButton::clicked, this, &ManagerPage::refreshOptimizationEvidence);
+    connect(endpointPanel_, &spellvision::shell::EndpointPanel::refreshRequested,
+            this, &ManagerPage::refreshEndpointStatuses);
+    connect(endpointPanel_, &spellvision::shell::EndpointPanel::registryChanged,
+            this, &ManagerPage::refreshEndpointStatuses);
+    connect(&spellvision::shell::EndpointProbe::instance(),
+            &spellvision::shell::EndpointProbe::statusChanged,
+            this, [this](const QString &) {
+                if (endpointPanel_)
+                    endpointPanel_->refreshRows();
+            });
+    refreshEndpointStatuses();
 
     comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(currentComfyRoot()));
     modelsRootLabel_->setText(QStringLiteral("Models root: %1").arg(currentModelsRoot()));
@@ -504,8 +539,10 @@ void ManagerPage::setProjectRoot(const QString &projectRoot)
 
     // The constructor set these labels before it knew the project root, so the live-root lookup --
     // which reads a file under it -- could not run yet. Refresh now that it can.
+    const spellvision::shell::RuntimeProfile localProfile =
+        spellvision::shell::RuntimeProfile::load(projectRoot_);
     const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
-        projectRoot_, QStringLiteral("127.0.0.1"), 8188);
+        projectRoot_, localProfile.comfyHost, localProfile.comfyPort);
     const QString configured = configuredComfyRoot();
     if (!liveRoot.isEmpty() && !configured.isEmpty() && liveRoot != configured)
     {
@@ -554,8 +591,14 @@ QString ManagerPage::currentComfyRoot() const
     // the running one does not merely mislabel the page: it installs into a tree nothing reads,
     // and the operation still reports success. configuredComfyRoot() keeps the stated intent
     // visible so the override is reported rather than silent.
+    // The host and port come from the resolver rather than from two more literals here. This page
+    // used to spell 127.0.0.1:8188 in four places, one of which was the second machine's address --
+    // and a page that spells an endpoint cannot be pointed at a different one.
+    const QString localRoot = resolveProjectRoot();
+    const spellvision::shell::RuntimeProfile localProfile =
+        spellvision::shell::RuntimeProfile::load(localRoot);
     const QString liveRoot = spellvision::shell::resolveLiveComfyRoot(
-        resolveProjectRoot(), QStringLiteral("127.0.0.1"), 8188);
+        localRoot, localProfile.comfyHost, localProfile.comfyPort);
     if (!liveRoot.isEmpty())
         return liveRoot;
 
@@ -608,36 +651,26 @@ void ManagerPage::setBusy(bool busy)
                                    : QStringLiteral("Manager ready."));
 }
 
-void ManagerPage::updateWorkersLabel(bool localHealthy)
+// The endpoint list, refreshed from the endpoints themselves.
+//
+// What this replaces: a QNetworkAccessManager GET at a host spelled as a C++ literal, whose reply
+// handler then decided whether the LOCAL master was healthy by reading another QLabel's text --
+//
+//     const bool localHealthy = runtimeStateLabel_->text().contains("healthy=yes");
+//
+// -- so the health of the machine the app runs on was a substring of a caption. Reword the caption
+// and the master goes offline; translate the app and it never comes online at all.
+void ManagerPage::refreshEndpointStatuses()
 {
-    if (!workersLabel_)
+    if (!endpointPanel_)
         return;
-    const QString local = localHealthy ? QStringLiteral("online") : QStringLiteral("offline");
-    const QString node = !spellNodeProbed_
-                             ? QStringLiteral("checking")
-                             : (spellNodeOnline_ ? QStringLiteral("online") : QStringLiteral("offline — fail-closed"));
-    workersLabel_->setText(QStringLiteral(
-                               "Workers:\n127.0.0.1:8188 master — %1\n192.168.1.127:8188 SpellNode — %2\n"
-                               "Whole jobs only. VRAM does not add (does not pool VRAM). Generate will not queue to an offline worker.")
-                               .arg(local, node));
-}
-
-void ManagerPage::probeSpellNodeWorker()
-{
-    auto *nam = new QNetworkAccessManager(this);
-    QNetworkRequest request(QUrl(QStringLiteral("http://192.168.1.127:8188/system_stats")));
-    request.setTransferTimeout(2500);
-    QNetworkReply *reply = nam->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, nam]() {
-        spellNodeProbed_ = true;
-        spellNodeOnline_ = reply->error() == QNetworkReply::NoError
-            && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200;
-        const bool localHealthy = runtimeStateLabel_
-            && runtimeStateLabel_->text().contains(QStringLiteral("healthy=yes"));
-        updateWorkersLabel(localHealthy);
-        reply->deleteLater();
-        nam->deleteLater();
-    });
+    const spellvision::shell::RuntimeProfile profile =
+        spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    const QString localBaseUrl = QStringLiteral("http://%1:%2")
+                                     .arg(profile.comfyHost)
+                                     .arg(profile.comfyPort);
+    endpointPanel_->setRegistry(spellvision::shell::EndpointRegistry::load(localBaseUrl));
+    spellvision::shell::EndpointProbe::instance().refresh(endpointPanel_->registry());
 }
 
 QJsonObject ManagerPage::parseWorkerResponse(const QString &stdoutText, const QString &stderrText) const
@@ -852,7 +885,11 @@ void ManagerPage::warmCache()
 
 void ManagerPage::refreshStatus()
 {
-    probeSpellNodeWorker();
+    refreshEndpointStatuses();
+    // Before the manager-status early returns below, not after: a fresh status cache must not mean
+    // a stale answer about what is running. The arm changes on a ComfyUI restart, which is exactly
+    // the moment the cached manager status is still perfectly valid.
+    refreshOptimizationEvidence();
     tryLoadManagerStatusCacheFromDisk();
 
     if (hasManagerStatusCache())
@@ -893,6 +930,75 @@ void ManagerPage::refreshStatus()
                 applyManagerStatus(livePayload);
             }
         });
+}
+
+void ManagerPage::refreshOptimizationEvidence()
+{
+    if (optimizationRequestInFlight_)
+        return;
+
+    // Its own socket call rather than sendWorkerRequestAsync: that path is gated on
+    // managerRequestInFlight_ and sets the page busy, and this is a cheap read that has to be able
+    // to run while a 15-minute node install is in flight.
+    optimizationRequestInFlight_ = true;
+
+    const QJsonObject request{{QStringLiteral("command"), QStringLiteral("optimization_results")}};
+    spellvision::workers::WorkerSocketClient::send(
+        this, request, 20000,
+        [this](const QJsonObject &response, const QString &diagnostics, bool)
+        {
+            optimizationRequestInFlight_ = false;
+            if (response.isEmpty())
+            {
+                applyOptimizationEvidence(QJsonObject{
+                    {QStringLiteral("ok"), false},
+                    {QStringLiteral("error"), diagnostics.trimmed().isEmpty()
+                                                  ? QStringLiteral("the worker did not answer")
+                                                  : diagnostics.trimmed()},
+                });
+                return;
+            }
+            applyOptimizationEvidence(response);
+        });
+}
+
+void ManagerPage::applyOptimizationEvidence(const QJsonObject &payload)
+{
+    if (!optimizationTable_ || !optimizationSummaryLabel_)
+        return;
+
+    if (!payload.value(QStringLiteral("ok")).toBool(false))
+    {
+        // Nothing is shown rather than a table of defaults. A panel whose whole subject is "do not
+        // assume the arm" cannot open by assuming one.
+        optimizationTable_->setRowCount(0);
+        const QString error = payload.value(QStringLiteral("error")).toString();
+        optimizationSummaryLabel_->setText(
+            QStringLiteral("Optimizations: could not be read (%1). Nothing below is claimed.")
+                .arg(error.isEmpty() ? QStringLiteral("no reason given") : error));
+        return;
+    }
+
+    const QList<spellvision::shell::OptimizationEvidenceRow> rows =
+        spellvision::shell::OptimizationEvidence::rows(payload);
+
+    optimizationSummaryLabel_->setText(spellvision::shell::OptimizationEvidence::summaryText(payload));
+    optimizationSummaryLabel_->setToolTip(payload.value(QStringLiteral("path")).toString());
+
+    optimizationTable_->setRowCount(static_cast<int>(rows.size()));
+    for (int index = 0; index < static_cast<int>(rows.size()); ++index)
+    {
+        const spellvision::shell::OptimizationEvidenceRow &row = rows.at(index);
+        const QStringList cells{row.label, row.installed, row.active, row.measured, row.verdict};
+        for (int column = 0; column < static_cast<int>(cells.size()); ++column)
+        {
+            auto *item = new QTableWidgetItem(cells.at(column));
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            if (!row.toolTip.isEmpty())
+                item->setToolTip(row.toolTip);
+            optimizationTable_->setItem(index, column, item);
+        }
+    }
 }
 
 void ManagerPage::installManager()
@@ -1282,7 +1388,11 @@ void ManagerPage::applyManagerStatus(const QJsonObject &payload)
         runtimeStateLabel_->setText(QStringLiteral("Runtime: %1 • healthy=%2")
                                         .arg(runtime.value(QStringLiteral("state")).toString(QStringLiteral("unknown")),
                                              boolText(runtime.value(QStringLiteral("healthy")).toBool(false))));
-    updateWorkersLabel(runtime.value(QStringLiteral("healthy")).toBool(false));
+    // The endpoint rows do NOT take the master's health from this reply. comfy_manager_status
+    // answers about the runtime this worker manages, which is one endpoint of several; the
+    // panel asks each machine directly. Taking it from here is how the old code ended up
+    // scraping a caption for "healthy=yes".
+    refreshEndpointStatuses();
     applyComfyVersionCheck(runtime.value(QStringLiteral("version_check")).toObject());
     if (comfyRootLabel_)
         comfyRootLabel_->setText(QStringLiteral("Comfy root: %1").arg(comfyRoot_));
@@ -1523,100 +1633,3 @@ void ManagerPage::importSelectedModelChoice()
         });
 }
 
-void ManagerPage::persistDualPcSettings()
-{
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    settings.setValue(QStringLiteral("runtime/dualPcConsent"),
-                      dualPcConsentCheck_ && dualPcConsentCheck_->isChecked());
-    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
-    settings.setValue(QStringLiteral("runtime/dualPcShareFolder"), share);
-}
-
-void ManagerPage::restoreDualPcSettings()
-{
-    QSettings settings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
-    const bool consent = settings.value(QStringLiteral("runtime/dualPcConsent"), false).toBool();
-    const QString share = settings.value(QStringLiteral("runtime/dualPcShareFolder")).toString().trimmed();
-    if (dualPcConsentCheck_)
-    {
-        const QSignalBlocker blocker(dualPcConsentCheck_);
-        dualPcConsentCheck_->setChecked(consent);
-    }
-    if (dualPcShareEdit_)
-        dualPcShareEdit_->setText(share);
-}
-
-void ManagerPage::browseDualPcShare()
-{
-    const QString start = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
-    const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("Choose Dual-PC share folder"), start);
-    if (dir.isEmpty() || !dualPcShareEdit_)
-        return;
-    dualPcShareEdit_->setText(QDir::fromNativeSeparators(dir));
-    persistDualPcSettings();
-    updateDualPcEnableState();
-}
-
-void ManagerPage::updateDualPcEnableState()
-{
-    const bool consent = dualPcConsentCheck_ && dualPcConsentCheck_->isChecked();
-    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
-    if (enableDistributedButton_)
-        enableDistributedButton_->setEnabled(consent && !share.isEmpty());
-}
-
-void ManagerPage::enableDistributedPack()
-{
-    if (!dualPcConsentCheck_ || !dualPcConsentCheck_->isChecked())
-    {
-        QMessageBox::information(this,
-                                 QStringLiteral("Dual-PC"),
-                                 QStringLiteral("Consent is required before dest is shared with SpellNode."));
-        return;
-    }
-    const QString share = dualPcShareEdit_ ? dualPcShareEdit_->text().trimmed() : QString();
-    if (share.isEmpty() || !QDir(share).exists())
-    {
-        QMessageBox::information(this,
-                                 QStringLiteral("Dual-PC"),
-                                 QStringLiteral("Choose an existing share folder first."));
-        return;
-    }
-    persistDualPcSettings();
-
-    auto *nam = new QNetworkAccessManager(this);
-    QNetworkRequest queueRequest(QUrl(QStringLiteral("http://127.0.0.1:8188/queue")));
-    queueRequest.setTransferTimeout(2500);
-    QNetworkReply *reply = nam->get(queueRequest);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, nam]() {
-        const QByteArray raw = reply->readAll();
-        reply->deleteLater();
-        nam->deleteLater();
-        QJsonParseError parseError{};
-        const QJsonDocument doc = QJsonDocument::fromJson(raw, &parseError);
-        const QJsonArray running = doc.object().value(QStringLiteral("queue_running")).toArray();
-        if (!running.isEmpty())
-        {
-            QMessageBox::information(this,
-                                     QStringLiteral("Dual-PC"),
-                                     QStringLiteral("Comfy is generating. The Distributed pack is not written while a job is running."));
-            return;
-        }
-        appendLog(QStringLiteral("Installing ComfyUI-Distributed from GitHub zipball. Restart Comfy after it finishes."));
-        QJsonObject request{
-            {QStringLiteral("command"), QStringLiteral("install_custom_node")},
-            {QStringLiteral("package_name"), QStringLiteral("ComfyUI-Distributed")},
-            {QStringLiteral("repo_url"), QStringLiteral("https://github.com/robertvoy/ComfyUI-Distributed")},
-            {QStringLiteral("install_method"), QStringLiteral("archive")},
-        };
-        sendWorkerRequestAsync(
-            request,
-            1800000,
-            QStringLiteral("install ComfyUI-Distributed"),
-            [this](const QJsonObject &payload) {
-                appendLog(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
-                refreshStatus();
-            });
-    });
-}

@@ -23,6 +23,30 @@ constexpr int kPad = 8;
 constexpr int kThumbMaster = 256; // Amendment A.4 — single 256px master, the card is the only consumer
 } // namespace
 
+namespace
+{
+// One chip. The type badge, the licence badge, the site badge and the quantisation chip were on
+// their way to being four hand-rolled copies of the same rounded rect with the same tokens.
+QRectF paintChip(QPainter *painter, const DashboardSurfaceTokens &t, const QFont &font,
+                 const QString &text, const QPointF &anchor, qreal radius, bool anchorIsRight,
+                 const QColor &textColor)
+{
+    painter->setFont(font);
+    const QFontMetrics fm(font);
+    const qreal w = fm.horizontalAdvance(text) + 14;
+    const qreal h = fm.height() + 6;
+    const QRectF rect(anchorIsRight ? anchor.x() - w : anchor.x(), anchor.y(), w, h);
+    QPainterPath path;
+    path.addRoundedRect(rect, radius, radius);
+    painter->fillPath(path, dashboardWithAlpha(t.panelBaseB, 0.88));
+    painter->setPen(QPen(dashboardWithAlpha(t.borderSoft, 0.9), 1.0));
+    painter->drawPath(path);
+    painter->setPen(textColor);
+    painter->drawText(rect, Qt::AlignCenter, text);
+    return rect;
+}
+} // namespace
+
 int ModelCardDelegate::cardWidth() { return kCardW; }
 int ModelCardDelegate::cardHeight() { return kCardH; }
 int ModelCardDelegate::cellGap() { return kGap; }
@@ -99,6 +123,8 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
     if (!previewPath.isEmpty() && cache_ && onScreen)
         pm = cache_->thumbnail(previewPath, previewPath, kThumbMaster);
 
+    const bool blur = index.data(ModelCardModel::BlurPreviewRole).toBool();
+
     if (!pm.isNull())
     {
         // Cover-crop into the rounded preview rect (fills the area, no letterbox).
@@ -110,7 +136,19 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         scaled.scale(preview.size(), Qt::KeepAspectRatioByExpanding);
         QRectF target(QPointF(0, 0), scaled);
         target.moveCenter(preview.center());
-        painter->drawPixmap(target, pm, QRectF(pm.rect()));
+        if (blur)
+        {
+            // Downscale hard and let the smooth transform put it back: a real blur on every card
+            // in a scrolling grid is not affordable, and this is the same visual promise -- the
+            // picture is unreadable until the user asks for it. NOT an alpha veil, which leaves a
+            // recognisable image behind a tint.
+            const QPixmap tiny = pm.scaled(QSize(10, 10), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            painter->drawPixmap(target, tiny, QRectF(tiny.rect()));
+        }
+        else
+        {
+            painter->drawPixmap(target, pm, QRectF(pm.rect()));
+        }
         painter->restore();
     }
     else if (previewPath.isEmpty() || (cache_ && cache_->isFailed(previewPath, kThumbMaster)))
@@ -145,6 +183,39 @@ void ModelCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         painter->drawPath(badgePath);
         painter->setPen(t.textSecondary);
         painter->drawText(badgeRect, Qt::AlignCenter, badge);
+    }
+
+    // --- W5: where this metadata came from, and what precision this weight is ---
+    // The type badge sits top-left of the preview and the licence badge top-right; these two go
+    // along the BOTTOM of the preview so no corner carries two chips.
+    {
+        const QFont chipFont = theme.font(ThemeManager::Type::Caption);
+        const QFontMetrics cfm(chipFont);
+        const qreal chipTop = preview.bottom() - 6 - (cfm.height() + 6);
+
+        const QString site = index.data(ModelCardModel::SiteBadgeRole).toString();
+        const QString caption = index.data(ModelCardModel::IdentificationCaptionRole).toString();
+        if (!site.isEmpty())
+        {
+            paintChip(painter, t, chipFont, site, QPointF(preview.left() + 6, chipTop),
+                      radiusInset, false, t.textSecondary);
+        }
+        else if (!caption.isEmpty())
+        {
+            // The honesty rule. "Not identified yet" and "No match on any site" are different
+            // facts, and a card that showed neither would read as identified-with-nothing-to-say.
+            paintChip(painter, t, chipFont, caption, QPointF(preview.left() + 6, chipTop),
+                      radiusInset, false, t.textMuted);
+        }
+
+        const QString quant = index.data(ModelCardModel::QuantisationRole).toString();
+        if (!quant.isEmpty())
+        {
+            // Four of the owner's Lox variants differ ONLY by this. Without the chip the grid
+            // shows four cards with the same picture and the same name.
+            paintChip(painter, t, chipFont, quant, QPointF(preview.right() - 6, chipTop),
+                      radiusInset, true, t.textSecondary);
+        }
     }
 
     const QString licenseBadge = familyLicenseBadgeText(family);

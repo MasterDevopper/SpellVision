@@ -66,11 +66,26 @@ VIDEO_HISTORY_INDEX_MESSAGE_TYPES = {"video_history_index"}
 # emitter.emit() refusal for a non-LTX family. Both reach the wire.
 MODEL_CACHE_MESSAGE_TYPES = {"model_cache"}
 VIDEO_FAMILY_GATED_SUBMISSION_MESSAGE_TYPES = {"video_family_prompt_api_gated_submission"}
+# model_intelligence_commands.py (W1): get/refresh/set_user/recommended_settings/roots_status,
+# plus the refresh progress event. DIAGNOSTIC in worker_command_audience.py until W2/W5 wire a
+# qt_ui/ route, but the wire type still has to be registered now or every reply arrives wrapped
+# in client_warning the moment anything (even a CLI probe) reads it.
+MODEL_INTELLIGENCE_MESSAGE_TYPES = {
+    "model_intel", "model_intel_refresh", "model_intel_refresh_started", "model_intel_cancel",
+    "model_intel_set_user", "model_recommended_settings", "model_roots_status",
+    "model_intel_progress",
+}
+# The optimization ledger (W3 T3). DIAGNOSTIC in worker_command_audience until T6 wires a
+# qt_ui/ route, and registered here regardless: an unregistered type reaches every client as
+# client_warning with ok=false, so even a terminal-only reply has to be a first-class one.
+OPTIMIZATION_MESSAGE_TYPES = {"optimization_results"}
 DOWNLOAD_MESSAGE_TYPES = {"download_status", "download_ack", "civitai_variants"}
 RUNTIME_MESSAGE_TYPES = {"comfy_runtime_status", "comfy_runtime_ack", "runtime_memory_status", "runtime_memory_ack"}
 MANAGER_MESSAGE_TYPES = {"comfy_manager_status", "comfy_manager_ack"}
 HISTORY_MESSAGE_TYPES = {"video_history_snapshot"}
 VIDEO_FAMILY_MESSAGE_TYPES = {"video_family_contracts"}
+# W6: "can this job run on that endpoint" -- one reply, no job, no stream.
+ENDPOINT_MESSAGE_TYPES = {"endpoint_capability"}
 VIDEO_READINESS_MESSAGE_TYPES = {"ltx_readiness_status", "video_family_readiness_status"}
 VIDEO_WORKFLOW_CONTRACT_MESSAGE_TYPES = {"ltx_test_workflow_contract", "video_family_workflow_contract"}
 LTX_SMOKE_TEST_MESSAGE_TYPES = {"ltx_t2v_smoke_test", "video_family_smoke_test_route"}
@@ -80,7 +95,7 @@ LTX_PROMPT_API_ADAPTER_MESSAGE_TYPES = {"ltx_prompt_api_conversion_adapter", "lt
 JOB_STATES = {"queued", "starting", "running", "completed", "failed", "cancelled"}
 TERMINAL_JOB_STATES = {"completed", "failed", "cancelled"}
 
-CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "delete_model", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract"}
+CONTROL_COMMANDS = {"queue_status", "enqueue", "enqueue_job", "remove_queue_item", "clear_pending_queue", "cancel_queue_item", "cancel_active_queue_item", "retry_queue_item", "move_queue_item_up", "move_queue_item_down", "duplicate_queue_item", "pause_queue", "resume_queue", "cancel_all_queue_items", "generate_dataset", "import_workflow", "list_workflow_profiles", "comfy_runtime_status", "ensure_comfy_runtime", "start_comfy_runtime", "stop_comfy_runtime", "restart_comfy_runtime", "comfy_manager_status", "install_comfy_manager", "install_custom_node", "install_recommended_video_nodes", "start_download", "download_status", "cancel_download", "delete_model", "resolve_missing_models", "civitai_variants", "runtime_memory_status", "runtime_diagnostics", "unload_image_runtime", "unload_video_runtime", "unload_all_runtimes", "clear_cuda_cache", "video_family_contracts", "video_family_status", "ltx_readiness_status", "ltx_runtime_readiness", "video_family_readiness", "video_family_readiness_status", "ltx_test_workflow_contract", "ltx_workflow_contract", "video_family_test_workflow_contract", "video_family_workflow_contract", "endpoint_capability"}
 STREAMING_COMMANDS = {"t2i", "i2i", "ping", "comfy_workflow"}
 
 
@@ -429,6 +444,9 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         | NODE_INDEX_MESSAGE_TYPES
         | WORKFLOW_COMPILE_MESSAGE_TYPES
         | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
+        | MODEL_INTELLIGENCE_MESSAGE_TYPES
+        | OPTIMIZATION_MESSAGE_TYPES
+        | ENDPOINT_MESSAGE_TYPES
     ):
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:

@@ -219,6 +219,11 @@ class JobResult:
     cache_hit: bool = False
     generation_time_sec: float | None = None
     steps_per_sec: float | None = None
+    # Which build produced generation_time_sec -- see worker_metadata._optimizations_block. Without
+    # this, job_archive.json's own "result" carried a seconds figure and nothing naming its arm; the
+    # published sage-vs-SDPA A/B was distinguishable only because a human typed the arm into a
+    # filename, and the archive held a third, unlabelled arm the quoted number never accounted for.
+    optimizations: dict[str, Any] | None = None
     cuda_allocated_gb: float | None = None
     cuda_reserved_gb: float | None = None
     metadata_output: str | None = None
@@ -489,6 +494,7 @@ def complete_job(job: JobRecord, payload: dict[str, Any]) -> None:
         cache_hit=bool(payload.get("cache_hit", False)),
         generation_time_sec=payload.get("generation_time_sec"),
         steps_per_sec=payload.get("steps_per_sec"),
+        optimizations=payload.get("optimizations") if isinstance(payload.get("optimizations"), dict) else None,
         cuda_allocated_gb=payload.get("cuda_allocated_gb"),
         cuda_reserved_gb=payload.get("cuda_reserved_gb"),
         metadata_output=payload.get("metadata_output"),

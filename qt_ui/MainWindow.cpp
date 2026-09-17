@@ -14,6 +14,7 @@
 #include "shell/TelemetryPresenter.h"
 #include "workflows/CivitaiVariantDialog.h"
 #include "workflows/WorkflowDownloadDialog.h"
+#include "workflows/WorkflowDropCoordinator.h"
 #include "ModePage.h"
 #include "InspirationPage.h"
 #include "Gen3DPage.h"
@@ -42,6 +43,7 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
+#include "shell/WindowDropTarget.h"
 #include "shell/ShellGeometry.h"
 #include "shell/SideRail.h"
 #include "style/SvKit.h"
@@ -49,6 +51,9 @@
 #include "workers/WorkerSocketClient.h"
 #include "workers/WorkerSubmissionPolicy.h"
 #include "generation/OutputPathHelpers.h"
+#include "generation/EndpointRouting.h"
+#include "shell/EndpointProbe.h"
+#include "shell/EndpointRegistry.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -1088,6 +1093,17 @@ MainWindow::MainWindow(QWidget *parent)
             }
         });
     }
+    // A workflow dropped ANYWHERE in the window lands here. Installed on the application rather than
+    // overridden on this widget, because Qt hands a drag only to a widget whose acceptDrops() is
+    // true, walking up from the cursor and stopping at the first taker -- so a dropEvent() on
+    // MainWindow would never have seen the rail, the title bar, Flows, Home, History or Settings.
+    // Those were the surfaces where a dropped .json disappeared with no message at all.
+    windowDropTarget_ = new spellvision::shell::WindowDropTarget(this);
+    windowDropTarget_->setOverlayHost(this);
+    windowDropTarget_->installOn(qApp);
+    connect(windowDropTarget_, &spellvision::shell::WindowDropTarget::workflowDropped, this,
+            [this](const QString &path) { importDroppedWorkflow(path); });
+
     ctorTrace("ctor before end");
     {
         QFile ctorLog(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
@@ -1757,6 +1773,62 @@ void MainWindow::buildPages()
     pageTrace("modelsPage warmCache deferred");
     // S2 send-to router: a card's Load/Add action routes by type + family (doc 22 §3).
     connect(modelsPage_, &ModelManagerPage::useModelRequested, this, &MainWindow::sendModelToGeneration);
+    // W2: refreshing the inventory is the user saying "look at the library again". Whatever it
+    // finds, the per-model answers cached from the PREVIOUS look are now claims about a state
+    // nobody has re-checked, so they go. Without this the cockpit kept serving an answer resolved
+    // before a sidecar existed, for the whole session, under a caption that told the user to go and
+    // create that sidecar.
+    connect(modelsPage_, &ModelManagerPage::inventoryRefreshStarted, this,
+            [this]() { clearModelDefaultsCache(); });
+    // W5 Task 3: the Models inspector builds a request and consumes a reply; MainWindow owns the
+    // socket. A refresh can take minutes on a large root, so it gets a long budget -- and the reply
+    // goes straight back to the page whether it succeeded or not, because the containment refusal
+    // (a picture outside the model roots) is the answer the user most needs to SEE.
+    // W5 Task 4: a refresh ENDS long after its request was answered -- `background: true` replies
+    // with the started event and publishes progress and the result to `subscribe`rs. This is where
+    // the cockpit's per-model answers are dropped, because the sidecars they were resolved from
+    // have just been rewritten. Doing it when the REQUEST returned would have dropped them at the
+    // start of a 79-minute pass and cached the stale ones again while it ran.
+    connect(modelsPage_, &ModelManagerPage::modelIntelRefreshFinished, this,
+            [this](const QString &weightPath) {
+                clearModelDefaultsCache(weightPath);
+                stopModelIntelEvents();
+            });
+    connect(modelsPage_, &ModelManagerPage::modelIntelRequested, this, [this](const QJsonObject &request) {
+        const QString command = request.value(QStringLiteral("command")).toString();
+        const int budgetMs = command == QStringLiteral("model_intel_refresh") ? 600000 : 20000;
+        // A background refresh answers immediately and then says nothing on this connection ever
+        // again. Its progress and its result go to `subscribe`rs, so the listener has to be open
+        // BEFORE the request is sent -- a refresh over a handful of files can finish first.
+        if (command == QStringLiteral("model_intel_refresh")
+            && request.value(QStringLiteral("background")).toBool(false))
+            startModelIntelEvents();
+        sendWorkerRequestAsync(
+            request,
+            [this, command, request](const QJsonObject &response, const QString &error, bool startedOk) {
+                if (!modelsPage_)
+                    return;
+                if (!startedOk)
+                {
+                    modelsPage_->applyModelIntelReply(QJsonObject{
+                        {QStringLiteral("type"), command},
+                        {QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), error.isEmpty()
+                             ? QStringLiteral("the worker did not answer") : error}});
+                    return;
+                }
+                // A sidecar written between two picks of the same checkpoint has to be able to
+                // reach the cockpit; the cached per-model answer is now stale. `path` is present on
+                // the set-user request and absent on a refresh -- whose eviction is deferred to
+                // modelIntelRefreshFinished, since a background pass has not written anything yet
+                // when this reply (the started event) arrives.
+                if (request.contains(QStringLiteral("path")))
+                    clearModelDefaultsCache(request.value(QStringLiteral("path")).toString());
+                modelsPage_->applyModelIntelReply(response);
+            },
+            budgetMs);
+    });
+
     // Models page: the existing download lane, and the new delete.
     connect(modelsPage_, &ModelManagerPage::downloadModelRequested, this, [this](const QString &reference) {
         startModelDownload(reference, QString(), QJsonObject{{QStringLiteral("origin"), QStringLiteral("models_page")}});
@@ -2488,6 +2560,22 @@ void MainWindow::ensureGenerationPageBuilt(const QString &modeId)
     // Phase 3b: the fast/quality operating-point table provider (lazy cached fetch).
     (*slot)->setOperatingPointsProvider(
         [this](const QString &family) { return operatingPointsForFamily(family); });
+    // W2: what THIS model wants, on top of the family table above. Two functions, not one, and
+    // deliberately: the PROVIDER is a synchronous cache read, so applyModelDefaults() works with a
+    // fake provider and no worker anywhere; the FETCHER is the only part that talks to the worker.
+    // No fetch is issued here -- a page has no model selected at construction, and the page itself
+    // triggers one on every model change.
+    (*slot)->setModelDefaultsProvider(
+        [this](const QString &modelPath, const QString &family, const QString &mode) {
+            return modelDefaultsFor(modelPath, family, mode);
+        });
+    (*slot)->setModelDefaultsFetcher(
+        [this](const QString &modelPath,
+               const QString &family,
+               const QString &mode,
+               std::function<void()> completion) {
+            fetchModelDefaultsAsync(modelPath, family, mode, std::move(completion));
+        });
     const QPointer<ImageGenerationPage> pageGuard(*slot);
     fetchOperatingPointsAsync([pageGuard]() {
         if (pageGuard)
@@ -2596,17 +2684,23 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
     // Route by a PURE predicate (isGenerationMode), not generationPageForMode()!=nullptr:
     // with lazy construction an unbuilt-but-valid target reads as null and would be
     // wrongly rejected. Build the resolved page on demand before accessing it.
-    const QString modeId = spellvision::workflows::WorkflowLaunchController::resolveDraftModeId(
+    const auto resolution = spellvision::workflows::WorkflowLaunchController::modeResolution(
         draft,
         [this](const QString &candidate) { return isGenerationMode(candidate); });
+    const QString modeId = resolution.modeId;
 
     ensureGenerationPageBuilt(modeId);
     ImageGenerationPage *page = generationPageForMode(modeId);
     if (!page)
     {
+        // The resolver's reason, not a generic sentence: "cannot be opened in the current build" is
+        // the same message whether the graph is video-to-video, unclassified, or bound for a mode
+        // this build hides, and those need different things done about them.
         QMessageBox::warning(this,
                              QStringLiteral("Workflow Draft"),
-                             QStringLiteral("This workflow cannot be opened as an editable draft in the current build."));
+                             resolution.reason.isEmpty()
+                                 ? QStringLiteral("This workflow cannot be opened as an editable draft in the current build.")
+                                 : resolution.reason);
         return;
     }
 
@@ -2619,6 +2713,116 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
         appendLogLine(spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
 }
 
+// One dropped workflow, asked of the worker in full, wherever it was dropped.
+//
+// The 186-line lambda that used to live here imported the workflow and then abandoned it. It read
+// none of the three answers the app already had -- the importer's classification, a compiled prompt,
+// and launch readiness -- so the workflow landed on whatever page the mouse happened to be over with
+// nothing filled in, and `safe_to_submit` was the literal false. The sequence lives in
+// WorkflowDropCoordinator now; what stays here is the shell's half of it, the parts that need a
+// window: a dialog, the credential store, and switchToMode.
+//
+// Built on first use rather than in the constructor, so a session that never drops a workflow never
+// pays for it.
+void MainWindow::importDroppedWorkflow(const QString &path)
+{
+    if (!workflowDropCoordinator_)
+    {
+        workflowDropCoordinator_ = new spellvision::workflows::WorkflowDropCoordinator(this);
+
+        spellvision::workflows::WorkflowDropCoordinator::Bindings bindings;
+
+        bindings.sendRequestAsync =
+            [this](const QJsonObject &request,
+                   spellvision::workflows::WorkflowDropCoordinator::RequestCompletion completion) {
+                sendWorkerRequestAsync(request, std::move(completion));
+            };
+
+        bindings.appendLogLine = [this](const QString &text) { appendLogLine(text); };
+
+        // A PURE predicate, not generationPageForMode() != nullptr: pages are lazy, so a valid but
+        // not-yet-built target reads as null and would be wrongly refused.
+        bindings.isModeAvailable = [this](const QString &modeId) { return isGenerationMode(modeId); };
+
+        // The one dialog. missing_custom_nodes is an /object_info gap, so packs whose dependency_plan
+        // action is already_installed must not open it; the coordinator has already filtered those.
+        // Whether to ASK for a key is decided here, because only the shell knows what is stored.
+        bindings.requestDownloads = [this](const QStringList &missingNodes,
+                                           const QStringList &missingModels,
+                                           bool needsCivitai,
+                                           bool needsHf) {
+            const bool askCivitaiKey =
+                needsCivitai && !SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
+            const bool askHfToken =
+                needsHf && !SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
+            WorkflowDownloadDialog downloadDialog(missingNodes, missingModels,
+                                                  askCivitaiKey, askHfToken, this);
+            if (downloadDialog.exec() != QDialog::Accepted)
+                return false;
+            const QString typedCivitai = downloadDialog.typedCivitaiKey();
+            if (!typedCivitai.isEmpty())
+                SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), typedCivitai);
+            const QString typedHf = downloadDialog.typedHfToken();
+            if (!typedHf.isEmpty())
+                SecureCredentialStore::setCredential(QStringLiteral("hf_token"), typedHf);
+            return true;
+        };
+
+        bindings.downloadCredentials = [this]() {
+            QJsonObject credentials;
+            const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
+            if (!civitaiKey.isEmpty())
+                credentials.insert(QStringLiteral("civitai_api_key"), civitaiKey);
+            const QString hfToken = SecureCredentialStore::credential(QStringLiteral("hf_token"));
+            if (!hfToken.isEmpty())
+                credentials.insert(QStringLiteral("hf_token"), hfToken);
+            return credentials;
+        };
+
+        bindings.showRefusal = [this](const QString &title, const QString &message) {
+            QMessageBox::warning(this, title, message);
+        };
+
+        bindings.openDraftOnMode = [this](const QString &modeId, const QJsonObject &draft) {
+            ensureGenerationPageBuilt(modeId);
+            ImageGenerationPage *page = generationPageForMode(modeId);
+            if (!page)
+            {
+                QMessageBox::warning(this,
+                                     QStringLiteral("Workflow Drop"),
+                                     QStringLiteral("This workflow is a %1 workflow and that page could "
+                                                    "not be opened in this build.")
+                                         .arg(modeId.toUpper()));
+                return;
+            }
+            page->applyWorkflowDraft(draft);
+            switchToMode(modeId);
+            appendLogLine(
+                spellvision::workflows::WorkflowLaunchController::draftOpenedLogLine(draft, modeId));
+            if (!page->workflowDraftCanSubmit())
+                appendLogLine(
+                    spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
+        };
+
+        bindings.setBusy = [this](bool busy, const QString &message) {
+            // Whatever cockpit is in front of the user, if any. A drop made on Flows or the rail has
+            // no page to show a spinner on, and the log line is the feedback there.
+            if (ImageGenerationPage *page = generationPageForMode(currentModeId_))
+                page->setBusy(busy, message);
+        };
+
+        bindings.refreshWorkflowLibrary = [this]() {
+            if (workflowsPage_)
+                workflowsPage_->refreshLibrary();
+        };
+
+        workflowDropCoordinator_->bind(bindings);
+    }
+
+    workflowDropCoordinator_->handleDroppedWorkflow(path);
+}
+
+
 void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
 {
     if (!page)
@@ -2628,193 +2832,8 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             { switchToMode(QStringLiteral("models")); });
     connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
             { switchToMode(QStringLiteral("workflows")); });
-    connect(page, &ImageGenerationPage::workflowFileDropped, this, [this, page, modeId](const QString &path) {
-        // Import through the worker, then open as editable draft on this cockpit.
-        // If import already exists / succeeds, also offer a direct launch profile.
-        QJsonObject request;
-        request.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
-        request.insert(QStringLiteral("source"), path);
-        request.insert(QStringLiteral("auto_apply_node_deps"), false);
-        request.insert(QStringLiteral("auto_apply_model_deps"), false);
-        const QPointer<ImageGenerationPage> pageGuard(page);
-        page->setBusy(true, QStringLiteral("Importing workflow…"));
-        sendWorkerRequestAsync(
-            request,
-            [this, pageGuard, modeId, path](
-                const QJsonObject &response, const QString &stderrText, bool startedOk) {
-        if (!pageGuard)
-            return;
-        pageGuard->setBusy(false, QString());
-        if (!stderrText.trimmed().isEmpty())
-            appendLogLine(stderrText.trimmed());
-        if (!startedOk || response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false)) {
-            const QString err = response.value(QStringLiteral("error")).toString(
-                QStringLiteral("Workflow import failed"));
-            appendLogLine(QStringLiteral("Workflow drop import failed: %1").arg(err));
-            // Still try to open a lightweight draft from the raw path so the user can edit
-            // prompts against the graph once assets resolve.
-            QJsonObject draft;
-            draft.insert(QStringLiteral("source_name"), QFileInfo(path).fileName());
-            draft.insert(QStringLiteral("source_workflow_path"), path);
-            draft.insert(QStringLiteral("workflow_path"), path);
-            draft.insert(QStringLiteral("safe_to_submit"), false);
-            draft.insert(QStringLiteral("warnings"),
-                         QJsonArray{QStringLiteral("Import incomplete — review models/nodes in Flows.")});
-            pageGuard->applyWorkflowDraft(draft);
-            return;
-        }
-
-        // Build the draft from the response the worker ACTUALLY sends.
-        //
-        // This previously read response["draft"] and response["result"], neither of which
-        // handle_import_workflow_command emits -- it returns a FLAT WorkflowImportResult
-        // (ok / import_slug / artifacts / missing_custom_nodes / warnings). Every lookup therefore
-        // resolved empty and `safe_to_submit` fell through to .toBool(true) on an absent object, so
-        // a dropped workflow was ALWAYS treated as ready and queue-launched unconditionally --
-        // including workflows whose nodes or models are missing.
-        const QJsonObject artifacts = response.value(QStringLiteral("artifacts")).toObject();
-        const QJsonArray missingNodes = response.value(QStringLiteral("missing_custom_nodes")).toArray();
-
-        QJsonObject draft;
-        draft.insert(QStringLiteral("source_name"),
-                     response.value(QStringLiteral("import_slug")).toString(QFileInfo(path).fileName()));
-        draft.insert(QStringLiteral("source_profile_path"),
-                     artifacts.value(QStringLiteral("profile_path")).toString());
-        draft.insert(QStringLiteral("source_workflow_path"),
-                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
-        draft.insert(QStringLiteral("workflow_path"),
-                     artifacts.value(QStringLiteral("workflow_path")).toString(path));
-        // The importer reports no launch readiness, so there is nothing here that could justify
-        // auto-submitting. Default CLOSED and let the user press Generate. Drop-and-run returns
-        // once readiness is real and the worker sends it (plan A8).
-        draft.insert(QStringLiteral("safe_to_submit"), false);
-        QStringList missingNodeNames;
-        const QJsonArray nodeDeps =
-            response.value(QStringLiteral("dependency_plan")).toObject()
-                .value(QStringLiteral("node_plan")).toObject()
-                .value(QStringLiteral("dependencies")).toArray();
-        if (!nodeDeps.isEmpty())
-        {
-            // missing_custom_nodes is an object_info gap. Packs already on disk
-            // (action=already_installed) must not open Download.
-            for (const QJsonValue &value : nodeDeps)
-            {
-                const QJsonObject dep = value.toObject();
-                const QString action = dep.value(QStringLiteral("action")).toString();
-                if (action == QStringLiteral("already_installed")
-                    || action == QStringLiteral("already_present"))
-                    continue;
-                const QString name = dep.value(QStringLiteral("class_name")).toString().trimmed();
-                if (!name.isEmpty())
-                    missingNodeNames << name;
-            }
-        }
-        else
-        {
-            for (const QJsonValue &value : missingNodes)
-            {
-                const QString name = value.toString().trimmed();
-                if (!name.isEmpty())
-                    missingNodeNames << name;
-            }
-        }
-        QStringList missingModels;
-        bool needsCivitai = false;
-        bool needsHf = false;
-        const QJsonArray installActions =
-            response.value(QStringLiteral("dependency_plan")).toObject()
-                .value(QStringLiteral("model_plan")).toObject()
-                .value(QStringLiteral("install_actions")).toArray();
-        for (const QJsonValue &value : installActions)
-        {
-            const QJsonObject action = value.toObject();
-            if (action.value(QStringLiteral("kind")).toString() == QStringLiteral("already_present"))
-                continue;
-            const QString name = action.value(QStringLiteral("source_value")).toString().trimmed();
-            if (!name.isEmpty())
-                missingModels << name;
-            QString blob = name;
-            for (const QJsonValue &note : action.value(QStringLiteral("notes")).toArray())
-                blob += note.toString();
-            const QJsonObject materialized = action.value(QStringLiteral("materialized")).toObject();
-            blob += materialized.value(QStringLiteral("url")).toString();
-            blob += materialized.value(QStringLiteral("kind")).toString();
-            blob += materialized.value(QStringLiteral("value")).toString();
-            if (blob.contains(QStringLiteral("civitai"), Qt::CaseInsensitive))
-                needsCivitai = true;
-            if (blob.contains(QStringLiteral("huggingface"), Qt::CaseInsensitive)
-                || blob.contains(QStringLiteral("hf.co"), Qt::CaseInsensitive))
-                needsHf = true;
-        }
-        if (!missingNodeNames.isEmpty() || !missingModels.isEmpty()) {
-            draft.insert(QStringLiteral("warnings"),
-                         QJsonArray{QStringLiteral("Imported with unresolved nodes/models — check Flows.")});
-            const bool askCivitaiKey = needsCivitai
-                && !SecureCredentialStore::hasCredential(QStringLiteral("civitai_api_key"));
-            const bool askHfToken = needsHf
-                && !SecureCredentialStore::hasCredential(QStringLiteral("hf_token"));
-            WorkflowDownloadDialog downloadDialog(missingNodeNames, missingModels,
-                                                  askCivitaiKey, askHfToken, this);
-            if (downloadDialog.exec() == QDialog::Accepted)
-            {
-                const QString typedCivitai = downloadDialog.typedCivitaiKey();
-                if (!typedCivitai.isEmpty())
-                    SecureCredentialStore::setCredential(QStringLiteral("civitai_api_key"), typedCivitai);
-                const QString typedHf = downloadDialog.typedHfToken();
-                if (!typedHf.isEmpty())
-                    SecureCredentialStore::setCredential(QStringLiteral("hf_token"), typedHf);
-                QJsonObject retry;
-                retry.insert(QStringLiteral("command"), QStringLiteral("import_workflow"));
-                retry.insert(QStringLiteral("source"), path);
-                retry.insert(QStringLiteral("auto_apply_node_deps"), !missingNodeNames.isEmpty());
-                retry.insert(QStringLiteral("auto_apply_model_deps"), !missingModels.isEmpty());
-                const QString civitaiKey = SecureCredentialStore::credential(QStringLiteral("civitai_api_key"));
-                if (!civitaiKey.isEmpty())
-                    retry.insert(QStringLiteral("civitai_api_key"), civitaiKey);
-                const QString hfToken = SecureCredentialStore::credential(QStringLiteral("hf_token"));
-                if (!hfToken.isEmpty())
-                    retry.insert(QStringLiteral("hf_token"), hfToken);
-                appendLogLine(QStringLiteral("Download requested for missing workflow files."));
-                sendWorkerRequestAsync(retry, [this](const QJsonObject &retryResponse, const QString &retryErr, bool retryOk) {
-                    if (!retryErr.trimmed().isEmpty())
-                        appendLogLine(retryErr.trimmed());
-                    if (!retryOk || !retryResponse.value(QStringLiteral("ok")).toBool(false))
-                        appendLogLine(QStringLiteral("Workflow download did not complete."));
-                    if (workflowsPage_)
-                        workflowsPage_->refreshLibrary();
-                });
-            }
-        }
-        if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
-            draft.insert(QStringLiteral("source_workflow_path"), path);
-        pageGuard->applyWorkflowDraft(draft);
-        appendLogLine(QStringLiteral("Workflow loaded into cockpit: %1")
-                          .arg(draft.value(QStringLiteral("source_name")).toString(QFileInfo(path).fileName())));
-
-        // If ready, also queue-launch with cockpit model overrides (drop-and-run).
-        // Default CLOSED: an absent or malformed readiness signal must never mean "go".
-        if (draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
-            QJsonObject profile;
-            profile.insert(QStringLiteral("profile_name"),
-                           draft.value(QStringLiteral("source_name")).toString());
-            profile.insert(QStringLiteral("name"), draft.value(QStringLiteral("source_name")).toString());
-            profile.insert(QStringLiteral("task_command"), modeId);
-            profile.insert(QStringLiteral("profile_path"),
-                           draft.value(QStringLiteral("source_profile_path")).toString());
-            profile.insert(QStringLiteral("workflow_path"),
-                           draft.value(QStringLiteral("workflow_path")).toString(
-                               draft.value(QStringLiteral("source_workflow_path")).toString(path)));
-            profile.insert(QStringLiteral("compiled_prompt_path"),
-                           draft.value(QStringLiteral("compiled_prompt_path")).toString());
-            const QString model = pageGuard->selectedModelValue();
-            const QString lora = pageGuard->selectedLoraValue();
-            launchWorkflowProfileWithModel(profile, model, lora, /*hasExplicitOverride=*/true);
-        }
-
-        if (workflowsPage_)
-            workflowsPage_->refreshLibrary();
-            });
-    });
+    connect(page, &ImageGenerationPage::workflowFileDropped, this,
+            [this](const QString &path) { importDroppedWorkflow(path); });
     connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
         // Send-to-I2I from another page: the I2I page may not be built yet under lazy
         // construction. Build it on demand so the image lands instead of silently
@@ -3184,6 +3203,68 @@ void MainWindow::submitGenerationRequest(
     }
     requestPayload.insert(QStringLiteral("output_folder"), dest);
 
+    // --- which machine, decided BEFORE the enqueue ------------------------------------------------
+    //
+    // The refusal has to be here. A job that reaches the queue and then fails on the far machine is
+    // exactly the outcome the endpoint work exists to prevent, and it is the shape both candidate
+    // packs have: ComfyUI-Distributed runs the job on the master when no worker answers, NetDist
+    // substitutes a black image. Both succeed at the wrong thing.
+    {
+        const spellvision::shell::RuntimeProfile endpointProfile =
+            spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+        const QString localBaseUrl = QStringLiteral("http://%1:%2")
+                                         .arg(endpointProfile.comfyHost)
+                                         .arg(endpointProfile.comfyPort);
+        const spellvision::shell::EndpointRegistry endpoints =
+            spellvision::shell::EndpointRegistry::load(localBaseUrl);
+        QHash<QString, spellvision::shell::EndpointStatus> endpointStatuses;
+        for (const spellvision::shell::Endpoint &endpoint : endpoints.entries())
+        {
+            endpointStatuses.insert(
+                endpoint.id, spellvision::shell::EndpointProbe::instance().statusFor(endpoint.id));
+        }
+
+        QString requestedEndpoint = page->runOnEndpointId();
+        // One consent, read at the moment it matters. Off means every job runs here, whatever a
+        // page is set to -- and it is said out loud rather than quietly honoured, because a silent
+        // reroute is the same class of substitution as a silent fallback.
+        QSettings endpointSettings(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision"));
+        const bool remoteAllowed =
+            endpointSettings.value(QStringLiteral("runtime/allowRemoteQueuing"), false).toBool();
+        if (!remoteAllowed
+            && requestedEndpoint != spellvision::generation::autoEndpointChoice()
+            && requestedEndpoint != spellvision::shell::EndpointRegistry::localId())
+        {
+            const QString message = QStringLiteral(
+                "%1 is set to run on another machine, but \"Allow queuing to remote workers\" is "
+                "off in Runtime.").arg(modeId.toUpper());
+            appendLogLine(message);
+            page->setBusy(false, QString());
+            page->showGenerationError(message);
+            completeRejected();
+            return;
+        }
+        if (!remoteAllowed)
+            requestedEndpoint = spellvision::shell::EndpointRegistry::localId();
+
+        const spellvision::generation::RouteDecision route = spellvision::generation::chooseEndpoint(
+            endpoints, endpointStatuses, requestedEndpoint,
+            spellvision::generation::endpointRequestFromPayload(requestPayload));
+        if (!route.accepted)
+        {
+            appendLogLine(QStringLiteral("%1 request refused: %2").arg(modeId.toUpper(), route.reason));
+            page->setBusy(false, QString());
+            page->showGenerationError(route.reason);
+            completeRejected();
+            return;
+        }
+        if (!route.isLocal)
+        {
+            requestPayload.insert(QStringLiteral("comfy_api_url"), route.baseUrl);
+            appendLogLine(route.reason);
+        }
+    }
+
     appendLogLine(spellvision::workers::WorkerSubmissionPolicy::acceptedRequestLogLine(
         modeId,
         videoMode,
@@ -3426,6 +3507,168 @@ QJsonObject MainWindow::operatingPointsForFamily(const QString &family) const
     if (key.isEmpty())
         return {};
     return operatingPointsByFamily_.value(key);
+}
+
+namespace
+{
+// `D:\AI_ASSETS\models\x.safetensors` and `D:/ai_assets/models/X.safetensors` are one file on this
+// platform, and must be one cache entry. Both the store and the lookup go through here, so a path
+// that arrives from the catalog scan and the same path restored from QSettings cannot end up as two
+// requests for one model -- which is the shape the keyed single-flight exists to prevent.
+//
+// The FAMILY AND MODE are part of the key, because they are part of the question. `resolve.py`
+// branches on both for sampler, scheduler, width, height, frames, fps and the reported operating
+// point, and the page sends both -- so keying on the path alone cached one answer and served it for
+// every other question about the same file. Switching the T2V family bar from Auto (resolving wan)
+// to LTX with the same checkpoint re-applied the WAN answer: LTX's 49 frames and its own sampler
+// never arrived, for the rest of the session, with nothing on screen saying so. The same weight
+// opened on T2V and then I2V had the same shape.
+QString modelDefaultsCacheKey(const QString &path, const QString &family, const QString &mode)
+{
+    return QDir::fromNativeSeparators(path.trimmed()).toLower() + QLatin1Char('|')
+        + family.trimmed().toLower() + QLatin1Char('|') + mode.trimmed().toLower();
+}
+
+// The path half of a key, for evicting every family/mode answer about one file at once.
+QString modelDefaultsPathPrefix(const QString &path)
+{
+    return QDir::fromNativeSeparators(path.trimmed()).toLower() + QLatin1Char('|');
+}
+} // namespace
+
+void MainWindow::fetchModelDefaultsAsync(const QString &modelPath,
+                                         const QString &family,
+                                         const QString &mode,
+                                         std::function<void()> completion)
+{
+    const QString key = modelDefaultsCacheKey(modelPath, family, mode);
+    // No model, or already answered: the caller gets its completion now, on this stack, exactly as
+    // fetchOperatingPointsAsync does for an already-fetched table.
+    if (modelPath.trimmed().isEmpty() || modelDefaultsByPath_.contains(key))
+    {
+        if (completion)
+            completion();
+        return;
+    }
+    if (completion)
+        modelDefaultsWaiters_[key].push_back(std::move(completion));
+    // Single-flight PER PATH. A second ask for a model already in flight rides the answer that is
+    // coming rather than issuing a duplicate -- and, unlike the global flag above, an ask for a
+    // DIFFERENT model is not blocked by it.
+    if (modelDefaultsInFlight_.contains(key))
+        return;
+
+    modelDefaultsInFlight_.insert(key);
+    QJsonObject request;
+    request.insert(QStringLiteral("command"), QStringLiteral("model_recommended_settings"));
+    request.insert(QStringLiteral("path"), modelPath.trimmed());
+    if (!family.trimmed().isEmpty())
+        request.insert(QStringLiteral("family"), family.trimmed().toLower());
+    if (!mode.trimmed().isEmpty())
+        request.insert(QStringLiteral("mode"), mode.trimmed().toLower());
+    // The worker bounds `path` to the roots the REQUEST names, and a request that names none gets
+    // no location check at all (model_intelligence_commands documents that honestly). Sending the
+    // configured library roots is what makes the documented containment true for this caller.
+    QJsonArray roots;
+    const QStringList configuredRoots = spellvision::shell::scannableModelsRoots(
+        spellvision::generation::chooseModelsRootPath(),
+        spellvision::shell::extraModelsRootsFromSettings());
+    for (const QString &root : configuredRoots)
+    {
+        if (!root.trimmed().isEmpty())
+            roots.append(root.trimmed());
+    }
+    if (!roots.isEmpty())
+        request.insert(QStringLiteral("roots"), roots);
+
+    sendWorkerRequestAsync(
+        request,
+        [this, key](const QJsonObject &response, const QString &, bool startedOk) {
+            modelDefaultsInFlight_.remove(key);
+            if (startedOk && response.value(QStringLiteral("ok")).toBool(false))
+                modelDefaultsByPath_.insert(key, response);
+            // A failure caches NOTHING -- so a worker that comes back up is asked again rather than
+            // the cockpit being stuck on a remembered "we could not tell" -- but the waiters still
+            // fire, so the page applies the family operating point instead of waiting forever.
+            auto waiters = modelDefaultsWaiters_.take(key);
+            for (auto &waiter : waiters)
+            {
+                if (waiter)
+                    waiter();
+            }
+        },
+        12000);
+}
+
+QJsonObject MainWindow::modelDefaultsFor(const QString &modelPath, const QString &family,
+                                         const QString &mode) const
+{
+    if (modelPath.trimmed().isEmpty())
+        return {};
+    return modelDefaultsByPath_.value(modelDefaultsCacheKey(modelPath, family, mode));
+}
+
+void MainWindow::clearModelDefaultsCache(const QString &modelPath)
+{
+    // A cached answer is only correct while the sidecar it was resolved from is. Nothing used to
+    // drop one, so a refresh that WROTE a sidecar changed what the cockpit showed only after a
+    // restart -- and the caption was telling the user to go and run that refresh. In-flight entries
+    // are deliberately left alone: their waiters still hold widgets, and cancelling them would give
+    // the page a completion that never comes.
+    if (modelPath.trimmed().isEmpty())
+    {
+        modelDefaultsByPath_.clear();
+        return;
+    }
+    const QString prefix = modelDefaultsPathPrefix(modelPath);
+    for (const QString &key : modelDefaultsByPath_.keys())
+    {
+        if (key.startsWith(prefix))
+            modelDefaultsByPath_.remove(key);
+    }
+}
+
+// W5 Task 4 -- the other half of `background: true`.
+//
+// A background refresh replies once, with its job id, and then goes quiet: progress and the final
+// result are published to `subscribe`rs (python/model_intelligence_commands.py `_fanout`). Without
+// a listener the Models page would show a spinner that never moved and a cancel button that
+// nothing ever retired. The subscription is opened only while a refresh is running -- the queue
+// controller keeps its own permanent one, and two listeners for the whole session would double
+// every queue frame the app already handles.
+void MainWindow::startModelIntelEvents()
+{
+    if (modelIntelEventGuard_)
+        return;
+    modelIntelEventGuard_ = new QObject(this);
+    spellvision::workers::WorkerSocketClient::listen(
+        modelIntelEventGuard_,
+        QJsonObject{{QStringLiteral("command"), QStringLiteral("subscribe")}},
+        [this](const QJsonObject &frame) {
+            // `subscribe` carries every fan-out, generation progress included. The page routes by
+            // type and ignores what is not its own, so the filter here is only about not waking it
+            // for every render step.
+            const QString type = frame.value(QStringLiteral("type")).toString();
+            if (!modelsPage_ || !type.startsWith(QStringLiteral("model_intel")))
+                return;
+            modelsPage_->applyModelIntelReply(frame);
+        },
+        [this]() {
+            // The socket died. Dropping the guard lets the next refresh open a fresh one rather
+            // than believing it still has a listener.
+            if (!modelIntelEventGuard_)
+                return;
+            modelIntelEventGuard_->deleteLater();
+            modelIntelEventGuard_ = nullptr;
+        });
+}
+
+void MainWindow::stopModelIntelEvents()
+{
+    if (!modelIntelEventGuard_)
+        return;
+    modelIntelEventGuard_->deleteLater();
+    modelIntelEventGuard_ = nullptr;
 }
 
 void MainWindow::sendWorkerRequestAsync(
@@ -5786,6 +6029,24 @@ void MainWindow::beginModelDownload(const QString &reference,
     if (!context.isEmpty())
         request.insert(QStringLiteral("context"), context);
 
+    // W5 Task 5 -- where the file ENDS UP.
+    //
+    // W1 Task 10 built the post-download hook: `models_root` makes the lane place the finished
+    // weight under the right subdirectory of the library and identify THAT file, writing its
+    // sidecar. `download_manager` is explicit that absent means "the file stays wherever the
+    // materializer put it" -- python/.cache/assets/... -- and no caller in `qt_ui/` ever sent it.
+    // So every download through this app, from the Models page's own button and from a link
+    // dropped on the page, finished successfully into a cache directory the Models page does not
+    // scan. From the user's chair that is a download that did not happen.
+    //
+    // Deliberately not `model_kind`: the kind is a claim about a file nobody has classified yet,
+    // and `placement.subdir_for` already falls back to the same filename heuristic the C++ drop
+    // path uses. Sending a guess would make the guess authoritative.
+    const QString libraryRoot =
+        spellvision::shell::RuntimeProfile::load(resolveProjectRoot()).modelsRoot.trimmed();
+    if (!libraryRoot.isEmpty())
+        request.insert(QStringLiteral("models_root"), libraryRoot);
+
     sendWorkerRequestAsync(request, [this, ref](const QJsonObject &response,
                                                 const QString &diagnostics,
                                                 bool startedOk) {
@@ -5856,6 +6117,13 @@ void MainWindow::pollDownloadStatus()
 
         if (downloadActiveCount_ > 0)
             downloadPollTick_ = 0;
+
+        // W5 Task 5: the lane just placed a weight in the library and wrote its sidecar, and the
+        // Models page reads kinds and pictures at SCAN time -- so without this the model the user
+        // just downloaded is on disk, identified, and absent from every tab until they press
+        // Refresh Models themselves.
+        if (previousCount > 0 && downloadActiveCount_ == 0 && modelsPage_)
+            modelsPage_->refreshInventory();
 
         if (downloadActiveCount_ != previousCount || downloadPercent_ != previousPercent)
             syncBottomTelemetry();

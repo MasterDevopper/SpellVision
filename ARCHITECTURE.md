@@ -50,9 +50,14 @@ seam between two of these steps rather than inside any one of them.
    which is only possible because it was moved out of `MainWindow`, where reaching it meant
    launching the GUI. Note it has side effects despite its name: it creates the output directory.
 2. **The submission policy decides whether to send it.** `qt_ui/workers/WorkerSubmissionPolicy`.
+   Then `qt_ui/generation/EndpointRouting::chooseEndpoint` decides WHICH MACHINE. Auto takes the
+   first idle enabled endpoint in registry order whose capability check passes, so a free local GPU
+   always wins; an explicit pick that cannot run the job is refused there, by name, and never
+   rerouted. Only a non-local choice puts `comfy_api_url` in the request — a single-machine install
+   sends exactly what it always sent.
 3. **It goes over the socket.** `qt_ui/workers/WorkerSocketClient` carries every one-shot command.
    (It replaced spawning `python worker_client.py` per RPC: ~79 ms → ~1.4 ms, on a 1.8 s poll.)
-4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 125
+4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 135
    commands. `python/worker_command_audience.py` classifies every one of them as user-facing,
    diagnostic or internal, and `tests/test_protocol_doc.py` holds the protocol document to that set.
 5. **The job enters the state machine.** `python/worker_service_state.py` owns `JobState` and
@@ -83,14 +88,16 @@ extractions; `worker_tcp.py` is 864.
 | --- | --- | --- |
 | Worker core | `worker_service.py`, `worker_tcp.py`, `worker_runtime.py`, `worker_service_state.py`, `worker_queue.py`, `worker_durable_state.py`, `worker_auth.py`, `worker_metadata.py` | Entry point, TCP dispatch, pipeline runtime, job state, queue, persistence, per-launch session secret |
 | Protocol surface | `worker_client.py`, `worker_command_audience.py`, `request_payload.py` | The CLI mirror of the wire protocol, who each command is for, request coercion |
-| ComfyUI lifecycle | `comfy_root.py`, `comfy_bootstrap.py`, `comfy_runtime_manager.py`, `comfy_launch_policy.py`, `comfy_endpoint.py`, `comfy_version_check.py`, `comfy_manager_bridge.py` | Where it is, how it starts, how it is reached, what version answered |
+| ComfyUI lifecycle | `comfy_root.py`, `comfy_bootstrap.py`, `comfy_runtime_manager.py`, `comfy_launch_policy.py`, `comfy_endpoint.py`, `comfy_version_check.py`, `comfy_manager_bridge.py`, `endpoint_capability.py`, `endpoint_capability_report.py`, `endpoint_commands.py` | Where it is, how it starts, how it is reached, what version answered, and whether a given endpoint can run a given graph |
 | ComfyUI graphs | `comfy_prompt_client.py`, `comfy_cancel.py`, `comfy_graph_helpers.py`, `comfy_graph_converter.py`, `comfy_slot_mapper.py`, `comfy_node_contract.py`, `comfy_node_aliases.py`, `comfy_subgraph_expander.py` | Submit, cancel, shared graph primitives, UI→API conversion, node contract diffing |
 | Generation | `image_runners.py`, `native_runners.py`, `native_image_graphs.py`, `native_video_graphs.py`, `krea2_graph.py`, `krea2_regional_inpaint.py`, `qwen_image_edit_graph.py`, `upscale_engine.py`, `flux3_video.py` | The routes that actually render |
 | Families | `family_capability.py`, `family_operating_points.py`, `family_install_plan.py`, `video_family_contracts.py`, `video_family_readiness.py`, `video_adapters/` | What a family can do, what it costs, whether it is ready, per-family video adapters |
 | Models | `model_registry.py`, `model_classification.py`, `model_sources.py`, `model_import.py`, `model_delete.py`, `model_dependency_resolver.py`, `model_dependency_manifest.py`, `model_resolution_commands.py`, `model_resolution_offer.py`, `component_resolver.py` | Inventory, one classifier, resolution and substitution offers |
+| Model intelligence | `model_intelligence/`, `model_intelligence_commands.py` | Who a weight is according to the site hosting it: hash, CivitAI/HF lookup, sidecar, previews, recommended settings, and the six worker commands over that package |
 | Workflows | `workflow_importer.py`, `workflow_scanner.py`, `workflow_url_import.py`, `workflow_pack_resolver.py`, `workflow_model_declarations.py`, `workflow_architecture_inference.py`, `workflow_library_commands.py`, `node_pack_installer.py`, `node_dependency_resolver.py`, `node_registry_resolver.py` | Import a foreign workflow, resolve what it needs, install pinned |
 | LTX | `ltx_workflow_contract.py`, `ltx_workflow_materialization.py`, `ltx_workflow_graph_inspection.py`, `ltx_prompt_api_*.py`, `ltx_queue_history_registry.py`, `ltx_requeue_draft_submission.py`, `ltx_smoke_test_route.py` | The LTX route and its prompt-API fallback |
 | Character | `character_create.py`, `character_pack.py`, `character_export_validate.py`, `look_completion.py`, `clothes_only.py`, `garment_shrinkwrap.py`, `plate_to_sliders.py`, `lock_plate_blend.py` | The Character Studio commands |
+| Optimization evidence | `optimization_provenance.py`, `optimization_levers.py`, `optimization_results.py`, `optimization_commands.py` | What build produced a render, which levers this stack can actually measure, and the ledger a timing is recorded in |
 | Resources | `runtime_paths.py`, `app_paths.py`, `runtime_identity.py`, `vram.py`, `memory_optimization.py`, `download_manager.py`, `download_commands.py`, `credential_store.py` | Paths, VRAM, memory profile, the download lane, secrets |
 
 `python/video_adapters/` holds `base.py`, `registry.py`, `ltx_adapter.py`, `wan_adapter.py` and
@@ -113,7 +120,8 @@ coupled component — see §7 for why that has not been split.
 | Home | `HomePage`, `HomeDashboardPage`, `HomeDashboardModuleRegistry`, `Dashboard*` | The outputs gallery and its module primitives |
 | Theming | `ThemeManager.{h,cpp}` | 26 tokens, five presets, runtime icon recoloring, contrast self-check |
 | Queue | `QueueManager`, `QueueTableModel`, `QueueFilterProxyModel`, `shell/QueueUiPresenter` | Local queue model, view and presentation |
-| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness. `CockpitLayout` places the cockpit's prompt, canvas and action cards for the shell layout in force |
+| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness. `CockpitLayout` places the cockpit's prompt, canvas and action cards for the shell layout in force. `EndpointRouting` decides which machine a job goes to and refuses, by name, before anything is enqueued |
+| Endpoints | `shell/EndpointRegistry.{h,cpp}`, `shell/EndpointProbe.{h,cpp}`, `shell/EndpointPanel.{h,cpp}` | The machines this install may render on. `EndpointRegistry` is the data (QSettings `runtime/endpoints`; entry 0 is the local master and cannot be removed or re-addressed from the list); `EndpointProbe` asks each one `/system_stats`, `/queue` and `/models/checkpoints`; `EndpointPanel` is the Runtime page's rows. Replaced a hardcoded IP, a second copy of it in a probe, and a health check that read `"healthy=yes"` out of a QLabel's text |
 | Worker transport | `workers/` | `WorkerSocketClient`, `WorkerRequestBuilder`, `WorkerResponseParser`, `WorkerCommandRunner`, `WorkerQueueController`, `WorkerProcessController`, `WorkerSubmissionPolicy` |
 | Preview | `preview/` | Image and video preview lifecycle, aspect cap, file settling |
 | Assets | `assets/` | Catalog scanning, model/LoRA stacks, family licence surfacing |

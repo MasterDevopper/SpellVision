@@ -10,8 +10,12 @@
 #include <QtTest>
 
 #include <QApplication>
+#include <QComboBox>
+#include <QLabel>
 #include <QCoreApplication>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -41,6 +45,65 @@ CanvasSpins canvasSpins(ImageGenerationPage &page)
             spins.height = box;
     }
     return spins;
+}
+
+// The frame and fps boxes, found by what they SAY rather than by creation order: the page has
+// several spin boxes and their order is an implementation detail, while these two tooltips are the
+// sentences the user reads.
+QSpinBox *spinWithTooltipContaining(ImageGenerationPage &page, const QString &needle)
+{
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->toolTip().contains(needle, Qt::CaseInsensitive))
+            return box;
+    }
+    return nullptr;
+}
+
+// wan's shape: two operating points, each carrying the canvas and the duration beside the sampling
+// values -- which is what family_operating_points.py ships since W2 Task 1. Two rather than one on
+// purpose: a single-point family hides the selector and never applies a bundle, so a one-point
+// fixture would have tested the early-out instead of the applier.
+QJsonObject familyTable(int width, int height, int frames, int fps)
+{
+    auto point = [&](const QString &name, int steps, double cfg) {
+        QJsonObject params;
+        params.insert(QStringLiteral("steps"), steps);
+        params.insert(QStringLiteral("cfg"), cfg);
+        params.insert(QStringLiteral("width"), width);
+        params.insert(QStringLiteral("height"), height);
+        params.insert(QStringLiteral("frames"), frames);
+        params.insert(QStringLiteral("fps"), fps);
+        QJsonObject out;
+        out.insert(QStringLiteral("name"), name);
+        out.insert(QStringLiteral("params"), params);
+        return out;
+    };
+    QJsonObject table;
+    table.insert(QStringLiteral("default_operating_point"), QStringLiteral("quality"));
+    table.insert(QStringLiteral("operating_points"),
+                 QJsonArray{point(QStringLiteral("quality"), 28, 4.0), point(QStringLiteral("fast"), 4, 1.0)});
+    return table;
+}
+
+// The video "Primary" checkpoint combo, found by the label beside it -- the same identification
+// tests/cpp/test_model_defaults_apply.cpp uses, and for the same reason: its currentIndexChanged
+// handler calls the private setSelectedModel(), so driving it simulates a real checkpoint pick
+// rather than reaching around one. A model CHANGE is the event clearUserEditedFields() runs on, and
+// without it this file's staged-canvas case could not fail however the flags behaved.
+QComboBox *videoPrimaryModelComboOf(ImageGenerationPage &page)
+{
+    for (QLabel *label : page.findChildren<QLabel *>())
+    {
+        if (label->text() != QStringLiteral("Primary"))
+            continue;
+        if (QWidget *cell = label->parentWidget())
+        {
+            if (QComboBox *combo = cell->findChild<QComboBox *>())
+                return combo;
+        }
+    }
+    return nullptr;
 }
 
 QString writePng(const QTemporaryDir &dir, const QString &name, const QSize &size)
@@ -152,6 +215,165 @@ private slots:
         page.useImageAsInput(portrait);
         QCOMPARE(spins.width->value(), 1024);
         QCOMPARE(spins.height->value(), 1024);
+    }
+
+    // --- W2 Task 6: the canvas comes from the same answer as the sampling values -----------------
+
+    void the_canvas_and_the_duration_come_from_the_resolved_answer()
+    {
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QSpinBox *frames = spinWithTooltipContaining(page, QStringLiteral("Total frames"));
+        QSpinBox *fps = spinWithTooltipContaining(page, QStringLiteral("frames per second"));
+        QVERIFY(spins.width && spins.height && frames && fps);
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+
+        // Before W2 the canvas was mode-based only -- every video page opened 832x480 whatever the
+        // family said -- and frames/fps kept the spin boxes' construction values.
+        QCOMPARE(spins.width->value(), 640);
+        QCOMPARE(spins.height->value(), 384);
+        QCOMPARE(frames->value(), 33);
+        QCOMPARE(fps->value(), 12);
+    }
+
+    void a_size_the_user_typed_is_not_overwritten()
+    {
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QSpinBox *frames = spinWithTooltipContaining(page, QStringLiteral("Total frames"));
+        QVERIFY(spins.width && spins.height && frames);
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+        QCOMPARE(spins.width->value(), 640);
+
+        // A write from outside the page's own ProgrammaticWrite scope is exactly what a human
+        // typing looks like, which is what makes this a real simulation rather than a poke at a flag.
+        spins.width->setValue(1216);
+        spins.height->setValue(704);
+        frames->setValue(81);
+
+        // The three triggers that re-run the appliers: a Simple/Advanced round trip, and the
+        // family/operating-point refresh a model change fans out into.
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        page.refreshOperatingPointSelector();
+        page.refreshModelDefaults();
+
+        QCOMPARE(spins.width->value(), 1216);
+        QCOMPARE(spins.height->value(), 704);
+        QCOMPARE(frames->value(), 81);
+    }
+
+    void a_simple_mode_aspect_choice_survives_the_same_way()
+    {
+        // The Aspect presets are literal pairs, and choosing one is the user stating a size -- not
+        // a value the next family default may quietly replace. Orientation is a DIFFERENT control
+        // (added 2026-09-16, spec 2.2): it swaps the resolved pair instead of replacing it, and is
+        // covered by tests/cpp/test_model_defaults_apply.cpp. This comment used to say Aspect was
+        // the only orientation there was, which recorded a missing feature in a place nobody
+        // reading the ledger would find it.
+        ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+
+        QComboBox *aspect = nullptr;
+        for (QComboBox *combo : page.findChildren<QComboBox *>())
+        {
+            if (combo->findData(QStringLiteral("768x1024")) >= 0)
+                aspect = combo;
+        }
+        QVERIFY2(aspect, "the Aspect preset combo was not found");
+
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(640, 384, 33, 12); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        page.updateDisclosure(false);
+
+        aspect->setCurrentIndex(aspect->findData(QStringLiteral("768x1024")));
+        QCOMPARE(spins.width->value(), 768);
+        QCOMPARE(spins.height->value(), 1024);
+
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        QCOMPARE(spins.width->value(), 768);
+        QCOMPARE(spins.height->value(), 1024);
+    }
+
+    void a_canvas_taken_from_the_staged_image_survives_a_model_change()
+    {
+        // ensureCanvasSizeDefault marks the canvas when it came from the image the user staged,
+        // with a comment saying "a checkpoint picked afterwards must not resize their input out
+        // from under them". setSelectedModel then called clearUserEditedFields() on EVERY model
+        // change -- performing the sentence the comment forbids. Stage a 1280x720 keyframe on I2V,
+        // pick a wan checkpoint, and it became 832x480.
+        //
+        // Both rules were right and neither was wrong: a deliberate model change IS a request for
+        // that model's numbers, and a staged keyframe's shape IS the shape the user asked for. What
+        // was missing is that they are two different facts sharing one set.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString keyframe = writePng(dir, QStringLiteral("keyframe.png"), QSize(1280, 720));
+
+        ImageGenerationPage page(ImageGenerationPage::Mode::ImageToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+
+        page.useImageAsInput(keyframe);
+        QCOMPARE(spins.width->value(), 1280);
+        QCOMPARE(spins.height->value(), 720);
+
+        // A REAL model change, through the combo whose handler calls setSelectedModel(). That is
+        // the event clearUserEditedFields() runs on, and it is the whole subject: a version of this
+        // test that only refreshed the operating point passed against the planted defect, because
+        // the flags were never cleared and nothing was ever overwritten.
+        page.setOperatingPointsProvider([](const QString &) { return familyTable(832, 480, 81, 16); });
+        page.pinVideoFamily(QStringLiteral("wan"));
+        QComboBox *primary = videoPrimaryModelComboOf(page);
+        QVERIFY2(primary, "primary video model combo not found");
+        const int index = primary->count();
+        primary->addItem(QStringLiteral("wan checkpoint"),
+                         QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v.safetensors"));
+        if (primary->currentIndex() != index)
+            primary->setCurrentIndex(index);
+        page.refreshOperatingPointSelector();
+        page.updateDisclosure(true);
+        page.updateDisclosure(false);
+        page.refreshModelDefaults();
+
+        QCOMPARE(spins.width->value(), 1280);
+        QCOMPARE(spins.height->value(), 720);
+    }
+
+    void staging_a_different_image_does_replace_the_canvas_it_gave()
+    {
+        // The other half, and the reason this is a second SET rather than a flag that is never
+        // cleared: the mark protects a size against a model change, not against the content it came
+        // from being replaced. Without this, the first keyframe's shape would outlive the keyframe.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString first = writePng(dir, QStringLiteral("first.png"), QSize(1280, 720));
+        const QString second = writePng(dir, QStringLiteral("second.png"), QSize(720, 1280));
+
+        ImageGenerationPage page(ImageGenerationPage::Mode::ImageToVideo);
+        const CanvasSpins spins = canvasSpins(page);
+        QVERIFY(spins.width && spins.height);
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+
+        page.useImageAsInput(first);
+        QCOMPARE(spins.width->value(), 1280);
+
+        spins.width->setValue(0);
+        spins.height->setValue(0);
+        page.useImageAsInput(second);
+        QCOMPARE(spins.width->value(), 720);
+        QCOMPARE(spins.height->value(), 1280);
     }
 };
 

@@ -11,12 +11,18 @@
 class QLabel;
 class QLineEdit;
 class QComboBox;
+class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QDragEnterEvent;
 class QDropEvent;
+
+namespace spellvision::widgets
+{
+class ElidingLabel;
+}
 
 namespace spellvision::assets
 {
@@ -26,6 +32,9 @@ class ModelCardFilterProxy;
 class ModelCardDelegate;
 class ModelCardView;
 class ModelOverlayStore;
+class ModelKindTabBar;
+class ModelInspectorPanel;
+class ModelRefreshController;
 }
 
 class ModelManagerPage : public QWidget
@@ -79,9 +88,27 @@ signals:
     // "Delete…": the selected file, already confirmed by the user on this page. MainWindow sends
     // delete_model and refreshes the inventory on success.
     void deleteModelRequested(const QString &path);
+    // W2: an inventory rescan has started. MainWindow drops its per-model defaults cache on it --
+    // an answer resolved before this scan is a claim about a library state nobody has re-checked,
+    // and until 2026-09-16 nothing ever dropped one, so a sidecar written between two picks of the
+    // same checkpoint could not reach the cockpit without restarting the app.
+    void inventoryRefreshStarted();
+    // W5 Task 3: one request the inspector built (model_intel_set_user / model_intel_refresh).
+    // The page owns no socket; MainWindow sends it and hands the answer back through
+    // applyModelIntelReply.
+    void modelIntelRequested(const QJsonObject &request);
+    // "Apply to this mode" -- the settings this model publishes, with their provenance attached.
+    void applyModelSettingsRequested(const QString &weightPath, const QJsonObject &settings);
+    // W5 Task 4: a metadata refresh ENDED (completed, cancelled or failed). `weightPath` names the
+    // one model a per-model refresh was about and is empty for a library pass. MainWindow drops the
+    // per-model defaults cache on it -- at the END, not at the start, because with
+    // `background: true` the immediate reply is only the started event and every answer resolved
+    // before the sidecars were rewritten is the stale one.
+    void modelIntelRefreshFinished(const QString &weightPath);
 
 public slots:
     void refreshInventory();
+    void applyModelIntelReply(const QJsonObject &reply);
     void rebuildThumbnailCache();
 
 protected:
@@ -103,6 +130,9 @@ private slots:
 
 private:
     void handleDroppedReference(const QString &reference);
+    // Everything the refresh row shows, in one place, driven by the controller's stateChanged.
+    void syncMetadataRefreshRow();
+    QStringList currentModelRoots() const;
     QString destSubdirForWeight(const QString &fileName) const;
     QPushButton *downloadModelButton_ = nullptr;
     QPushButton *deleteModelButton_ = nullptr;
@@ -110,7 +140,11 @@ private:
     {
         QString name;         // filename on disk — never rewritten
         QString displayName;  // metadata model_name for the page only; empty = show filename
-        QString type;
+        QString type;         // display label for `kind` (Checkpoint / LoRA / …)
+        // W5 Task 1: the classifier's own answer, read from `<stem>.spellvision.json`, falling
+        // back to the folder a ComfyUI library files a kind under. One of the ten values plus
+        // "other"; never empty, so every model reaches a visible tab.
+        QString kind;
         QString family;
         QString sizeText;
         QString status;
@@ -121,6 +155,14 @@ private:
         QString metadataPath;
         QString sha256;    // identity — thumbnail-cache / overlay key
         QString baseModel; // "" or "Unknown" when absent
+        // W5 Task 2: what `<stem>.spellvision.json` says. `displayName` above already carried the
+        // import sidecar's model_name; the intel name wins over it when both exist.
+        QString siteBadge;      // "CivitAI" / "HuggingFace" / ""
+        QString quantisation;   // nvfp4 / int8 / fp8 / bf16 / ""
+        QString coverPath;      // the sidecar's cover picture ("" -> fall back to the old sidecars)
+        int previewNsfwLevel = 0;
+        // NeverAsked / NothingFound / Identified, stored as an int so the cache round-trips it.
+        int identification = 0;
     };
 
     struct RefreshResult
@@ -156,7 +198,10 @@ private:
     static QJsonObject entryToJson(const ModelEntry &entry);
     static ModelEntry entryFromJson(const QJsonObject &object);
     static QString detectFamily(const QString &path);
-    static QString detectType(const QString &path);
+    // W5 Task 1: the kind for one weight -- the sidecar's classifier answer when there is one,
+    // the folder fallback when there is not. `detectType`'s six path substrings are gone.
+    static QString kindForWeight(const QString &path);
+    void rebuildKindTabs();
 
     QString projectRoot_;
     QString explicitModelsRoot_;
@@ -167,8 +212,8 @@ private:
     QLabel *lastCheckedLabel_ = nullptr;
     QLabel *cachePathLabel_ = nullptr;
     QLineEdit *searchModelEdit_ = nullptr;
-    QComboBox *typeFilterCombo_ = nullptr;
     QComboBox *familyFilterCombo_ = nullptr;
+    spellvision::assets::ModelKindTabBar *kindTabBar_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *rebuildCacheButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;
@@ -179,13 +224,23 @@ private:
     QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
-    QLabel *exampleImageLabel_ = nullptr;
-    QLabel *modelTriggersLabel_ = nullptr;
-    QPushButton *copyTriggersButton_ = nullptr;
-    QLabel *modelDescriptionLabel_ = nullptr;
-    QStringList currentTriggerWords_;
+    // W5 Task 3: the gallery, description, trigger words, licence, recommended settings and the
+    // three actions all live in one unit now. The page used to hold four loose widgets and rebuild
+    // them inline in updateDetailsForRow.
+    spellvision::assets::ModelInspectorPanel *inspectorPanel_ = nullptr;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
+
+    // W5 Task 4: "Refresh metadata" -- the action W2's caption named and the app did not have.
+    // The controller owns the conversation (background job id, progress, cancel); these widgets
+    // only show it. The progress row is hidden while nothing is running rather than sitting at 0%,
+    // because a bar at zero claims a denominator nobody has counted yet.
+    spellvision::assets::ModelRefreshController *refreshController_ = nullptr;
+    QPushButton *metadataRefreshButton_ = nullptr;
+    QWidget *metadataProgressRow_ = nullptr;
+    QProgressBar *metadataProgressBar_ = nullptr;
+    spellvision::widgets::ElidingLabel *metadataProgressLabel_ = nullptr;
+    QPushButton *metadataCancelButton_ = nullptr;
 
     // S3 workflow binding: the bound-workflow row in the details card + its actions.
     QLabel *workflowBindingLabel_ = nullptr;

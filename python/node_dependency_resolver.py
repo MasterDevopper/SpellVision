@@ -21,8 +21,10 @@ import json
 
 from comfy_manager_bridge import (
     clone_custom_node_repo,
+    detect_manager_paths,
     ensure_manager_installed,
     install_registered_nodes,
+    invalidate_installed_nodes_cache,
     list_installed_nodes,
 )
 from node_pack_installer import install_node_pack
@@ -142,14 +144,33 @@ def build_node_install_plan(
     """
     catalog = load_node_catalog(node_catalog)
     catalog_entries = list(catalog.get("packages", []))
-    installed_snapshot = list_installed_nodes(comfy_root, python_executable=python_executable)
-    installed_names = {name.lower() for name in installed_snapshot.get("names", [])}
 
-    plan = NodeInstallPlan(
-        manager_present=bool(installed_snapshot.get("manager_present")),
-        installed_packages=sorted(installed_snapshot.get("names", [])),
-        logs=[installed_snapshot.get("command_result", {})],
-    )
+    # The installed-node snapshot shells out to cm-cli, and it is only ever consulted to decide
+    # whether a pack a MISSING class resolves to is already on disk. When the graph has no missing
+    # classes there is nothing to compare it against and the subprocess is pure latency: measured on
+    # krea2-compact-t2i-v10 (zero missing classes) it was 132.6 s of a 134.4 s readiness pass -- and
+    # both the import path and the readiness path build this plan, so a dropped workflow paid it
+    # twice before it reached a page. manager_present still comes from the filesystem, which is what
+    # it describes, rather than being asserted False because the snapshot was skipped.
+    if report.missing_custom_nodes:
+        installed_snapshot = list_installed_nodes(comfy_root, python_executable=python_executable)
+        installed_names = {name.lower() for name in installed_snapshot.get("names", [])}
+        plan = NodeInstallPlan(
+            manager_present=bool(installed_snapshot.get("manager_present")),
+            installed_packages=sorted(installed_snapshot.get("names", [])),
+            logs=[installed_snapshot.get("command_result", {})],
+        )
+    else:
+        installed_names = set()
+        plan = NodeInstallPlan(
+            manager_present=detect_manager_paths(comfy_root).exists,
+            installed_packages=[],
+            logs=[{
+                "stage": "installed_node_snapshot",
+                "skipped": True,
+                "reason": "no missing node classes to resolve, so nothing would be compared against it",
+            }],
+        )
 
     declared_by_class: dict[str, PackResolution] = {}
     if use_declared_packs:
@@ -294,6 +315,10 @@ def apply_node_install_plan(
         results.append(outcome)
         if not outcome.get("ok"):
             errors.append(outcome.get("message") or f"Failed to install {package_name or repo_url}")
+
+    # install_node_pack writes straight into custom_nodes/ without going through the bridge, so the
+    # bridge cannot invalidate for it. The plan that applied the installs knows, and says so.
+    invalidate_installed_nodes_cache("apply_node_install_plan")
 
     return NodeApplyResult(
         ok=not errors,

@@ -3,6 +3,8 @@
 
 #include "ThemeManager.h"
 #include "workflows/ModelResolutionDialog.h"
+#include "workflows/WorkflowDraftBuilder.h"
+#include "workflows/WorkflowLaunchController.h"
 #include "style/SvKit.h"
 
 #include <QComboBox>
@@ -101,102 +103,6 @@ QJsonArray buildNodeRef(const QString &nodeId, int slot)
     return ref;
 }
 
-QString nodeInputRefId(const QJsonValue &value)
-{
-    if (!value.isArray())
-        return {};
-
-    const QJsonArray ref = value.toArray();
-    if (ref.isEmpty())
-        return {};
-
-    const QJsonValue nodeValue = ref.at(0);
-    if (nodeValue.isString())
-        return nodeValue.toString().trimmed();
-    if (nodeValue.isDouble())
-        return QString::number(nodeValue.toInt());
-    return {};
-}
-
-// Walk the conditioning graph UPSTREAM from a node to find its source CLIPTextEncode text.
-//
-// The conditioning graph can contain CYCLES (IPAdapter / reroute feedback loops are common in complex
-// ComfyUI workflows). This was previously a plain recursion with no visited-set, so a cyclic chain
-// recursed until the native stack overflowed (STATUS_STACK_OVERFLOW, 0xC00000FD). That crashed startup
-// as soon as ONE such workflow was in the imported library and hit during the (background) library
-// scan -- surfaced by the 81-workflow import, whose "ip-adapter-json" profile has a self-referential
-// conditioning node (node 10 -> ... -> node 10). It looked count-dependent only because that profile
-// sorts partway through the scan; it is really a single pathological graph.
-//
-// Fixed by an explicit-stack iterative DFS with a visited-set: bounded native stack (O(1) frames) and
-// O(nodes) work, cycle-safe. Semantics are preserved -- passthrough keys are explored in their
-// original order (reverse-pushed so LIFO yields the same pre-order), the first non-empty CLIPTextEncode
-// text wins, and empty encode nodes are skipped exactly as the recursive version's callers did.
-QString textFromClipEncode(const QJsonObject &prompt, const QString &startNodeId)
-{
-    static const QStringList passthroughKeys = {
-        QStringLiteral("text"),
-        QStringLiteral("conditioning"),
-        QStringLiteral("positive"),
-        QStringLiteral("negative"),
-        QStringLiteral("base_cond"),
-        QStringLiteral("refiner_cond")
-    };
-
-    QStringList pending;
-    if (!startNodeId.trimmed().isEmpty())
-        pending.push_back(startNodeId);
-
-    QSet<QString> visited;
-    while (!pending.isEmpty())
-    {
-        const QString nodeId = pending.takeLast();
-        if (nodeId.trimmed().isEmpty() || visited.contains(nodeId))
-            continue;
-        visited.insert(nodeId);
-
-        const QJsonValue nodeValue = prompt.value(nodeId);
-        if (!nodeValue.isObject())
-            continue;
-
-        const QJsonObject node = nodeValue.toObject();
-        const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
-        const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
-
-        if (classType == QStringLiteral("CLIPTextEncode"))
-        {
-            const QString text = inputs.value(QStringLiteral("text")).toString().trimmed();
-            if (!text.isEmpty())
-                return text;
-            continue; // empty encode node: keep searching (matches the recursive skip-empty behaviour)
-        }
-
-        // Reverse-push so the first passthrough key is popped first (LIFO => original DFS pre-order).
-        for (int i = passthroughKeys.size() - 1; i >= 0; --i)
-        {
-            const QString nextNodeId = nodeInputRefId(inputs.value(passthroughKeys.at(i)));
-            if (!nextNodeId.trimmed().isEmpty())
-                pending.push_back(nextNodeId);
-        }
-    }
-
-    return {};
-}
-
-QString compactBaseName(const QString &value)
-{
-    const QString trimmed = value.trimmed();
-    if (trimmed.isEmpty())
-        return {};
-
-    const QFileInfo info(trimmed);
-    const QString baseName = info.completeBaseName().trimmed();
-    if (!baseName.isEmpty())
-        return baseName;
-
-    const QString fileName = info.fileName().trimmed();
-    return fileName.isEmpty() ? trimmed : fileName;
-}
 
 QString boolText(bool value)
 {
@@ -207,157 +113,6 @@ QString boolText(bool value)
 
 
 
-const QSet<QString> kCheckpointInputNames = {
-    QStringLiteral("ckpt_name"),
-    QStringLiteral("checkpoint"),
-    QStringLiteral("model"),
-    QStringLiteral("model_name")
-};
-
-const QSet<QString> kLoraInputNames = {
-    QStringLiteral("lora_name"),
-    QStringLiteral("lora")
-};
-
-const QSet<QString> kLoraStrengthInputNames = {
-    QStringLiteral("strength_model"),
-    QStringLiteral("strength"),
-    QStringLiteral("lora_strength"),
-    QStringLiteral("weight")
-};
-
-const QSet<QString> kImageInputNames = {
-    QStringLiteral("image"),
-    QStringLiteral("input_image"),
-    QStringLiteral("image_path")
-};
-
-bool hasLikelyModelExtension(const QString &value)
-{
-    const QString suffix = QFileInfo(value.trimmed()).suffix().trimmed().toLower();
-    return suffix == QStringLiteral("safetensors")
-        || suffix == QStringLiteral("ckpt")
-        || suffix == QStringLiteral("pt")
-        || suffix == QStringLiteral("pth")
-        || suffix == QStringLiteral("bin");
-}
-
-bool hasModelFolderHint(const QString &value)
-{
-    const QString normalized = value.trimmed().toLower();
-    return normalized.contains(QStringLiteral("checkpoint"))
-        || normalized.contains(QStringLiteral("checkpoints"))
-        || normalized.contains(QStringLiteral("models/checkpoints"))
-        || normalized.contains(QStringLiteral("models\\checkpoints"))
-        || normalized.contains(QStringLiteral("loras"))
-        || normalized.contains(QStringLiteral("models/loras"))
-        || normalized.contains(QStringLiteral("models\\loras"));
-}
-
-bool isLikelyAssetValue(const QString &value)
-{
-    const QString trimmed = value.trimmed();
-    if (trimmed.isEmpty())
-        return false;
-    if (trimmed.startsWith(QLatin1Char('<')) || trimmed.startsWith(QLatin1Char('{')))
-        return false;
-    return hasLikelyModelExtension(trimmed) || hasModelFolderHint(trimmed);
-}
-
-QString stringInputByNames(const QJsonObject &inputs, const QSet<QString> &names)
-{
-    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
-    {
-        if (!names.contains(it.key().trimmed().toLower()) || !it.value().isString())
-            continue;
-
-        const QString value = it.value().toString().trimmed();
-        if (!value.isEmpty())
-            return value;
-    }
-
-    return {};
-}
-
-double doubleInputByNames(const QJsonObject &inputs, const QSet<QString> &names, double fallback)
-{
-    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
-    {
-        if (!names.contains(it.key().trimmed().toLower()))
-            continue;
-        if (it.value().isDouble())
-            return it.value().toDouble(fallback);
-        if (it.value().isString())
-        {
-            bool ok = false;
-            const double parsed = it.value().toString().trimmed().toDouble(&ok);
-            if (ok)
-                return parsed;
-        }
-    }
-
-    return fallback;
-}
-
-QString extractCheckpointFromInputs(const QString &, const QJsonObject &inputs)
-{
-    const QString direct = stringInputByNames(inputs, kCheckpointInputNames);
-    if (!direct.isEmpty() && isLikelyAssetValue(direct))
-        return direct;
-
-    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
-    {
-        if (!it.value().isString())
-            continue;
-
-        const QString key = it.key().trimmed().toLower();
-        if (!kCheckpointInputNames.contains(key) && !key.contains(QStringLiteral("checkpoint")) && !key.contains(QStringLiteral("ckpt")))
-            continue;
-
-        const QString value = it.value().toString().trimmed();
-        if (isLikelyAssetValue(value))
-            return value;
-    }
-
-    return {};
-}
-
-QString extractLoraNameFromInputs(const QString &classType, const QJsonObject &inputs)
-{
-    const QString loweredClassType = classType.trimmed().toLower();
-    const QString direct = stringInputByNames(inputs, kLoraInputNames);
-    if (!direct.isEmpty() && (isLikelyAssetValue(direct) || loweredClassType.contains(QStringLiteral("lora"))))
-        return direct;
-
-    for (auto it = inputs.constBegin(); it != inputs.constEnd(); ++it)
-    {
-        if (!it.value().isString())
-            continue;
-
-        const QString key = it.key().trimmed().toLower();
-        if (!kLoraInputNames.contains(key) && !key.contains(QStringLiteral("lora")))
-            continue;
-
-        const QString value = it.value().toString().trimmed();
-        if (!value.isEmpty() && (isLikelyAssetValue(value) || loweredClassType.contains(QStringLiteral("lora"))))
-            return value;
-    }
-
-    return {};
-}
-
-QString extractImageInputFromInputs(const QString &classType, const QJsonObject &inputs)
-{
-    const QString loweredClassType = classType.trimmed().toLower();
-    if (!loweredClassType.contains(QStringLiteral("image")) && loweredClassType != QStringLiteral("loadimage"))
-        return {};
-
-    const QString direct = stringInputByNames(inputs, kImageInputNames);
-    if (!direct.isEmpty())
-        return direct;
-
-    return {};
-}
 
 QString stringFromJsonValue(const QJsonValue &value)
 {
@@ -2038,12 +1793,19 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     if (record.displayName.isEmpty())
         record.displayName = QFileInfo(record.importRoot).fileName();
 
-    record.modeId = normalizedModeId(safeObjectString(object, {
-        QStringLiteral("mode_id"),
-        QStringLiteral("task"),
-        QStringLiteral("mode"),
-        QStringLiteral("task_command")
-    }));
+    // ONE resolver. This page used to derive the mode in three passes -- here from the profile's own
+    // keys, again from capability_report.primary_task in applyCapabilityReport, and a third time from
+    // user_task_override below -- each overwriting the last, which is a precedence order nobody had
+    // written down. It is written down now, in WorkflowLaunchController::modeResolution, and both of
+    // those later passes read the answer from here.
+    //
+    // `verdict` rather than `modeId`: this field is what the workflow IS (it becomes task_command on
+    // the launch profile and the task in the list row), and a v2v workflow is still a v2v workflow
+    // even though there is no page to open it on. Whether it can be OPENED is modeRoutable.
+    const auto modeVerdict = spellvision::workflows::WorkflowLaunchController::modeResolution(object);
+    record.modeId = modeVerdict.verdict;
+    record.modeRoutable = modeVerdict.routable;
+    record.modeReason = modeVerdict.reason;
     record.mediaType = safeObjectString(object, {
         QStringLiteral("media_type"),
         QStringLiteral("media"),
@@ -2090,12 +1852,9 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
         }
     }
 
-    const QString taskOverride = normalizedModeId(safeObjectString(object, {
-        QStringLiteral("user_task_override"),
-        QStringLiteral("task_override")
-    }));
-    if (!taskOverride.isEmpty())
-        record.modeId = taskOverride;
+    // The user_task_override pass that used to live here is gone: modeResolution() applies it, at the
+    // top of its precedence, so the override survives the consolidation without being a second site
+    // that can disagree about when it wins.
 
     const QString mediaOverride = safeObjectString(object, {
         QStringLiteral("user_media_override"),
@@ -2170,7 +1929,19 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
             const QJsonObject scanObj = scanDoc.object();
 
             if (!record.capabilityFromGraph)
+            {
                 applyCapabilityReport(record, capabilityObjectFromProfile(scanObj));
+                // The scan report can classify a profile that carried no verdict of its own. Asked of
+                // the one resolver, so a mode learned from a scan is decided exactly as a mode read
+                // from a profile is.
+                const auto scanned = spellvision::workflows::WorkflowLaunchController::modeResolution(scanObj);
+                if (!scanned.verdict.isEmpty() && record.modeId.isEmpty())
+                {
+                    record.modeId = scanned.verdict;
+                    record.modeRoutable = scanned.routable;
+                    record.modeReason = scanned.reason;
+                }
+            }
 
             QStringList scanMissing = safeObjectStringList(scanObj, {
                 QStringLiteral("missing_custom_nodes"),
@@ -2577,8 +2348,11 @@ void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJ
     if (!primaryTask.isEmpty() && primaryTask != QStringLiteral("unknown"))
     {
         record.primaryTask = primaryTask;
-        record.modeId = primaryTask;
         record.capabilityFromGraph = true;
+        // It does NOT assign record.modeId. This report is one of the inputs modeResolution() already
+        // weighed -- below an override, above the stored task -- and re-applying it here is how the
+        // page ended up with a precedence order that existed only as the order three functions ran in.
+        // The separate-scan path (:2172) re-asks the resolver on the scan object for the same reason.
     }
 
     if (!mediaType.isEmpty() && mediaType != QStringLiteral("unknown"))
@@ -2706,201 +2480,29 @@ bool WorkflowLibraryPage::ensureCompiledPrompt(WorkflowRecord &record)
     return record.launchArtifactValid;
 }
 
+// Extraction lives in spellvision::workflows::WorkflowDraftBuilder now, because the workflow-drop
+// path needs exactly this answer and a second extractor written for it would have started
+// disagreeing with this one on the first graph whose loader is not a plain CheckpointLoaderSimple.
+// What stays here is the part that is about a Flows ROW: which record, and where its verdict lands.
 void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
 {
-    record.reusableDraftPresent = false;
-    record.reusableDraftSafeToSubmit = false;
-    record.reusableDraftReason.clear();
-    record.reusableDraft = {};
+    spellvision::workflows::WorkflowDraftBuilder::Source source;
+    source.displayName = record.displayName;
+    source.profilePath = record.profilePath;
+    source.sourceWorkflowPath = record.sourceWorkflowPath;
+    source.sourceWorkflowFormat = record.sourceWorkflowFormat;
+    source.compiledPromptPath = record.compiledPromptPath;
+    source.modeId = record.modeId;
+    source.mediaType = record.mediaType;
+    source.backend = record.backend;
+    source.missingRuntimeAssets = record.missingRuntimeAssets;
+    source.missingCustomNodes = record.missingCustomNodes;
 
-    const bool draftImageWorkflow = isImageMode(record.modeId, record.mediaType);
-    const bool draftVideoWorkflow = isVideoMode(record.modeId, record.mediaType)
-        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
-    if (!draftImageWorkflow && !draftVideoWorkflow)
-    {
-        record.reusableDraftReason = tr("Only image, text-to-video, and image-to-video workflows can currently open as editable drafts.");
-        return;
-    }
-
-    QString promptPath = record.compiledPromptPath.trimmed();
-    if (promptPath.isEmpty() || !QFileInfo::exists(promptPath))
-    {
-        if (record.sourceWorkflowFormat == QStringLiteral("comfy_api_prompt") && !record.sourceWorkflowPath.trimmed().isEmpty())
-            promptPath = record.sourceWorkflowPath.trimmed();
-    }
-
-    if (promptPath.isEmpty() || !QFileInfo::exists(promptPath))
-    {
-        record.reusableDraftReason = tr("No compiled or API prompt is available for reusable handoff.");
-        return;
-    }
-
-    QFile file(promptPath);
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        record.reusableDraftReason = tr("Compiled prompt could not be opened.");
-        return;
-    }
-
-    QJsonParseError parseError{};
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-    {
-        record.reusableDraftReason = tr("Compiled prompt is not valid JSON.");
-        return;
-    }
-
-    const QJsonObject prompt = doc.object();
-    if (prompt.isEmpty())
-    {
-        record.reusableDraftReason = tr("Compiled prompt is empty.");
-        return;
-    }
-
-    QString checkpointName;
-    QStringList loraNames;
-    QList<double> loraStrengths;
-    QSet<QString> seenLoras;
-    QString samplerName;
-    QString schedulerName;
-    int steps = 0;
-    double cfg = 0.0;
-    qlonglong seed = 0;
-    int width = 0;
-    int height = 0;
-    int frames = 0;
-    int fps = 0;
-    QString positivePrompt;
-    QString negativePrompt;
-    QString inputImage;
-
-    for (auto it = prompt.constBegin(); it != prompt.constEnd(); ++it)
-    {
-        const QJsonObject node = it.value().toObject();
-        const QString classType = node.value(QStringLiteral("class_type")).toString().trimmed();
-        const QJsonObject inputs = node.value(QStringLiteral("inputs")).toObject();
-
-        if (checkpointName.isEmpty())
-        {
-            const QString extractedCheckpoint = extractCheckpointFromInputs(classType, inputs);
-            if (!extractedCheckpoint.isEmpty())
-                checkpointName = extractedCheckpoint;
-        }
-
-        const QString extractedLora = extractLoraNameFromInputs(classType, inputs);
-        if (!extractedLora.isEmpty())
-        {
-            const QString dedupeKey = extractedLora.trimmed().toLower();
-            if (!seenLoras.contains(dedupeKey))
-            {
-                seenLoras.insert(dedupeKey);
-                loraNames.push_back(extractedLora);
-                loraStrengths.push_back(doubleInputByNames(inputs, kLoraStrengthInputNames, 1.0));
-            }
-        }
-
-        if ((classType == QStringLiteral("KSampler") || classType == QStringLiteral("KSamplerAdvanced")) && steps <= 0)
-        {
-            samplerName = inputs.value(QStringLiteral("sampler_name")).toString().trimmed();
-            schedulerName = inputs.value(QStringLiteral("scheduler")).toString().trimmed();
-            steps = inputs.value(QStringLiteral("steps")).toInt(0);
-            cfg = inputs.value(QStringLiteral("cfg")).toDouble(0.0);
-            seed = inputs.value(classType == QStringLiteral("KSampler") ? QStringLiteral("seed") : QStringLiteral("noise_seed")).toVariant().toLongLong();
-            positivePrompt = textFromClipEncode(prompt, nodeInputRefId(inputs.value(QStringLiteral("positive"))));
-            negativePrompt = textFromClipEncode(prompt, nodeInputRefId(inputs.value(QStringLiteral("negative"))));
-        }
-
-        if (width <= 0)
-            width = inputs.value(QStringLiteral("width")).toInt(width);
-        if (height <= 0)
-            height = inputs.value(QStringLiteral("height")).toInt(height);
-        if (frames <= 0)
-            frames = inputs.value(QStringLiteral("num_frames")).toInt(
-                inputs.value(QStringLiteral("frames")).toInt(
-                    inputs.value(QStringLiteral("frame_count")).toInt(frames)));
-        if (fps <= 0)
-            fps = inputs.value(QStringLiteral("fps")).toInt(
-                inputs.value(QStringLiteral("frame_rate")).toInt(fps));
-
-        if (inputImage.isEmpty())
-        {
-            const QString extractedInputImage = extractImageInputFromInputs(classType, inputs);
-            if (!extractedInputImage.isEmpty())
-                inputImage = extractedInputImage;
-        }
-    }
-
-    QJsonObject draft;
-    draft.insert(QStringLiteral("source_name"), record.displayName);
-    draft.insert(QStringLiteral("source_profile_path"), record.profilePath);
-    draft.insert(QStringLiteral("source_workflow_path"), record.sourceWorkflowPath);
-    draft.insert(QStringLiteral("compiled_prompt_path"), promptPath);
-    draft.insert(QStringLiteral("mode_id"), normalizedModeId(record.modeId));
-    draft.insert(QStringLiteral("media_type"), record.mediaType);
-    draft.insert(QStringLiteral("backend"), record.backend);
-    draft.insert(QStringLiteral("prompt"), positivePrompt);
-    draft.insert(QStringLiteral("negative_prompt"), negativePrompt);
-    draft.insert(QStringLiteral("checkpoint"), checkpointName);
-    draft.insert(QStringLiteral("checkpoint_display"), compactBaseName(checkpointName));
-    draft.insert(QStringLiteral("sampler"), samplerName);
-    draft.insert(QStringLiteral("scheduler"), schedulerName);
-    draft.insert(QStringLiteral("steps"), steps);
-    draft.insert(QStringLiteral("cfg"), cfg);
-    draft.insert(QStringLiteral("seed"), QString::number(seed));
-    draft.insert(QStringLiteral("width"), width);
-    draft.insert(QStringLiteral("height"), height);
-    if (frames > 0)
-        draft.insert(QStringLiteral("frames"), frames);
-    if (fps > 0)
-        draft.insert(QStringLiteral("fps"), fps);
-    if (!inputImage.isEmpty())
-        draft.insert(QStringLiteral("input_image"), inputImage);
-
-    QJsonArray loraArray;
-    for (int i = 0; i < loraNames.size(); ++i)
-    {
-        QJsonObject loraEntry;
-        loraEntry.insert(QStringLiteral("name"), loraNames.at(i));
-        loraEntry.insert(QStringLiteral("display"), compactBaseName(loraNames.at(i)));
-        loraEntry.insert(QStringLiteral("strength"), i < loraStrengths.size() ? loraStrengths.at(i) : 1.0);
-        loraArray.append(loraEntry);
-    }
-    draft.insert(QStringLiteral("lora_stack"), loraArray);
-
-    QStringList draftWarnings;
-    bool safeToSubmit = true;
-    if (checkpointName.trimmed().isEmpty() && !isVideoMode(record.modeId, record.mediaType))
-    {
-        safeToSubmit = false;
-        draftWarnings.push_back(tr("No checkpoint could be inferred from the compiled prompt."));
-    }
-    else if (checkpointName.trimmed().isEmpty() && isVideoMode(record.modeId, record.mediaType))
-    {
-        draftWarnings.push_back(tr("No standalone checkpoint was inferred. The video workflow may carry its own model stack through the compiled prompt."));
-    }
-    if (loraNames.size() > 1)
-    {
-        draftWarnings.push_back(tr("This workflow uses %1 LoRAs. Review the imported stack before generating.").arg(loraNames.size()));
-    }
-    if (!record.missingRuntimeAssets.isEmpty())
-    {
-        safeToSubmit = false;
-        draftWarnings.push_back(tr("Runtime asset validation failed for %1 imported assets. Remap the stack on the generation page before submitting.").arg(record.missingRuntimeAssets.size()));
-    }
-    if (!record.missingCustomNodes.isEmpty())
-        draftWarnings.push_back(tr("The original workflow references missing custom nodes, so this draft should be treated as a reusable approximation."));
-
-    QJsonArray warningArray;
-    for (const QString &warning : draftWarnings)
-        warningArray.append(warning);
-    draft.insert(QStringLiteral("warnings"), warningArray);
-    draft.insert(QStringLiteral("safe_to_submit"), safeToSubmit);
-    draft.insert(QStringLiteral("supports_apply"), true);
-
-    record.reusableDraftPresent = true;
-    record.reusableDraftSafeToSubmit = safeToSubmit;
-    record.reusableDraftReason = safeToSubmit ? tr("This workflow can open as an editable generation draft.") : tr("This workflow can open as an editable draft, but it still needs review before submission.");
-    record.reusableDraft = draft;
+    const auto result = spellvision::workflows::WorkflowDraftBuilder::build(source);
+    record.reusableDraftPresent = result.present;
+    record.reusableDraftSafeToSubmit = result.safeToSubmit;
+    record.reusableDraftReason = result.reason;
+    record.reusableDraft = result.draft;
 }
 
 void WorkflowLibraryPage::rebuildFilters()
@@ -3338,7 +2940,9 @@ QString WorkflowLibraryPage::workflowSummaryText(const WorkflowRecord &record) c
 QString WorkflowLibraryPage::workflowDetailsText(const WorkflowRecord &record) const
 {
     QStringList lines;
-    lines << tr("Mode: %1").arg(record.modeId.toUpper());
+    lines << tr("Mode: %1").arg(record.modeId.isEmpty() ? tr("UNCLASSIFIED") : record.modeId.toUpper());
+    if (!record.modeRoutable && !record.modeReason.isEmpty())
+        lines << tr("Cannot open: %1").arg(record.modeReason);
     lines << tr("Media: %1").arg(record.mediaType);
     lines << tr("Backend: %1").arg(record.backend);
     lines << tr("Capability classifier: %1").arg(record.capabilityVersion.isEmpty() ? tr("legacy / unavailable") : record.capabilityVersion);
@@ -3883,6 +3487,8 @@ QJsonObject WorkflowLibraryPage::workflowRecordToJson(const WorkflowRecord &reco
     QJsonObject object{
         {QStringLiteral("displayName"), record.displayName},
         {QStringLiteral("modeId"), record.modeId},
+        {QStringLiteral("modeRoutable"), record.modeRoutable},
+        {QStringLiteral("modeReason"), record.modeReason},
         {QStringLiteral("mediaType"), record.mediaType},
         {QStringLiteral("backend"), record.backend},
         {QStringLiteral("tags"), QJsonArray::fromStringList(record.tags)},
@@ -3949,6 +3555,8 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::workflowRecordFromJson(
     WorkflowRecord record;
     record.displayName = object.value(QStringLiteral("displayName")).toString();
     record.modeId = object.value(QStringLiteral("modeId")).toString();
+    record.modeRoutable = object.value(QStringLiteral("modeRoutable")).toBool(false);
+    record.modeReason = object.value(QStringLiteral("modeReason")).toString();
     record.mediaType = object.value(QStringLiteral("mediaType")).toString();
     record.backend = object.value(QStringLiteral("backend")).toString();
     record.tags = safeObjectStringList(object, {QStringLiteral("tags")});

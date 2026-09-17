@@ -1,4 +1,5 @@
 """First-run is honest: STARTING vs NEEDS SETUP, no F: house path, worker not killed at 5s."""
+import re
 import sys
 from pathlib import Path
 
@@ -248,13 +249,50 @@ def test_same_family_checkpoint_change_reapplies_operating_point() -> None:
     assert 'else if (family == QStringLiteral("krea2")' not in body
 
 
-def test_krea2_hidden_selector_uses_table_sampler() -> None:
-    """krea2_image table sampler is er_sde (render comparison 2026-08-28).
-    Hidden selector (<=1 point) hardcoded euler."""
+def test_a_selector_with_nothing_to_choose_still_gets_its_sampler_from_the_table() -> None:
+    """Was `test_krea2_hidden_selector_uses_table_sampler`, and asserted the literal `er_sde` inside
+    the hidden branch -- because the hidden branch used to WRITE the sampler, and wrote `euler` for
+    krea2 whose table says er_sde (settled by render comparison 2026-08-28).
+
+    W2 Task 7 deleted that: `krea2OperatingPointForPath` picked raw-vs-turbo by testing the FILENAME
+    for "turbo", and the branch then spelled that choice's numbers as literals. The values live in
+    `family_operating_points` now and reach the page through the provider, so the literal is gone --
+    correctly. Re-adding it to make this test pass would restore the defect it was written about.
+
+    The property it was really protecting is that a family the selector cannot show anything for is
+    not therefore a family that gets a made-up sampler. Two halves, and neither names a sampler:
+
+      * the table is applied BEFORE the early return, so the no-selector case is served by it;
+      * and no sampler name appears as a literal anywhere in the function -- checked against the
+        vocabulary `family_operating_points` publishes, so a hardcode for any family, not just this
+        one, is caught. `er_sde` and `euler` are two of the 63 names that check covers.
+    """
     body = definition_body("updateOperatingPointSelector", qualifier="ImageGenerationPage")
-    hidden = body.split("points.size() <= 1", 1)[1].split("return;", 1)[0]
-    assert "er_sde" in hidden
-    assert 'QStringLiteral("euler")' not in hidden
+    applied = body.index("applyFamilySamplingChoices(")
+    hidden_at = body.index("points.size() <= 1")
+    assert applied < hidden_at, (
+        "the family's sampling table is applied only after the no-selector early return, so a "
+        "family with one operating point or none keeps whatever the previous family left on screen"
+    )
+    hidden = body[hidden_at:body.index("return;", hidden_at)]
+    assert "operatingPointCard_->setVisible(false)" in hidden
+
+    sys.path.insert(0, str(ROOT / "python"))
+    import family_operating_points as fop
+
+    samplers = set()
+    for choices in fop.family_sampling_snapshot().values():
+        samplers |= set(choices.get("samplers", ()))
+        samplers |= set(choices.get("schedulers", ()))
+    assert {"er_sde", "euler"} <= samplers, "the sampler vocabulary stopped covering the two names this was written about"
+    # Whole string literals, not substrings: "rk" and "lms" are sampler names and would otherwise
+    # match inside ordinary words.
+    literals = set(re.findall(r'"([^"\n]*)"', body))
+    hardcoded = sorted(literals & samplers)
+    assert not hardcoded, (
+        f"the operating-point selector spells a sampler itself: {hardcoded}. The table is the one "
+        f"place that answers this -- a literal here is how krea2 rendered at euler for months"
+    )
 
 
 def test_simple_mode_hides_operating_point_selector() -> None:

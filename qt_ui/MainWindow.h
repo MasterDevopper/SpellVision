@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QStackedWidget>
@@ -49,9 +50,15 @@ namespace spellvision::workers
 class WorkerQueueController;
 }
 
+namespace spellvision::workflows
+{
+class WorkflowDropCoordinator;
+}
+
 namespace spellvision::shell
 {
 class SideRail;
+class WindowDropTarget;
 }
 
 class QAbstractButton;
@@ -270,6 +277,31 @@ private:
     // an unknown family / worker down -> the cockpit hides the selector).
     void fetchOperatingPointsAsync(std::function<void()> completion = {});
     QJsonObject operatingPointsForFamily(const QString &family) const;
+    // W2: the settings ONE model wants (`model_recommended_settings`), cached per weight path.
+    // Structurally unlike the family table above, and the difference is the whole point: that table
+    // is a single static snapshot, so one bool and one waiter list express its single-flight. There
+    // is a DISTINCT answer per model, so the cache, the in-flight marker and the waiter list are all
+    // KEYED by path -- a second ask for a path already in flight attaches a waiter instead of
+    // issuing a duplicate request, and an answer for one model never satisfies a wait on another.
+    // A failed fetch caches nothing and still fires its waiters, so the cockpit falls back to the
+    // family operating point rather than hanging on an answer that is not coming.
+    void fetchModelDefaultsAsync(const QString &modelPath,
+                                 const QString &family,
+                                 const QString &mode,
+                                 std::function<void()> completion = {});
+    // Cache-only, exactly like operatingPointsForFamily: {} until a fetch has landed. Keyed on
+    // (path, family, mode) because the answer depends on all three -- see modelDefaultsCacheKey.
+    QJsonObject modelDefaultsFor(const QString &modelPath, const QString &family,
+                                 const QString &mode) const;
+    // Drop every cached answer about one weight (all families, all modes), or the whole cache when
+    // given no path. The Models page calls it on an inventory refresh: a sidecar written between
+    // two picks of the same checkpoint has to be able to reach the cockpit without a restart.
+    void clearModelDefaultsCache(const QString &modelPath = QString());
+    // W5 Task 4: a `subscribe` listener open only while a metadata refresh is running. A
+    // background refresh publishes its progress and its result to subscribers, not to the
+    // connection that started it.
+    void startModelIntelEvents();
+    void stopModelIntelEvents();
     // Fires on EVERY quit path via qApp::aboutToQuit (close button, Alt+F4, menu Quit,
     // QApplication::quit) -- the detached ComfyUI (:8188 + GPU) has no other teardown.
     void tearDownComfyOnExit();
@@ -327,6 +359,10 @@ private:
     void updateDetailsPanelForQueueSelection();
     void showWorkflowImportResult(const QJsonObject &response, const QString &stderrText);
     void openWorkflowDraft(const QJsonObject &draft);
+    // A workflow dropped anywhere in the window: imported through the worker, then opened as an
+    // editable draft. Called by the cockpit's own drop zone AND by WindowDropTarget, which is the
+    // only reason a .json dropped on the rail or the title bar is no longer discarded in silence.
+    void importDroppedWorkflow(const QString &path);
 
     void configureDetailsActions(const QString &primaryId,
                                  const QString &primaryText,
@@ -484,11 +520,26 @@ private:
     bool operatingPointsFetched_ = false;
     bool operatingPointsFetchInFlight_ = false;
     std::vector<std::function<void()>> operatingPointsFetchWaiters_;
+    // W2 per-model recommended-settings cache. KEYED where the three members above are GLOBAL: the
+    // family table is one snapshot for the whole app, this is one answer per weight, so "is a fetch
+    // in flight" and "who is waiting on it" are both questions about a path, not about the app.
+    // Keys go through modelDefaultsCacheKey() on both the store and the lookup side.
+    QHash<QString, QJsonObject> modelDefaultsByPath_;
+    // Owns the `subscribe` socket a background metadata refresh reports over; null when none.
+    QObject *modelIntelEventGuard_ = nullptr;
+    QSet<QString> modelDefaultsInFlight_;
+    QHash<QString, std::vector<std::function<void()>>> modelDefaultsWaiters_;
     QMap<QString, QWidget *> modePages_;
     QMap<QString, QString> lastSyncedGenerationPreviewByMode_;
     QMap<QString, QString> lastSyncedGenerationErrorByMode_;
     QString currentModeId_ = QStringLiteral("home");
     spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
+    // The window's own drop handling, as an application event filter rather than a dragEnterEvent:
+    // Qt never delivers a drag to a widget that does not accept drops, so an override on
+    // MainWindow would only have covered the pixels no page occupies.
+    spellvision::shell::WindowDropTarget *windowDropTarget_ = nullptr;
+    // Built on the first drop, not in the constructor.
+    spellvision::workflows::WorkflowDropCoordinator *workflowDropCoordinator_ = nullptr;
     // Latched worker reachability. Re-scan image catalogs only on the false->true
     // edge (worker became ready) so display families upgrade from the startup-race
     // fallback to the classifier verdict -- not on every 1800ms poll.

@@ -61,6 +61,20 @@ _SDPA_NAMES = frozenset({"sdpa", "pytorch", "torch", "none", "off", "default"})
 
 SAGE_FLAG = "--use-sage-attention"
 
+# ComfyUI's own flag to FORCE pytorch/SDPA attention, as opposed to merely not asking for sage.
+# launch_args()/attention_args() never spell this -- "no flag" is sufficient there, because SDPA is
+# ComfyUI's own default. An A/B arm cannot rely on that: it must be able to pin either side
+# explicitly, because a bare launch that happens to land on SDPA is not evidence that SDPA was
+# asked for (see arm_args()).
+PYTORCH_ATTENTION_FLAG = "--use-pytorch-cross-attention"
+
+# `--fast` and `--disable-dynamic-vram` are the direct levers `optimization_provenance.py` reads
+# back out of a running process's argv (attention_from_argv / fast_from_argv /
+# dynamic_vram_from_argv). Named here too so the writer and the reader agree on the same strings
+# without one of them re-typing a literal.
+FAST_FLAG = "--fast"
+DISABLE_DYNAMIC_VRAM_FLAG = "--disable-dynamic-vram"
+
 # --- VRAM, which is not what a decade of ComfyUI advice says it is ------------------------------
 #
 # Core 0.34.0 runs DynamicVRAM (`comfy-aimdo`), enabled by default -- `cli_args.enables_dynamic_vram`
@@ -123,7 +137,7 @@ REQUIRED_ENV: dict[str, str] = {
     "PYTHONIOENCODING": "utf-8",
 }
 
-_PROBE_CACHE: dict[str, bool] = {}
+_PROBE_CACHE: dict[tuple[str, str], bool] = {}
 
 
 def normalize_backend(value: Any) -> str | None:
@@ -146,6 +160,39 @@ def normalize_backend(value: Any) -> str | None:
     return None
 
 
+def _package_importable(python_executable: str | Path | None, package_name: str) -> bool:
+    """Whether ``import <package_name>`` succeeds in the given interpreter.
+
+    Shared by ``sageattention_available`` and ``triton_available``: both packages live in ComfyUI's
+    OWN venv (CLAUDE.md 9.2 -- isolated since the 2026-07-17 cutover), not the caller's, so asking
+    this process is the wrong question -- and neither package is ever reported by ComfyUI's
+    ``/system_stats`` (that lists ComfyUI's OWN declared packages, not everything in its venv), so a
+    subprocess probe is the only way to learn this at all.
+
+    Cached per (interpreter, package) pair. Answering costs a subprocess; a ComfyUI launch happens
+    once per session, but readiness checks -- and now also optimization-provenance probes -- ask far
+    more often than that.
+    """
+    exe = str(python_executable or sys.executable)
+    key = (exe, package_name)
+    if key in _PROBE_CACHE:
+        return _PROBE_CACHE[key]
+    available = False
+    try:
+        completed = subprocess.run(
+            [exe, "-c", f"import {package_name}"],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        available = completed.returncode == 0
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Could not ask. Report unavailable rather than assume either way: the optimistic answer
+        # costs a ComfyUI that exits -1, and the answer is re-derived on the next launch anyway.
+        log.warning("Could not probe %s with %s: %s", package_name, exe, exc)
+    _PROBE_CACHE[key] = available
+    return available
+
+
 def sageattention_available(python_executable: str | Path | None = None) -> bool:
     """Whether ``import sageattention`` succeeds in the interpreter that will run ComfyUI.
 
@@ -156,23 +203,18 @@ def sageattention_available(python_executable: str | Path | None = None) -> bool
     Cached per interpreter path. Answering costs a subprocess; a ComfyUI launch happens once per
     session, but readiness checks ask far more often than that.
     """
-    exe = str(python_executable or sys.executable)
-    if exe in _PROBE_CACHE:
-        return _PROBE_CACHE[exe]
-    available = False
-    try:
-        completed = subprocess.run(
-            [exe, "-c", "import sageattention"],
-            capture_output=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        available = completed.returncode == 0
-    except (OSError, subprocess.SubprocessError) as exc:
-        # Could not ask. Report unavailable rather than assume either way: the optimistic answer
-        # costs a ComfyUI that exits -1, and the answer is re-derived on the next launch anyway.
-        log.warning("Could not probe sageattention with %s: %s", exe, exc)
-    _PROBE_CACHE[exe] = available
-    return available
+    return _package_importable(python_executable, "sageattention")
+
+
+def triton_available(python_executable: str | Path | None = None) -> bool:
+    """Whether ``import triton`` succeeds in the interpreter that will run ComfyUI.
+
+    Same rationale and caching as ``sageattention_available`` -- see ``_package_importable``. Added
+    for ``optimization_provenance.py``: triton is a venv package, never a ``comfy_package_versions``
+    entry, so ``/system_stats`` can never answer this and a probe-or-unknown distinction is the only
+    honest one available.
+    """
+    return _package_importable(python_executable, "triton")
 
 
 def resolve_attention_backend(
@@ -286,6 +328,65 @@ def launch_args(
     headroom, headroom_reason = resolve_vram_headroom(vram_headroom)
     log.warning("ComfyUI VRAM headroom: %s", headroom_reason)
     args.extend(vram_args(headroom))
+    return args
+
+
+def arm_args(
+    arm: Mapping[str, Any] | None,
+    python_executable: str | Path | None = None,
+    *,
+    probe: bool = True,
+    source: str = "arm",
+) -> list[str]:
+    """The launch arguments for one named arm of an A/B run.
+
+    ``arm`` is ``{attention, fast, dynamic_vram, vram_headroom}``, every key optional. An axis the
+    arm does not name falls through to the same env/default resolution ``launch_args()`` uses, so
+    an arm that overrides one axis still behaves normally on the others.
+
+    The attention axis is the one place this deliberately diverges from ``launch_args()``: when the
+    arm NAMES a backend, the flag for either side is emitted explicitly -- including SDPA, via
+    ``PYTORCH_ATTENTION_FLAG`` -- because an A/B run has to control what actually runs, not merely
+    avoid asking for the other option. A caller reading the flags back
+    (``optimization_provenance.py``) must see which side was asked for, not infer it from absence.
+    Missing sageattention when the arm explicitly names ``sage`` still raises, via the same
+    ``resolve_attention_backend`` contract ``launch_args()`` uses -- an A/B run downgrading its own
+    "sage" arm to SDPA would produce a labelled row that is not what it claims to be.
+
+    ``source`` is what the two log lines below call this arm. It exists because a REMEMBERED arm
+    (``comfy_session_arm``) and a freshly requested one produce identical flags and are not the
+    same event: a silent restart re-applying the session's arm has to be readable as that in the
+    stderr log, since those lines are the only place a backend change is recorded at all.
+    """
+    arm = arm or {}
+    args: list[str] = []
+
+    explicit_attention = arm.get("attention")
+    backend, reason = resolve_attention_backend(python_executable, explicit=explicit_attention, probe=probe)
+    log.warning("ComfyUI attention backend (%s): %s -- %s", source, backend, reason)
+    if explicit_attention is not None:
+        args.append(SAGE_FLAG if backend == SAGE else PYTORCH_ATTENTION_FLAG)
+    else:
+        args.extend(attention_args(backend))
+
+    # The `fast` convention, and it is PRESENCE-based on purpose. An absent key passes no flag at
+    # all; `fast: []` -- present and empty -- is the bare `--fast`, which ComfyUI reads as every
+    # PerformanceFeature (fp16_accumulation, fp8_matrix_mult, cublas_ops, autotune); a non-empty
+    # list names exactly those features. The middle case is the dangerous one: a row labelled
+    # "fp16_accumulation" that launched bare would have measured all four under the name of one, so
+    # the names are appended here and read back by `optimization_provenance.fast_from_argv` /
+    # `measure_optimizations_rows.verify_arm`, which expand a bare flag the same way.
+    if "fast" in arm and arm["fast"] is not None:
+        args.append(FAST_FLAG)
+        args.extend(str(name) for name in arm["fast"])
+
+    if arm.get("dynamic_vram") is False:
+        args.append(DISABLE_DYNAMIC_VRAM_FLAG)
+
+    headroom, headroom_reason = resolve_vram_headroom(arm.get("vram_headroom"))
+    log.warning("ComfyUI VRAM headroom (%s): %s", source, headroom_reason)
+    args.extend(vram_args(headroom))
+
     return args
 
 

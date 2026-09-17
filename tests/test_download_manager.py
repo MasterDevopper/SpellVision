@@ -342,3 +342,169 @@ def test_an_ordinary_failure_still_reads_as_a_failure_not_a_choice():
     assert wait_for(lambda: record.state == FAILED)
     assert "needs_variant_choice" not in record.context
     assert record.progress.message.startswith("failed:")
+
+
+# --- the post-download hook -----------------------------------------------------------------
+#
+# This section did not exist. The hook placed files, evicted the asset cache, ran a whole-library
+# refresh and held the manager's RLock while doing it, and nothing in the suite touched any of it:
+# grepping models_root / model_kind / placed_path / placement across the download tests returned
+# nothing. Every test below fails against the shipped hook.
+
+
+@pytest.fixture
+def stub_identification(monkeypatch):
+    """The hook's second step makes HTTPS requests. These tests are about the first step, so the
+    identification is stubbed -- and the stub records WHAT it was asked to identify, which is the
+    other half of C1: one file landed, so one file is refreshed, not its whole directory."""
+    from model_intelligence import refresh as mi_refresh
+
+    asked: list[Path] = []
+
+    def fake_refresh_one(path, **kwargs):
+        asked.append(Path(str(path)))
+        return {"ok": True, "examined": 1}
+
+    monkeypatch.setattr(mi_refresh, "refresh_one", fake_refresh_one)
+    return asked
+
+
+def _asset_materializer(source: Path, *, cache_hit: bool = False):
+    def _materialize(reference, *, asset_type="model", progress_cb=None, cancel_cb=None, **kw):
+        if progress_cb:
+            progress_cb(1, 1)
+        return FakeAsset(local_path=str(source), cache_hit=cache_hit)
+
+    return _materialize
+
+
+def test_the_hook_places_the_download_where_the_library_can_see_it(tmp_path, stub_identification):
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+    models_root = tmp_path / "models"
+
+    mgr = DownloadManager(materializer=_asset_materializer(source))
+    record = mgr.start("model.safetensors", models_root=str(models_root),
+                       model_kind="checkpoint")
+    assert wait_for(lambda: record.state == COMPLETED)
+
+    placed = models_root / "checkpoints" / "model.safetensors"
+    assert placed.exists(), "a weight left in the asset cache is invisible to the Models page"
+    assert record.placed_path == str(placed)
+    assert record.local_path == str(placed)
+    # The FILE that landed, not the directory it landed in.
+    assert stub_identification == [placed]
+
+
+def test_a_failure_in_the_hook_never_fails_a_download_that_succeeded(tmp_path, monkeypatch):
+    from model_intelligence import placement
+
+    def boom(*args, **kwargs):
+        raise OSError("the models root is BitLocker-locked")
+
+    monkeypatch.setattr(placement, "place", boom)
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+
+    mgr = DownloadManager(materializer=_asset_materializer(source))
+    record = mgr.start("model.safetensors", models_root=str(tmp_path / "models"),
+                       model_kind="checkpoint")
+    assert wait_for(lambda: record.state == COMPLETED)
+    assert record.error is None
+    assert record.placed_path is None
+
+
+def test_an_identification_failure_still_leaves_the_weight_placed(tmp_path, monkeypatch):
+    from model_intelligence import refresh as mi_refresh
+
+    def boom(path, **kwargs):
+        raise ValueError("unknown url type")
+
+    monkeypatch.setattr(mi_refresh, "refresh_one", boom)
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+    models_root = tmp_path / "models"
+
+    mgr = DownloadManager(materializer=_asset_materializer(source))
+    record = mgr.start("model.safetensors", models_root=str(models_root),
+                       model_kind="checkpoint")
+    assert wait_for(lambda: record.state == COMPLETED)
+    assert record.placed_path == str(models_root / "checkpoints" / "model.safetensors")
+
+
+def test_the_post_download_hook_does_not_hold_the_manager_lock(tmp_path, monkeypatch):
+    """The hook is not a file move: it hashes, makes an HTTPS round trip that retries a 429 four
+    times with backoff, fetches previews and writes a sidecar. Run inside `with self.lock:` that
+    blocked every other download's progress callback, start(), snapshot() and cancel -- about 35
+    minutes over a 937 GB checkpoints directory, with nothing able to stop it.
+
+    The probe runs on ANOTHER thread on purpose. self.lock is an RLock, so a probe on the hook's
+    own thread would re-enter it and pass while the lock was held against the whole world.
+    """
+    from model_intelligence import refresh as mi_refresh
+
+    observed: list[bool] = []
+    holder: dict[str, DownloadManager] = {}
+
+    def probing_refresh(path, **kwargs):
+        reached = threading.Event()
+
+        def probe():
+            holder["mgr"].snapshot()
+            reached.set()
+
+        threading.Thread(target=probe, daemon=True).start()
+        observed.append(reached.wait(timeout=2.0))
+        return {"ok": True}
+
+    monkeypatch.setattr(mi_refresh, "refresh_one", probing_refresh)
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+
+    mgr = DownloadManager(materializer=_asset_materializer(source))
+    holder["mgr"] = mgr
+    record = mgr.start("model.safetensors", models_root=str(tmp_path / "models"),
+                       model_kind="checkpoint")
+    assert wait_for(lambda: record.state == COMPLETED, timeout=15)
+    assert observed == [True], (
+        "snapshot() blocked for 2s while the hook ran: the manager lock is held across it"
+    )
+
+
+def test_a_cache_hit_is_copied_out_not_evicted_from_the_cache(tmp_path, stub_identification):
+    """`move=True` on a cache hit pulled the file OUT of python/.cache/assets. The next request
+    for the same asset then found nothing, re-downloaded the whole thing, and `place`'s
+    never-overwrite rule landed it as X_1.safetensors."""
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+    models_root = tmp_path / "models"
+
+    mgr = DownloadManager(materializer=_asset_materializer(source, cache_hit=True))
+    record = mgr.start("model.safetensors", models_root=str(models_root),
+                       model_kind="checkpoint")
+    assert wait_for(lambda: record.state == COMPLETED)
+    assert record.cache_hit is True
+    assert source.exists(), "the asset cache lost its copy, so the next request re-downloads it"
+    assert (models_root / "checkpoints" / "model.safetensors").exists()
+
+
+def test_downloading_the_same_asset_twice_does_not_accumulate_copies(tmp_path,
+                                                                    stub_identification):
+    source = tmp_path / "cache" / "model.safetensors"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"weights")
+    models_root = tmp_path / "models"
+    mgr = DownloadManager(materializer=_asset_materializer(source, cache_hit=True))
+
+    first = mgr.start("one.safetensors", models_root=str(models_root), model_kind="checkpoint")
+    assert wait_for(lambda: first.state == COMPLETED)
+    second = mgr.start("two.safetensors", models_root=str(models_root), model_kind="checkpoint")
+    assert wait_for(lambda: second.state == COMPLETED)
+
+    landed = sorted(p.name for p in (models_root / "checkpoints").iterdir())
+    assert landed == ["model.safetensors"], f"duplicated multi-GB weights: {landed}"

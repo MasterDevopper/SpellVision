@@ -9,6 +9,7 @@
 #include <QFutureWatcher>
 #include <QJsonObject>
 #include <QMap>
+#include <QSet>
 #include <QVector>
 #include <QPixmap>
 #include <QSize>
@@ -87,6 +88,12 @@ public:
     explicit ImageGenerationPage(Mode mode, QWidget *parent = nullptr);
 
     QJsonObject buildRequestPayload() const;
+    // Which machine this page is set to render on: an endpoint id, or "auto".
+    //
+    // Read by MainWindow immediately before the enqueue, because the refusal has to happen there --
+    // a job that reaches the queue and fails on the far machine is the outcome this whole feature
+    // exists to prevent.
+    QString runOnEndpointId() const;
     // Public re-scan hook (worker-ready recovery): the constructor's catalog scan
     // can land before the worker binds :8765, leaving fallback families; MainWindow
     // calls this on the worker down->up edge to repopulate from the classifier.
@@ -135,6 +142,26 @@ public:
     // {default_operating_point, operating_points:[...]} for a video family ({} -> no selector).
     void setOperatingPointsProvider(std::function<QJsonObject(const QString &family)> provider);
     void refreshOperatingPointSelector();
+    // W2: the settings THIS model wants, as MainWindow cached them. Split in two on purpose --
+    // the provider is a SYNCHRONOUS cache read and the fetcher is the only half that talks to a
+    // worker, so a test can inject a provider alone and applyModelDefaults() stays callable with
+    // no worker, no socket and no event loop. Returns the whole
+    // {ok, family, operating_point, settings:{field:{value,provenance,confidence,n,total}}, warnings}
+    // reply; {} until a fetch has landed (or if it failed), which is the cockpit's cue to stay on
+    // the family operating point.
+    // (path, family, mode) -- all three, because the answer depends on all three. A provider given
+    // the path alone answered one question and was asked several: the T2V family bar moving from
+    // Auto (wan) to LTX re-applied wan's frames and wan's sampler.
+    void setModelDefaultsProvider(std::function<QJsonObject(const QString &modelPath,
+                                                            const QString &family,
+                                                            const QString &mode)> provider);
+    void setModelDefaultsFetcher(std::function<void(const QString &modelPath,
+                                                   const QString &family,
+                                                   const QString &mode,
+                                                   std::function<void()> completion)> fetcher);
+    // Re-read the provider and overlay the answer onto the visible controls. Needs no worker: with
+    // a provider and no fetcher (a test, or a page built without one) this is the whole mechanism.
+    void refreshModelDefaults();
     void useImageAsInput(const QString &path);
     // Send-to-generation handoff (doc 22 §3): resolve `value` against this page's catalog and set the
     // checkpoint slot, or add to the LoRA stack. Returns whether a catalog match was found. Unlike
@@ -152,6 +179,8 @@ public:
     // Phase 7: app-global Simple/Advanced disclosure mode. Step 1 is plumbing only -- this records
     // the mode (advanced_); later steps gate per-tab controls off it.
     void updateDisclosure(bool advanced);
+    // Creates the Run on row on first call and repopulates it from the endpoint registry after.
+    void ensureRunOnRow();
 
     // Simple hides the raw knobs but keeps their values -- so four of them can change the output
     // with nothing on screen saying so. This states them instead of discarding them. No-op in
@@ -282,6 +311,10 @@ public:
     bool selectComboValue(QComboBox *combo, const QString &value);
     // A preset PREFERS a sampler; the family's allow-list decides whether it can have it.
     void applyPresetSampling(const QString &preset, const QString &sampler, const QString &scheduler);
+    // Turn the canvas the resolver produced to match the user's stated orientation. Runs at the end
+    // of applyResolvedSettings, so a model's own published pair arrives first and is then oriented
+    // -- the order that lets an intent survive a model change without freezing the numbers.
+    void applyOrientationPreference();
     void showCheckpointPicker();
     void showLoraPicker();
     void setSelectedModel(const QString &value, const QString &display = QString());
@@ -319,6 +352,17 @@ public:
     QString resolvedVideoFamilyForSelector() const;
     void applyFamilySamplingChoices(const QString &family);
     void applyOperatingPoint(const QString &name);
+    // W2: ask for, then overlay, the settings the SELECTED model wants. requestModelDefaults defers
+    // the worker round-trip off the current handler stack for the reason setSelectedModel already
+    // defers its component resolve; applyModelDefaults is pure widget work and needs no worker.
+    void requestModelDefaults(const QString &family);
+    void applyModelDefaults();
+    void refreshModelDefaultsCaption(const QJsonObject &reply);
+    // W2: the ONE place a resolved answer reaches the widgets. Both sources land here -- the family
+    // operating point's `params` verbatim, and this model's own settings with the
+    // {value, provenance, confidence, n, total} envelope peeled off -- so the two cannot drift in
+    // what they write, nor in which fields they refuse to overwrite.
+    void applyResolvedSettings(const QJsonObject &values);
     void removeOperatingPointLoras();
     void setVideoComboToBasename(QComboBox *combo, const QString &value);
     void constrainVideoComboToValid(QComboBox *combo, const QStringList &validBasenames, const QString &keepValue);
@@ -369,6 +413,77 @@ public:
     QString operatingPointFamily_;           // the family the selector is currently built for
     QString currentOperatingPoint_;          // the selected point's name (sent on the request)
     QStringList operatingPointLoras_;         // accel LoRA values the selector added (so Quality removes only those)
+    // W2 per-model defaults. The provider reads MainWindow's keyed cache; the fetcher fills it.
+    std::function<QJsonObject(const QString &, const QString &, const QString &)> modelDefaultsProvider_;
+    std::function<void(const QString &, const QString &, const QString &, std::function<void()>)>
+        modelDefaultsFetcher_;
+    // One model change fans out into several updateOperatingPointSelector() calls inside a single
+    // event-loop turn; this coalesces that burst into one deferred ask.
+    bool modelDefaultsRequestScheduled_ = false;
+    // The family the last ask was made FOR. applyModelDefaults reads the cache with it, so the
+    // answer it applies is an answer to the question that was asked -- the cache is keyed on
+    // (path, family, mode) and a page that looked up a different family would simply miss.
+    QString modelDefaultsFamily_;
+
+    // W2 -- "the user typed this".
+    //
+    // applyResolvedSettings() runs on a model change, on a Simple/Advanced toggle and on a snapshot
+    // restore, and whatever it writes it overwrites. The brief singled out the CANVAS, because that
+    // is where the overwrite was first noticed; steps and CFG reach the widgets through the same
+    // three triggers and the same writes, so the flag covers every field this page fills from a
+    // resolved answer rather than the two that happened to be looked at. Silently discarding an
+    // edit is a defect this repo has shipped once and fixed once.
+    //
+    // Scope is this page, this session -- which is the scope the brief asks for. A restored
+    // snapshot deliberately does NOT count as typing: it is guarded like any other app write, so a
+    // returning user still gets the settings of the model they pick.
+    //
+    // Cleared when the user deliberately changes the model, and when they re-pick a Speed chip:
+    // both are a request for that thing's numbers, and keeping the previous hand-edits over them
+    // would be the mirror image of the defect.
+    // SplitSteps is the wan dual-noise high/low/split trio. It is a SEPARATE field from Steps even
+    // though applyResolvedSettings derives its value from Steps, because the user can set the three
+    // of them asymmetrically (20 / 8 for a deliberate MoE handoff) without touching Steps at all --
+    // and with no flag of its own, the Steps guard was open and a Simple/Advanced toggle reset both
+    // spins to 14. Ruling W2-E3 is one flag per field the wave writes; these three were the
+    // exception, and they are exactly the fields where a hand-edit is most deliberate.
+    enum class ResolvedField { Steps, Cfg, Sampler, Scheduler, Shift, Width, Height, Frames, Fps,
+                               SplitSteps };
+    void watchForUserEdits();
+    bool userEdited(ResolvedField field) const;
+    void markUserEdited(ResolvedField field);
+    // The canvas came from the image the user staged. Protected from a model change; dropped when
+    // the staged content itself changes.
+    void markContentDerived(ResolvedField field);
+    void clearContentDerivedFields();
+    void clearUserEditedFields();
+    QSet<int> userEditedFields_;
+    // "This came from the user's own CONTENT", as distinct from "the user typed it".
+    //
+    // ensureCanvasSizeDefault marks Width/Height when the canvas was taken from a staged image,
+    // with a comment saying a checkpoint picked afterwards must not resize the user's input out
+    // from under them. setSelectedModel then cleared every flag on every model change -- performing
+    // the exact sentence the comment forbids. Both rules are right: a deliberate model change IS a
+    // request for that model's numbers, and a staged keyframe's shape IS the shape the user asked
+    // for. They were never reconciled because there was one set for two different facts.
+    //
+    // Cleared when the content it came from goes (a new or removed input image), not when the model
+    // changes. userEdited() reads both sets.
+    QSet<int> contentDerivedFields_;
+    // A depth, not a bool: applyResolvedSettings runs inside applySimpleOperatingPointDefaults,
+    // which runs inside restoreSnapshot. A bool would be cleared by the inner scope's exit and the
+    // outer scope's remaining writes would then read as the user's own.
+    int programmaticWriteDepth_ = 0;
+    // RAII. Writes made inside this scope are the app's, so the valueChanged/activated handlers
+    // wired by watchForUserEdits() do not read them as a human typing.
+    struct ProgrammaticWrite
+    {
+        explicit ProgrammaticWrite(ImageGenerationPage *owner) : page(owner) { ++page->programmaticWriteDepth_; }
+        ~ProgrammaticWrite() { --page->programmaticWriteDepth_; }
+        ProgrammaticWrite(const ProgrammaticWrite &) = delete;
+        ProgrammaticWrite &operator=(const ProgrammaticWrite &) = delete;
+        ImageGenerationPage *page;
+    };
     QString lastAutoPopulatedModel_;                       // engine runs once per model-change
     QMap<QString, QStringList> videoComponentValidOptions_; // component -> valid basenames (constrains the menu)
     QMap<QString, QString> videoAutoFilledValues_;          // component -> resolved basename (survives re-sync)
@@ -496,6 +611,13 @@ public:
     QWidget *heightRow_ = nullptr;
     QWidget *batchRow_ = nullptr;
     QWidget *prefixRow_ = nullptr;
+    // "Run on": Auto / this machine / a named endpoint. Advanced-only; Simple is always Auto.
+    //
+    // Built lazily by ensureRunOnRow() from updateDisclosure() rather than in buildUi(), because
+    // buildUi() lives in ImageGenerationPage.cpp and that file is over its 3000-line ceiling -- the
+    // row is inserted into the Output card's existing layout beside prefixRow_.
+    QWidget *runOnRow_ = nullptr;
+    QComboBox *runOnCombo_ = nullptr;
     // Phase 7 Sampling-tab rows gated Advanced-only (Aspect + Frames/FPS stay Simple). The video
     // sampler/scheduler also carry an isVideoMode() guard the disclosure gate AND-composes with.
     QWidget *samplerRow_ = nullptr;
@@ -533,6 +655,9 @@ public:
     QLabel *canvasEmptyChipSeed_ = nullptr;
     spellvision::generation::ErrorPillLabel *readinessHintLabel_ = nullptr;
     QLabel *advancedOverrideLabel_ = nullptr; // Simple-mode notice; see refreshAdvancedOverrideNotice
+    // W2: where the sampling numbers on screen came from. Visible in BOTH modes -- a value the user
+    // did not choose has to say so whichever mode they are in. See refreshModelDefaultsCaption.
+    spellvision::widgets::ElidingLabel *modelDefaultsCaptionLabel_ = nullptr;
     QLabel *modelsRootLabel_ = nullptr;
 
     // --- SPRINT MOCKUP PASS 1 ASSET INTELLIGENCE ---
@@ -607,6 +732,10 @@ public:
 
         QBoxLayout *stackToolsLayout_ = nullptr;
     QBoxLayout *samplerSchedulerLayout_ = nullptr;
+    // Simple-mode orientation (spec 2.2). "" = as published; "portrait" / "landscape" swap the
+    // RESOLVED pair rather than replacing it with a literal, which is what distinguishes it from
+    // the Aspect preset combo beside it.
+    QComboBox *orientationCombo_ = nullptr;
     QBoxLayout *stepsCfgLayout_ = nullptr;
     QBoxLayout *seedBatchLayout_ = nullptr;
     QBoxLayout *sizeLayout_ = nullptr;

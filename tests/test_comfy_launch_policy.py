@@ -40,6 +40,7 @@ QT_MAIN = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8", errors
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.delenv(policy.ATTENTION_ENV_VAR, raising=False)
+    monkeypatch.delenv(policy.VRAM_HEADROOM_ENV_VAR, raising=False)
     policy._PROBE_CACHE.clear()
     yield
     policy._PROBE_CACHE.clear()
@@ -346,3 +347,152 @@ def test_running_on_a_foreign_interpreter_is_reported(tmp_path) -> None:
     assert report["python_executable"] == str(Path(sys.executable).resolve())
     assert report["source"] == "explicit argument"
     assert report["is_comfy_own_venv"] is False
+
+
+# --- A/B arms: an arm must control what actually ran, not merely avoid asking for the other side --
+#
+# launch_args() (used when arm is None) treats "no flag" as sufficient for SDPA, because SDPA is
+# ComfyUI's own default. An A/B arm cannot rely on that: a bare launch that happens to land on SDPA
+# is not evidence that SDPA was asked for. So an arm that NAMES a backend gets an explicit flag on
+# either side -- including PYTORCH_ATTENTION_FLAG, which launch_args() never spells.
+
+
+def test_an_arm_naming_sdpa_forces_the_explicit_flag() -> None:
+    args = policy.arm_args({"attention": "sdpa"}, "py")
+    assert policy.PYTORCH_ATTENTION_FLAG in args
+    assert policy.SAGE_FLAG not in args
+
+
+def test_an_arm_naming_sage_without_the_package_still_raises(monkeypatch) -> None:
+    """The existing resolve_attention_backend contract (:205-212) must survive being routed through
+    an arm -- an A/B run silently downgrading its own "sage" arm to SDPA would label a row with an
+    arm it did not actually run, which is worse than no label."""
+    _fake_probe(monkeypatch, False)
+    with pytest.raises(RuntimeError) as excinfo:
+        policy.arm_args({"attention": "sage"}, "py")
+    assert policy.SAGE_FLAG in str(excinfo.value)
+
+
+def test_an_arm_naming_fast_features_produces_the_flag_and_names() -> None:
+    args = policy.arm_args({"attention": "sdpa", "fast": ["fp16_accumulation"]}, "py")
+    assert args[args.index(policy.FAST_FLAG) + 1:] == ["fp16_accumulation"]
+
+
+def test_a_named_fast_feature_never_launches_as_a_bare_flag() -> None:
+    """Bare `--fast` enables EVERY PerformanceFeature -- fp16_accumulation, fp8_matrix_mult,
+    cublas_ops and autotune. An arm that named one feature and launched bare would measure four
+    levers under the name of one, and the row would look like a clean single-lever measurement."""
+    args = policy.arm_args({"attention": "sdpa", "fast": ["fp16_accumulation"]}, "py")
+    index = args.index(policy.FAST_FLAG)
+    assert args[index + 1:index + 2] == ["fp16_accumulation"], (
+        "the feature list must follow the flag; a bare --fast is a different launch"
+    )
+
+
+def test_an_empty_fast_list_is_the_bare_flag_and_an_absent_key_is_no_flag() -> None:
+    """The convention, pinned so it cannot drift: `fast: []` is PRESENT and means the bare flag
+    (every feature); no `fast` key at all means no `--fast`. The two are not the same launch, and
+    `arm_args` distinguishes them by presence, not by truthiness."""
+    bare = policy.arm_args({"attention": "sdpa", "fast": []}, "py")
+    assert policy.FAST_FLAG in bare
+    assert bare[bare.index(policy.FAST_FLAG) + 1:] == []
+    assert policy.FAST_FLAG not in policy.arm_args({"attention": "sdpa"}, "py")
+
+
+def test_an_arm_disabling_dynamic_vram_produces_the_flag() -> None:
+    args = policy.arm_args({"attention": "sdpa", "dynamic_vram": False}, "py")
+    assert policy.DISABLE_DYNAMIC_VRAM_FLAG in args
+
+
+def test_an_arm_with_dynamic_vram_true_names_no_flag() -> None:
+    """Only an explicit `False` turns it off -- DynamicVRAM is on by default on this core, so a
+    True/absent value must not emit a flag that looks like it changed anything."""
+    args = policy.arm_args({"attention": "sdpa", "dynamic_vram": True}, "py")
+    assert policy.DISABLE_DYNAMIC_VRAM_FLAG not in args
+
+
+def test_an_arm_reserving_vram_produces_the_flag() -> None:
+    args = policy.arm_args({"attention": "sdpa", "vram_headroom": 16}, "py")
+    assert args[args.index(policy.RESERVE_VRAM_FLAG) + 1:] == ["16"]
+
+
+def test_an_arm_naming_only_one_axis_leaves_the_others_on_the_default_resolution(monkeypatch) -> None:
+    """An arm that names only `fast` must not silently force attention or VRAM -- those axes fall
+    through to the same env/probe resolution launch_args() would have used."""
+    _fake_probe(monkeypatch, True)
+    args = policy.arm_args({"fast": ["cublas_ops"]}, "py")
+    assert policy.SAGE_FLAG in args  # probed available, unset preference -> same default as launch_args
+    assert policy.PYTORCH_ATTENTION_FLAG not in args
+    assert policy.RESERVE_VRAM_FLAG not in args
+
+
+def test_build_launch_command_with_an_arm_forces_the_explicit_flag(tmp_path) -> None:
+    from comfy_bootstrap import build_launch_command
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    command = build_launch_command(
+        tmp_path, python_executable=sys.executable, arm={"attention": "sdpa"})
+    assert policy.PYTORCH_ATTENTION_FLAG in command
+    assert policy.SAGE_FLAG not in command
+
+
+def test_build_launch_command_arm_none_pins_the_original_command(tmp_path, monkeypatch) -> None:
+    """Ruling W3-P1, and the single most important constraint of this wave: `arm=None` must
+    reproduce today's behaviour byte for byte, because every launch in this repo that is not an
+    explicit A/B goes through this path. Pinned against launch_args() computed independently, not
+    against a second call to build_launch_command itself, so a bug that routed arm=None through
+    arm_args() by accident (which WOULD still look self-consistent) is caught here."""
+    from comfy_bootstrap import build_launch_command, detect_comfy_entrypoint, resolve_managed_comfy_python
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    _fake_probe(monkeypatch, True)
+
+    python_path = resolve_managed_comfy_python(tmp_path, sys.executable)
+    entry = detect_comfy_entrypoint(tmp_path)
+    expected = [
+        python_path, str(entry), "--listen", "127.0.0.1", "--port", "8188", "--dont-print-server",
+    ] + policy.launch_args(python_path, probe=True, vram_headroom=None)
+
+    command = build_launch_command(
+        tmp_path, python_executable=sys.executable, host="127.0.0.1", port=8188,
+        probe_attention=True, arm=None)
+    assert command == expected
+    assert policy.PYTORCH_ATTENTION_FLAG not in command, "arm=None must never emit an arm-only flag"
+
+
+def test_build_launch_command_omitted_arm_matches_explicit_none(tmp_path, monkeypatch) -> None:
+    from comfy_bootstrap import build_launch_command
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    _fake_probe(monkeypatch, True)
+    kwargs = dict(python_executable=sys.executable, host="127.0.0.1", port=8188, probe_attention=True)
+    omitted = build_launch_command(tmp_path, **kwargs)
+    explicit_none = build_launch_command(tmp_path, arm=None, **kwargs)
+    assert omitted == explicit_none
+
+
+def test_bootstrap_comfy_runtime_can_pass_vram_headroom(tmp_path) -> None:
+    """Defect 1: bootstrap_comfy_runtime had no vram_headroom parameter at all, so the
+    worker-managed launch could never reach --reserve-vram -- the lever worked from
+    build_launch_command directly and from the PowerShell launcher, but not from the function
+    ComfyRuntimeManager.start() actually calls."""
+    from comfy_bootstrap import bootstrap_comfy_runtime
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    payload = bootstrap_comfy_runtime(
+        tmp_path, python_executable=sys.executable, apply_launch_policy=True,
+        probe_attention=False, vram_headroom=16,
+    )
+    command = payload["recommended_command"]
+    assert command[command.index(policy.RESERVE_VRAM_FLAG) + 1:] == ["16"]
+
+
+def test_bootstrap_comfy_runtime_can_pass_an_arm(tmp_path) -> None:
+    from comfy_bootstrap import bootstrap_comfy_runtime
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    payload = bootstrap_comfy_runtime(
+        tmp_path, python_executable=sys.executable, apply_launch_policy=False,
+        arm={"attention": "sdpa"},
+    )
+    assert policy.PYTORCH_ATTENTION_FLAG in payload["recommended_command"]

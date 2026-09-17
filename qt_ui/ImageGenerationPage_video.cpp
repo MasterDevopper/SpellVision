@@ -2,6 +2,7 @@
 #include "generation/ErrorPillLabel.h"
 #include "ImageGenerationPage_units.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "widgets/ElidingLabel.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -29,6 +30,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTimer>
 
 
 QString ImageGenerationPage::videoComponentValue(const QComboBox *combo) const
@@ -216,64 +218,251 @@ void ImageGenerationPage::updateVideoFamilyUi()
         upscaleRow_->setVisible(!isFlux3);
 }
 
+// --- W2: the user's own edits -------------------------------------------------------------------
+
+void ImageGenerationPage::watchForUserEdits()
+{
+    // `valueChanged` plus the ProgrammaticWrite depth, NOT `editingFinished`: editingFinished also
+    // fires when focus merely leaves a box nobody typed in, which would mark a field the user never
+    // touched and freeze it against every later model. `activated` (not currentIndexChanged) for
+    // the combos, because applyFamilyChoices REBUILDS their items on each family change and
+    // currentIndexChanged fires for that too -- activated is emitted only by a human choosing.
+    auto watchSpin = [this](QSpinBox *spin, ResolvedField field) {
+        if (spin)
+            connect(spin, &QSpinBox::valueChanged, this, [this, field](int) { markUserEdited(field); });
+    };
+    auto watchDouble = [this](QDoubleSpinBox *spin, ResolvedField field) {
+        if (spin)
+            connect(spin, &QDoubleSpinBox::valueChanged, this, [this, field](double) { markUserEdited(field); });
+    };
+    auto watchCombo = [this](QComboBox *combo, ResolvedField field) {
+        if (combo)
+            connect(combo, &QComboBox::activated, this, [this, field](int) { markUserEdited(field); });
+    };
+
+    watchSpin(widthSpin_, ResolvedField::Width);
+    watchSpin(heightSpin_, ResolvedField::Height);
+    watchSpin(frameCountSpin_, ResolvedField::Frames);
+    watchSpin(fpsSpin_, ResolvedField::Fps);
+    watchDouble(highNoiseShiftSpin_, ResolvedField::Shift);
+    watchDouble(lowNoiseShiftSpin_, ResolvedField::Shift);
+    // The dual-noise trio. applyResolvedSettings writes all three from `steps / 2` and they were
+    // watched by nothing, so a deliberate asymmetric split (20 high / 8 low, an MoE handoff the
+    // user chose) was reset to 14 / 14 by the next Simple/Advanced toggle -- `steps` had never been
+    // touched, so its guard was open. The sweep rule `resolved-fields-are-watched` now fails a
+    // build in which applyResolvedSettings writes a spin box this function does not connect.
+    watchSpin(highNoiseStepsSpin_, ResolvedField::SplitSteps);
+    watchSpin(lowNoiseStepsSpin_, ResolvedField::SplitSteps);
+    watchSpin(splitStepSpin_, ResolvedField::SplitSteps);
+    if (sampling_)
+    {
+        watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);
+        watchDouble(sampling_->cfgSpin(), ResolvedField::Cfg);
+        // Both halves of each pair: video mode drives the video combos and image mode the image
+        // ones, and one page is only ever one of those -- but marking the logical FIELD rather than
+        // the widget is what makes a sampler chosen in Advanced survive a Simple/Advanced round
+        // trip, which writes through whichever pair the mode selects.
+        watchCombo(sampling_->samplerCombo(), ResolvedField::Sampler);
+        watchCombo(sampling_->videoSamplerCombo(), ResolvedField::Sampler);
+        watchCombo(sampling_->schedulerCombo(), ResolvedField::Scheduler);
+        watchCombo(sampling_->videoSchedulerCombo(), ResolvedField::Scheduler);
+    }
+}
+
+bool ImageGenerationPage::userEdited(ResolvedField field) const
+{
+    // Two sets, one question. "The user typed this" is cleared by a deliberate model change; "this
+    // came from the user's own content" is not, because picking a checkpoint is not a request to
+    // resize the keyframe they staged. applyResolvedSettings asks only whether it may write.
+    return userEditedFields_.contains(static_cast<int>(field))
+        || contentDerivedFields_.contains(static_cast<int>(field));
+}
+
+void ImageGenerationPage::markUserEdited(ResolvedField field)
+{
+    if (programmaticWriteDepth_ > 0)
+        return;
+    userEditedFields_.insert(static_cast<int>(field));
+}
+
+void ImageGenerationPage::markContentDerived(ResolvedField field)
+{
+    // Deliberately NOT gated on programmaticWriteDepth_. The write that produced this value was the
+    // app's (ensureCanvasSizeDefault, inside its own guard); what makes it the user's is the image
+    // they chose, not the keystroke they did not make.
+    contentDerivedFields_.insert(static_cast<int>(field));
+}
+
+void ImageGenerationPage::clearContentDerivedFields()
+{
+    contentDerivedFields_.clear();
+}
+
+void ImageGenerationPage::clearUserEditedFields()
+{
+    userEditedFields_.clear();
+}
+
+void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)
+{
+    if (values.isEmpty() || !sampling_)
+        return;
+
+    const ProgrammaticWrite guard(this);
+
+    // Each field is written only if the answer CARRIES it and the user has not typed one. A field
+    // the answer omits keeps whatever is already there -- that is what lets this model's own
+    // settings overlay the family's rather than replacing them wholesale.
+    auto field = [&values](const char *name) { return values.value(QLatin1String(name)); };
+
+    const QJsonValue steps = field("steps");
+    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && sampling_->stepsSpin())
+        sampling_->stepsSpin()->setValue(steps.toInt());
+    const QJsonValue cfg = field("cfg");
+    if (cfg.isDouble() && !userEdited(ResolvedField::Cfg) && sampling_->cfgSpin())
+        sampling_->cfgSpin()->setValue(cfg.toDouble());
+
+    // Video routes sampler/scheduler through the VIDEO combos (the ones actually shown and sent for
+    // video); image mode uses the image combos.
+    QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo())
+                                   ? sampling_->videoSamplerCombo()
+                                   : sampling_->samplerCombo();
+    QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo())
+                                     ? sampling_->videoSchedulerCombo()
+                                     : sampling_->schedulerCombo();
+    const QString sampler = field("sampler").toString().trimmed();
+    if (!sampler.isEmpty() && !userEdited(ResolvedField::Sampler) && samplerTarget
+        && !selectComboValue(samplerTarget, sampler))
+        selectComboByContains(samplerTarget, {sampler});
+    const QString scheduler = field("scheduler").toString().trimmed();
+    if (!scheduler.isEmpty() && !userEdited(ResolvedField::Scheduler) && schedulerTarget
+        && !selectComboValue(schedulerTarget, scheduler))
+        selectComboByContains(schedulerTarget, {scheduler});
+
+    const QJsonValue shift = field("shift");
+    if (shift.isDouble() && !userEdited(ResolvedField::Shift))
+    {
+        if (highNoiseShiftSpin_)
+            highNoiseShiftSpin_->setValue(shift.toDouble());
+        if (lowNoiseShiftSpin_)
+            lowNoiseShiftSpin_->setValue(shift.toDouble());
+    }
+
+    // W2 Task 6: the canvas and the duration come from the same answer as the sampling values. The
+    // legality rules -- LTX width/height divisible by 32, frame length (N*8)+1, mochi's and
+    // hunyuan_video's own strides -- are NOT re-derived here. resolve.py snaps them, transcribed
+    // from the one place each is actually enforced, and this writes what it is handed. A second
+    // C++ copy of those rules is precisely the duplicate resolver this wave exists to remove.
+    const QJsonValue width = field("width");
+    if (width.toInt() >= 64 && !userEdited(ResolvedField::Width) && widthSpin_)
+        widthSpin_->setValue(width.toInt());
+    const QJsonValue height = field("height");
+    if (height.toInt() >= 64 && !userEdited(ResolvedField::Height) && heightSpin_)
+        heightSpin_->setValue(height.toInt());
+    if (isVideoMode())
+    {
+        const QJsonValue frames = field("frames");
+        if (frames.toInt() > 0 && !userEdited(ResolvedField::Frames) && frameCountSpin_)
+            frameCountSpin_->setValue(frames.toInt());
+        const QJsonValue fps = field("fps");
+        if (fps.toInt() > 0 && !userEdited(ResolvedField::Fps) && fpsSpin_)
+            fpsSpin_->setValue(fps.toInt());
+    }
+
+    // The dual-noise split boxes are the resolved step count expressed across two experts -- the
+    // builder runs the high expert 0->N/2 and the low one N/2->N. They are not a second sampling
+    // decision, so they follow the number above instead of carrying one of their own.
+    if (steps.isDouble() && !userEdited(ResolvedField::Steps) && !userEdited(ResolvedField::SplitSteps)
+        && usesWanDualNoiseMode() && resolvedVideoFamilyToken() == QStringLiteral("wan"))
+    {
+        const int half = qMax(1, steps.toInt() / 2);
+        if (highNoiseStepsSpin_)
+            highNoiseStepsSpin_->setValue(half);
+        if (lowNoiseStepsSpin_)
+            lowNoiseStepsSpin_->setValue(half);
+        if (splitStepSpin_)
+            splitStepSpin_->setValue(half);
+    }
+
+    // Last, and inside the same guard: whatever pair the resolver produced, the user's stated
+    // orientation decides which way round it is shown. Applying it here rather than making it a
+    // user-edit means a later model's own canvas still arrives -- it simply arrives the right way
+    // up. A Portrait choice that FROZE the canvas would be the Aspect preset's behaviour, and the
+    // reason Aspect cannot serve as the orientation control.
+    applyOrientationPreference();
+}
+
+void ImageGenerationPage::applyOrientationPreference()
+{
+    if (!orientationCombo_ || !widthSpin_ || !heightSpin_)
+        return;
+    const QString wanted = orientationCombo_->currentData().toString();
+    if (wanted.isEmpty())
+        return;  // "As published" -- the resolver's pair, untouched.
+    const int width = widthSpin_->value();
+    const int height = heightSpin_->value();
+    if (width < 64 || height < 64 || width == height)
+        return;
+    const bool isPortrait = height > width;
+    if ((wanted == QStringLiteral("portrait")) == isPortrait)
+        return;
+    // A SWAP, not a new size: the long and short edges the model published are both kept, so the
+    // pixel count, the divisibility the resolver snapped to and the family's own aspect all survive.
+    const ProgrammaticWrite guard(this);
+    widthSpin_->setValue(height);
+    heightSpin_->setValue(width);
+}
+
 void ImageGenerationPage::applyOptimalVideoSamplingDefaults()
 {
     if (!isVideoMode())
         return;
 
-    const QString family = resolvedVideoFamilyToken().trimmed().toLower();
-    // Community-validated operating points; user can still edit Advanced knobs afterward.
-    if (family.startsWith(QStringLiteral("wan"))) {
-        if (wanSplitCombo_)
-            selectComboValue(wanSplitCombo_, QStringLiteral("auto"));
-        if (highNoiseStepsSpin_)
-            highNoiseStepsSpin_->setValue(14);
-        if (lowNoiseStepsSpin_)
-            lowNoiseStepsSpin_->setValue(14);
-        if (splitStepSpin_)
-            splitStepSpin_->setValue(14);
-        if (highNoiseShiftSpin_)
-            highNoiseShiftSpin_->setValue(5.0);
-        if (lowNoiseShiftSpin_)
-            lowNoiseShiftSpin_->setValue(5.0);
-        if (sampling_->stepsSpin())
-            sampling_->stepsSpin()->setValue(28); // high+low when split
-        if (sampling_->cfgSpin())
-            sampling_->cfgSpin()->setValue(5.0);
-        if (sampling_->videoSamplerCombo()) {
-            if (!selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("uni_pc")))
-                selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("euler"));
+    // No numbers here any more. wan's 28 / 5.0 / uni_pc, ltx's 30 / 3.5 / 49 and flux3's 24 / 120
+    // lived in this function as C++ literals that DUPLICATED and OVERRODE the table the worker
+    // actually resolves from -- and had already drifted from it: the table says wan is CFG 4.0 on
+    // euler, so the cockpit was showing a pair the render was never going to use. The family's
+    // numbers now arrive through the same provider the Speed chips read, and this applies whatever
+    // it is handed.
+    //
+    // Two deletions worth their own line. The wanSplitCombo_ "auto" write went with the numbers: it
+    // re-forced auto over a manual split on every Simple/Advanced toggle, which is the overwrite
+    // the user-edit flags exist to stop, and "auto" is already the combo's construction value and
+    // what Reset restores. And flux3's 24 fps / 120 frames needed no data home, because they never
+    // reached the API: build_flux3_payload sends `duration`, and _duration_seconds is
+    // `max(5, min(20, round(frames/fps)))` -- 120/24 and the spin boxes' own 81/16 are both 5.
+    //
+    // resolvedVideoFamilyForSelector rather than resolvedVideoFamilyToken: the token answers "auto"
+    // for the Auto family and no table is keyed that way, so the selector's resolver (which falls
+    // through to the checkpoint) is the one that can actually name a family here.
+    const QString family = resolvedVideoFamilyForSelector().trimmed().toLower();
+    QJsonObject params;
+    if (operatingPointsProvider_ && !family.isEmpty())
+    {
+        const QJsonObject table = operatingPointsProvider_(family);
+        const QJsonArray points = table.value(QStringLiteral("operating_points")).toArray();
+        const QString wanted = table.value(QStringLiteral("default_operating_point")).toString().trimmed();
+        for (const QJsonValue &v : points)
+        {
+            const QJsonObject point = v.toObject();
+            const bool isWanted = point.value(QStringLiteral("name")).toString() == wanted;
+            if (params.isEmpty() || isWanted)
+                params = point.value(QStringLiteral("params")).toObject();
+            if (isWanted)
+                break;
         }
-        if (sampling_->videoSchedulerCombo())
-            selectComboValue(sampling_->videoSchedulerCombo(), QStringLiteral("simple"));
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("WAN defaults applied: split auto · 14/14 · shift 5.0 (editable in Advanced)."));
-    } else if (family.startsWith(QStringLiteral("ltx"))) {
-        // Full ltx-2.3-22b wants 25–40 steps, CFG 3–5 (native AV path).
-        if (sampling_->stepsSpin())
-            sampling_->stepsSpin()->setValue(30);
-        if (sampling_->cfgSpin())
-            sampling_->cfgSpin()->setValue(3.5);
-        if (sampling_->videoSamplerCombo())
-            selectComboValue(sampling_->videoSamplerCombo(), QStringLiteral("euler"));
-        if (frameCountSpin_) {
-            // Snap toward (N×8)+1 without fighting user too hard on first pick.
-            const int f = frameCountSpin_->value();
-            if (f < 49)
-                frameCountSpin_->setValue(49);
-        }
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("LTX defaults applied: 30 steps · CFG 3.5 · native AV (editable in Advanced)."));
-    } else if (family == QStringLiteral("flux3")) {
-        if (fpsSpin_)
-            fpsSpin_->setValue(24);
-        if (frameCountSpin_ && frameCountSpin_->value() < 120)
-            frameCountSpin_->setValue(120);
-        if (readinessHintLabel_)
-            readinessHintLabel_->setHint(
-                QStringLiteral("FLUX.3 BFL API preview: hosted, paid, audio enabled · BFL_API_KEY required."));
+    }
+    applyResolvedSettings(params);
+
+    // The hint reports what is SHOWING, read back off the controls, rather than what was sent to
+    // them: a value the user typed is deliberately not overwritten above, and a caption naming the
+    // family's number anyway would be describing a render nobody is going to get.
+    if (readinessHintLabel_ && !params.isEmpty() && sampling_->stepsSpin() && sampling_->cfgSpin())
+    {
+        readinessHintLabel_->setHint(QStringLiteral("%1 sampling: %2 steps · CFG %3 (editable in Advanced).")
+                                         .arg(family.toUpper())
+                                         .arg(sampling_->stepsSpin()->value())
+                                         .arg(sampling_->cfgSpin()->value(), 0, 'g', 3));
     }
     updateVideoStackModeUi();
 }
@@ -701,6 +890,243 @@ void ImageGenerationPage::refreshOperatingPointSelector()
     updateOperatingPointSelector();
 }
 
+void ImageGenerationPage::setModelDefaultsProvider(
+    std::function<QJsonObject(const QString &, const QString &, const QString &)> provider)
+{
+    // Store only. Unlike setOperatingPointsProvider, this does NOT refresh the selector: the family
+    // table is app-wide and worth re-rendering the moment it arrives, while this answers a question
+    // about the selected model -- and at the moment MainWindow wires it, no model is selected.
+    modelDefaultsProvider_ = std::move(provider);
+}
+
+void ImageGenerationPage::setModelDefaultsFetcher(
+    std::function<void(const QString &, const QString &, const QString &, std::function<void()>)> fetcher)
+{
+    modelDefaultsFetcher_ = std::move(fetcher);
+}
+
+void ImageGenerationPage::refreshModelDefaults()
+{
+    applyModelDefaults();
+}
+
+void ImageGenerationPage::requestModelDefaults(const QString &family)
+{
+    // Recorded BEFORE the early-outs. applyModelDefaults reads the cache with this family, and the
+    // cache is keyed on it -- so a page that asked for one family and then looked up another would
+    // simply miss its own answer. It is also the fix for the coalescing hazard below: the LAST ask
+    // in an event-loop turn owns the widgets, so it owns the family the lookup uses.
+    modelDefaultsFamily_ = family.trimmed().toLower();
+    if (selectedModelPath_.trimmed().isEmpty())
+    {
+        // No model, nothing to overlay -- but the caption must stop describing the last one.
+        applyModelDefaults();
+        return;
+    }
+    if (modelDefaultsRequestScheduled_)
+        return; // a burst of selector refreshes inside one event-loop turn is one ask
+
+    modelDefaultsRequestScheduled_ = true;
+    const QString path = selectedModelPath_;
+    const QString mode = modeKey();
+    // Deferred for exactly the reason setSelectedModel already defers its component resolve, and
+    // the comment there is the record of what happens otherwise: a worker round-trip runs a nested
+    // event loop, and starting one from inside a combo-change handler re-enters the UI with the
+    // popup possibly still open, and crashes. singleShot(0) runs it on a clean stack.
+    QTimer::singleShot(0, this, [this, path, mode]() {
+        modelDefaultsRequestScheduled_ = false;
+        // The family is read HERE, not captured at schedule time. applyVideoFamilyCheckpointIfNeeded
+        // and the family combo's own handler both fire inside one turn, and capturing the first
+        // ask's family cached whichever ran first -- so the answer the page then applied was an
+        // answer about a family the bar is no longer showing.
+        const QString familyKey = modelDefaultsFamily_;
+        if (path.compare(selectedModelPath_, Qt::CaseInsensitive) != 0)
+            return; // the user moved on while this was queued; the newer ask owns the widgets
+        if (!modelDefaultsFetcher_)
+        {
+            // No worker wired (a test, or a page built without one). The provider may still answer,
+            // and if it does not, applyModelDefaults leaves the family operating point alone.
+            applyModelDefaults();
+            return;
+        }
+        const QPointer<ImageGenerationPage> guard(this);
+        modelDefaultsFetcher_(path, familyKey, mode, [guard, path]() {
+            if (!guard)
+                return;
+            if (path.compare(guard->selectedModelPath_, Qt::CaseInsensitive) != 0)
+                return;
+            guard->applyModelDefaults();
+        });
+    });
+}
+
+namespace
+{
+// Every entry in the reply's `settings` is {value, provenance, confidence, n, total}. This reaches
+// past that envelope for the number the widget wants, and returns an undefined QJsonValue for a
+// field the model did not mention -- which is what keeps an unmentioned field on the family's
+// value instead of clearing it.
+QJsonValue modelDefaultValue(const QJsonObject &settings, const QString &field)
+{
+    const QJsonValue entry = settings.value(field);
+    if (!entry.isObject())
+        return {};
+    return entry.toObject().value(QStringLiteral("value"));
+}
+} // namespace
+
+void ImageGenerationPage::applyModelDefaults()
+{
+    QJsonObject reply;
+    if (modelDefaultsProvider_ && !selectedModelPath_.trimmed().isEmpty())
+        reply = modelDefaultsProvider_(selectedModelPath_, modelDefaultsFamily_, modeKey());
+
+    const QJsonObject settings = reply.value(QStringLiteral("settings")).toObject();
+
+    // Spec ruling R2.1: this applies in BOTH modes, and there is deliberately no `advanced_` test
+    // anywhere in this function. Simple applies it because the user will not change it; Advanced
+    // applies it because a pre-filled correct value is the entire point, and the house rule is that
+    // Advanced REVEALS IN PLACE rather than starting from nothing -- the user edits the number
+    // afterwards, in the control it was already sitting in. Treating the pre-fill as a Simple-mode
+    // convenience is the tempting shortcut and it is the wrong one.
+    //
+    // This is an OVERLAY, not a replacement. The caller has already applied the family operating
+    // point, so a field the model does not mention keeps the family's value; only fields the
+    // resolver actually answered are written here. It writes the same widgets applyOperatingPoint
+    // writes, by the same rules, because since W2 Task 6 it writes them through the SAME function.
+    //
+    // Peel the envelope off every field the resolver answered and hand the flat map to that one
+    // applier. Task 6 added width/height/frames/fps to what the resolver answers, and this loop is
+    // why that needed no change here: a field the model does not mention is simply not in the map.
+    QJsonObject values;
+    for (auto it = settings.constBegin(); it != settings.constEnd(); ++it)
+    {
+        const QJsonValue value = modelDefaultValue(settings, it.key());
+        if (!value.isUndefined() && !value.isNull())
+            values.insert(it.key(), value);
+    }
+    applyResolvedSettings(values);
+
+    refreshModelDefaultsCaption(reply);
+}
+
+namespace
+{
+// Where a number came from, at the coarseness a caption can honestly report. This is NOT a second
+// copy of the precedence order -- that lives in model_intelligence/resolve.py and restating it here
+// is exactly the duplicate resolver this wave exists to remove. It groups the provenance strings
+// into the four places a user would recognise, so the caption names WHERE rather than which rule won.
+enum class DefaultsSource
+{
+    None = 0,
+    Table = 1,   // table:family-operating-point / table:family-default
+    Card = 2,    // card:frontmatter / card:snippet-regex / card:prose-regex
+    Site = 3,    // site:image-meta-mode / site:trainedWords / site:image-meta-weak
+    User = 4,    // a value the user pinned on the Models page
+};
+
+DefaultsSource sourceOfProvenance(const QString &provenance)
+{
+    if (provenance.startsWith(QStringLiteral("user")))
+        return DefaultsSource::User;
+    if (provenance.startsWith(QStringLiteral("site:")))
+        return DefaultsSource::Site;
+    if (provenance.startsWith(QStringLiteral("card:")))
+        return DefaultsSource::Card;
+    if (provenance.startsWith(QStringLiteral("table:")))
+        return DefaultsSource::Table;
+    return DefaultsSource::None;
+}
+} // namespace
+
+void ImageGenerationPage::refreshModelDefaultsCaption(const QJsonObject &reply)
+{
+    if (!modelDefaultsCaptionLabel_)
+        return;
+
+    const QJsonObject settings = reply.value(QStringLiteral("settings")).toObject();
+    // Nothing to report: no model, or no answer yet / the worker could not be reached. Saying
+    // "family defaults" here would be a claim we have not earned -- we do not know what this model
+    // wants, which is different from knowing it publishes nothing.
+    if (selectedModelPath_.trimmed().isEmpty() || settings.isEmpty())
+    {
+        modelDefaultsCaptionLabel_->setVisible(false);
+        return;
+    }
+
+    DefaultsSource best = DefaultsSource::None;
+    int agreeCount = 0;
+    int agreeTotal = 0;
+    bool capped = false;
+    for (auto it = settings.constBegin(); it != settings.constEnd(); ++it)
+    {
+        const QJsonObject entry = it.value().toObject();
+        QString provenance = entry.value(QStringLiteral("provenance")).toString().trimmed();
+        // A capped field keeps its provenance with ":capped" appended, so the caption can say the
+        // number shown is not the number the model asked for.
+        if (provenance.endsWith(QStringLiteral(":capped")))
+        {
+            capped = true;
+            provenance.chop(QStringLiteral(":capped").size());
+        }
+        const DefaultsSource source = sourceOfProvenance(provenance);
+        if (source <= best)
+            continue;
+        best = source;
+        agreeCount = entry.value(QStringLiteral("n")).toInt();
+        agreeTotal = entry.value(QStringLiteral("total")).toInt();
+    }
+
+    bool noSidecar = false;
+    const QJsonArray warnings = reply.value(QStringLiteral("warnings")).toArray();
+    for (const QJsonValue &w : warnings)
+    {
+        if (w.toString().contains(QStringLiteral("no sidecar"), Qt::CaseInsensitive))
+            noSidecar = true;
+    }
+
+    QString caption;
+    switch (best)
+    {
+    case DefaultsSource::User:
+        caption = QStringLiteral("Defaults you saved for this model");
+        break;
+    case DefaultsSource::Site:
+        caption = QStringLiteral("Defaults from this model's CivitAI examples");
+        if (agreeCount > 0 && agreeTotal > 0)
+            caption += QStringLiteral(" · %1 of %2 agree").arg(agreeCount).arg(agreeTotal);
+        break;
+    case DefaultsSource::Card:
+        caption = QStringLiteral("Defaults from the model card");
+        break;
+    case DefaultsSource::Table:
+    case DefaultsSource::None:
+        // Two different situations, and conflating them is what sends a user looking for a setting
+        // that was never published. The difference is worth a sentence, and the first one may now
+        // name an action again: W5 Task 4 built "Refresh metadata" on the Models page -- a real
+        // control, beside "Refresh Models", that starts a model_intel_refresh and writes the
+        // sidecar this branch is missing. W2 had to delete this sentence because the button did
+        // not exist; restoring it is the other half of that ruling, and it is restored here rather
+        // than paraphrased so the words on screen match the words on the button.
+        caption = noSidecar
+            ? QStringLiteral("Family defaults · run Refresh metadata on the Models page to use "
+                             "this model's own")
+            : QStringLiteral("Family defaults (this model has no published settings)");
+        break;
+    }
+    // NOT "reduced to fit VRAM". That states as fact something the code does not know: the cap is a
+    // rough pixels-per-gigabyte heuristic that has never been measured against any family, and the
+    // sentence saying so lives in a `warnings` array this function throws away. The visible string
+    // now claims exactly what was done and on what basis.
+    if (capped)
+        caption += QStringLiteral(" · canvas reduced by a rough VRAM estimate");
+
+    // setFullText, not setText: the label elides to whatever width the inspector gives it and keeps
+    // the full sentence in the tooltip, so no width cuts this mid-word. Shown in BOTH modes.
+    modelDefaultsCaptionLabel_->setFullText(caption);
+    modelDefaultsCaptionLabel_->setVisible(true);
+}
+
 QString ImageGenerationPage::resolvedVideoFamilyForSelector() const
 {
     if (!isVideoMode())
@@ -1074,6 +1500,11 @@ void ImageGenerationPage::updateOperatingPointSelector()
         ? resolvedVideoFamilyForSelector()
         : modelFamilyByValue_.value(selectedModelPath_).trimmed().toLower();
     applyFamilySamplingChoices(family);
+    // W2: ask what THIS model wants. Above both of this function's exits on purpose -- a family
+    // with one operating point (or none) returns early below, and that is precisely the case where
+    // the model's own published settings are the only thing there is to show. The ask is deferred,
+    // so it lands after the family point has been applied and overlays it rather than racing it.
+    requestModelDefaults(family);
     QJsonArray points;
     QString defaultPoint;
     if (operatingPointsProvider_ && !family.isEmpty())
@@ -1082,8 +1513,13 @@ void ImageGenerationPage::updateOperatingPointSelector()
         points = table.value(QStringLiteral("operating_points")).toArray();
         defaultPoint = table.value(QStringLiteral("default_operating_point")).toString();
     }
-    if (family == QStringLiteral("krea2"))
-        defaultPoint = krea2OperatingPointForPath(selectedModelPath_);
+    // W2 Task 7: krea2 used to be special-cased twice right here -- once to pick `raw` vs `turbo`
+    // by testing the FILENAME for "turbo" (krea2OperatingPointForPath, now deleted), and once to
+    // write that choice's 52/3.5 or 8/1.0 as literals. The filename test is wrong for the owner's
+    // own loxsUtopicWorldKrea2_v20Quants, whose author publishes 10 steps and whose name says
+    // neither word; resolve.py reads the variant off the sidecar's identity and falls back to the
+    // same substring only when there is nothing better, so the answer is now right for that model
+    // and arrives through requestModelDefaults above like every other model's.
 
     // >1 point -> show a selector; <=1 -> hide it entirely (nothing to choose).
     if (points.size() <= 1)
@@ -1092,18 +1528,6 @@ void ImageGenerationPage::updateOperatingPointSelector()
         currentOperatingPoints_ = {};
         currentOperatingPoint_.clear();
         operatingPointFamily_.clear();
-        if (family == QStringLiteral("krea2"))
-        {
-            const bool raw = defaultPoint == QStringLiteral("raw");
-            if (sampling_->stepsSpin())
-                sampling_->stepsSpin()->setValue(raw ? 52 : 8);
-            if (sampling_->cfgSpin())
-                sampling_->cfgSpin()->setValue(raw ? 3.5 : 1.0);
-            if (sampling_->samplerCombo() && !selectComboValue(sampling_->samplerCombo(), QStringLiteral("er_sde")))
-                selectComboByContains(sampling_->samplerCombo(), {QStringLiteral("er_sde")});
-            if (sampling_->schedulerCombo() && !selectComboValue(sampling_->schedulerCombo(), QStringLiteral("simple")))
-                selectComboByContains(sampling_->schedulerCombo(), {QStringLiteral("simple")});
-        }
         return;
     }
 
@@ -1186,37 +1610,13 @@ void ImageGenerationPage::applyOperatingPoint(const QString &name)
         return;
 
     currentOperatingPoint_ = name;
-    const QJsonObject params = point.value(QStringLiteral("params")).toObject();
 
-    // Write the bundle into the VISIBLE controls -- the user sees exactly what will run, no hidden state.
-    if (params.contains(QStringLiteral("steps")) && sampling_->stepsSpin())
-        sampling_->stepsSpin()->setValue(params.value(QStringLiteral("steps")).toInt());
-    if (params.contains(QStringLiteral("cfg")) && sampling_->cfgSpin())
-        sampling_->cfgSpin()->setValue(params.value(QStringLiteral("cfg")).toDouble());
-    // Video routes the sampler/scheduler through the VIDEO combos (the ones actually shown + sent for
-    // video); image mode uses the image combos. Operating points are video-only today, but guard both.
-    QComboBox *samplerTarget = (isVideoMode() && sampling_->videoSamplerCombo()) ? sampling_->videoSamplerCombo() : sampling_->samplerCombo();
-    QComboBox *schedulerTarget = (isVideoMode() && sampling_->videoSchedulerCombo()) ? sampling_->videoSchedulerCombo() : sampling_->schedulerCombo();
-    if (params.contains(QStringLiteral("sampler")) && samplerTarget)
-    {
-        const QString s = params.value(QStringLiteral("sampler")).toString();
-        if (!s.isEmpty() && !selectComboValue(samplerTarget, s))
-            selectComboByContains(samplerTarget, {s});
-    }
-    if (params.contains(QStringLiteral("scheduler")) && schedulerTarget)
-    {
-        const QString s = params.value(QStringLiteral("scheduler")).toString();
-        if (!s.isEmpty() && !selectComboValue(schedulerTarget, s))
-            selectComboByContains(schedulerTarget, {s});
-    }
-    if (params.contains(QStringLiteral("shift")))
-    {
-        const double shift = params.value(QStringLiteral("shift")).toDouble();
-        if (highNoiseShiftSpin_)
-            highNoiseShiftSpin_->setValue(shift);
-        if (lowNoiseShiftSpin_)
-            lowNoiseShiftSpin_->setValue(shift);
-    }
+    // Write the bundle into the VISIBLE controls -- the user sees exactly what will run, no hidden
+    // state. Through applyResolvedSettings, which is also what this model's own settings go
+    // through: one applier, so the family point and the model overlay cannot disagree about which
+    // widget a field lands in, and W2's canvas/duration fields (the point now carries width,
+    // height, frames and fps beside steps and cfg) arrive here without a second copy of the logic.
+    applyResolvedSettings(point.value(QStringLiteral("params")).toObject());
 
     // LoRA: Fast populates the VISIBLE stack with the declared accel LoRAs (so the user sees what they
     // got -- unlike the API path's silent inject); Quality removes the accel LoRAs the selector added

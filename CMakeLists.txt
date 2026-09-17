@@ -143,6 +143,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/generation/SamplingController.cpp
     qt_ui/generation/UpscaleController.cpp
     qt_ui/generation/SamplingController.h
+    qt_ui/generation/EndpointRouting.cpp
+    qt_ui/generation/EndpointRouting.h
     qt_ui/assets/ModelStackState.cpp
     qt_ui/assets/ModelStackState.h
 
@@ -161,6 +163,14 @@ qt_add_library(SpellVisionCore STATIC
 
     qt_ui/assets/ModelSidecar.cpp
     qt_ui/assets/ModelSidecar.h
+    qt_ui/assets/ModelIntelSidecar.cpp
+    qt_ui/assets/ModelIntelSidecar.h
+    qt_ui/assets/ModelKindTabs.cpp
+    qt_ui/assets/ModelKindTabs.h
+    qt_ui/assets/ModelInspectorPanel.cpp
+    qt_ui/assets/ModelInspectorPanel.h
+    qt_ui/assets/ModelRefreshController.cpp
+    qt_ui/assets/ModelRefreshController.h
     qt_ui/assets/ModelOverlayStore.cpp
     qt_ui/assets/ModelOverlayStore.h
     qt_ui/assets/ModelThumbnailCache.cpp
@@ -213,6 +223,13 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/ProjectRoot.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
+    qt_ui/shell/EndpointRegistry.cpp
+    qt_ui/shell/EndpointRegistry.h
+    qt_ui/shell/EndpointProbe.cpp
+    qt_ui/shell/EndpointProbe.h
+    qt_ui/shell/EndpointPanel.cpp
+    qt_ui/shell/EndpointPanel_rows.cpp
+    qt_ui/shell/EndpointPanel.h
     qt_ui/shell/ModelsLibraryPaths.cpp
     qt_ui/shell/ModelsLibraryPaths.h
     qt_ui/shell/SecureCredentialStore.cpp
@@ -229,10 +246,14 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/QueueUiPresenter.cpp
     qt_ui/shell/QueueUiPresenter.h
 
+    qt_ui/shell/OptimizationEvidence.cpp
+    qt_ui/shell/OptimizationEvidence.h
     qt_ui/shell/TelemetryPresenter.cpp
     qt_ui/shell/TelemetryPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
+    qt_ui/shell/WindowDropTarget.cpp
+    qt_ui/shell/WindowDropTarget.h
     qt_ui/style/SvFonts.cpp
     qt_ui/style/SvFonts.h
     qt_ui/style/SvStyle.cpp
@@ -245,6 +266,10 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workflows/ModelResolutionDialog.h
     qt_ui/workflows/WorkflowDownloadDialog.cpp
     qt_ui/workflows/WorkflowDownloadDialog.h
+    qt_ui/workflows/WorkflowDraftBuilder.cpp
+    qt_ui/workflows/WorkflowDraftBuilder.h
+    qt_ui/workflows/WorkflowDropCoordinator.cpp
+    qt_ui/workflows/WorkflowDropCoordinator.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp
@@ -506,6 +531,31 @@ qt_add_executable(test_comfy_endpoint_profile tests/cpp/test_comfy_endpoint_prof
 target_link_libraries(test_comfy_endpoint_profile PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME comfy_endpoint_profile COMMAND test_comfy_endpoint_profile)
 
+# The second machine was a string literal: ManagerPage printed it, probed it with the host spelled
+# again, and then read the MASTER's health back out of a QLabel's text. Endpoints are data now, and
+# these are the three properties that make the data trustworthy -- a round trip, a local entry that
+# cannot be removed, and a corrupt stored value falling back to the default registry rather than to
+# an empty one (an empty one has no local master, so the app could not render on its own machine).
+qt_add_executable(test_endpoint_registry tests/cpp/test_endpoint_registry.cpp)
+target_link_libraries(test_endpoint_registry PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME endpoint_registry COMMAND test_endpoint_registry)
+
+# Which machine a job goes to, and the refusal that must come BEFORE the queue. ComfyUI-Distributed
+# falls back to the master when no worker answers and says so only in a log line; NetDist substitutes
+# a black image. Both succeed at the wrong thing. This holds the opposite: Auto prefers a free local
+# master, and an explicit pick that cannot run the job is refused by name rather than rerouted.
+qt_add_executable(test_endpoint_routing tests/cpp/test_endpoint_routing.cpp)
+target_link_libraries(test_endpoint_routing PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME endpoint_routing COMMAND test_endpoint_routing)
+
+# The Runtime page's list of machines, driven with a fake registry and fake probes. The case that
+# matters most is the one that cannot be proven by looking at a control: an unticked family must not
+# become ticked when the gesture is made, because UIA's IsEnabled lied to the last wave and a
+# disabled-looking checkbox is not the same claim as a refused change.
+qt_add_executable(test_endpoint_panel tests/cpp/test_endpoint_panel.cpp)
+target_link_libraries(test_endpoint_panel PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME endpoint_panel COMMAND test_endpoint_panel)
+
 # The socket client presents the worker's per-launch session secret, read from a user-only file.
 # Python proves the worker enforces it and that worker_client.py presents it; this proves the
 # transport that carries every one-shot UI command does too. A reader that silently returned ""
@@ -613,6 +663,113 @@ qt_add_executable(test_models_library_paths tests/cpp/test_models_library_paths.
 target_link_libraries(test_models_library_paths PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME models_library_paths COMMAND test_models_library_paths)
 
+# W2 Task 8: a model's own published settings apply in BOTH Simple and Advanced -- the tempting
+# wrong shortcut is pre-filling only in Simple, since "the user won't change it anyway" reads as a
+# Simple-mode convenience. An unmentioned field never clears what the family operating point already
+# set (OVERLAY, not replacement), the caption names where the numbers came from and how many of the
+# model's own examples agreed, a canvas size the user typed survives a later re-application of the
+# model's answer, and a worker-down reply (nothing published) leaves the widgets exactly where they
+# were rather than zeroing them.
+qt_add_executable(test_model_defaults_apply tests/cpp/test_model_defaults_apply.cpp)
+target_link_libraries(test_model_defaults_apply PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_defaults_apply COMMAND test_model_defaults_apply)
+
+# W3 Task 6: the Runtime page tells you which optimizations your renders actually ran on.
+# Installed and active are different facts -- sageattention is installed in ComfyUI's venv on this
+# box and the running process was launched without the flag -- so a lever that is installed and not
+# active must never read as a benefit, and a lever with no verified row must say "not timed" rather
+# than show a blank that looks like zero. Driven by a fake ledger and a fake probe: no worker, no
+# socket, no ComfyUI.
+qt_add_executable(test_optimization_panel tests/cpp/test_optimization_panel.cpp)
+target_link_libraries(test_optimization_panel PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME optimization_panel COMMAND test_optimization_panel)
+
+# W4 Task 1: "what kind of generation is this workflow" had three independent answers, and the Home
+# one ended in a loop over the FILE PATH -- so a workflow whose classification failed was routed by
+# its filename onto a page its graph does not belong to, silently. The resolver consumes the worker's
+# own vocabulary (inferred_task_command / capability_report.primary_task / classification_confidence,
+# python/workflow_scanner.py:955-1033) and refuses with a reason where it used to guess.
+qt_add_executable(test_workflow_mode_resolver tests/cpp/test_workflow_mode_resolver.cpp)
+target_link_libraries(test_workflow_mode_resolver PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_mode_resolver COMMAND test_workflow_mode_resolver)
+
+# W4 Task 2: a workflow dropped ANYWHERE in the window is a workflow the window handles. Qt delivers
+# a drag only to a widget whose acceptDrops() is true, walking up from the cursor and stopping at the
+# first taker -- and MainWindow had no dragEnterEvent, no dropEvent and no setAcceptDrops, so a .json
+# dropped on the rail, the title bar, Flows, Home, History or Settings was discarded with no message.
+# The two cases a careless window-level grab breaks are both here: an image on the cockpit still
+# reaches the cockpit, and a workflow on a prompt editor reaches the window instead of becoming text.
+qt_add_executable(test_window_drop_target tests/cpp/test_window_drop_target.cpp)
+target_link_libraries(test_window_drop_target PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME window_drop_target COMMAND test_window_drop_target)
+
+# W4 Task 4: the draft carries the cockpit's VALUES, not four paths. The extraction moved out of
+# WorkflowLibraryPage so the drop path and Flows share one answer to "what does this graph say the
+# checkpoint is" -- a second extractor would have started disagreeing on the first graph whose loader
+# is not a plain CheckpointLoaderSimple. Driven by real owner workflows under
+# runtime/imported_workflows: a synthetic prompt written to match the extractor proves only that the
+# extractor matches itself, and classification's whole job is graphs nobody here wrote.
+qt_add_executable(test_workflow_draft_builder tests/cpp/test_workflow_draft_builder.cpp)
+target_link_libraries(test_workflow_draft_builder PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_draft_builder COMMAND test_workflow_draft_builder)
+
+# W4 Task 3: the drop asks for everything the worker already knows. import_workflow -> the Download
+# dialog when something is missing -> compile_workflow_prompt -> check_workflow_launch_readiness ->
+# the draft -> the resolved page. Every step existed; none of them were chained, and safe_to_submit
+# was a hardcoded false, which is why a dropped workflow could not run. Driven by a fake worker that
+# answers each command in turn: no socket, no ComfyUI. The case that matters most is the one where
+# readiness is ABSENT -- it must read as unknown and keep submission closed, not fall through to yes.
+qt_add_executable(test_workflow_drop_coordinator tests/cpp/test_workflow_drop_coordinator.cpp)
+target_link_libraries(test_workflow_drop_coordinator PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_drop_coordinator COMMAND test_workflow_drop_coordinator)
+
+# W5 Task 1: the Models page's tabs come from the classifier, not from a path substring. The old
+# detectType answered with six names matched against the path, so clip_vision and text_encoders
+# shared one "Encoder" bucket and an embedding had no kind at all -- it sat under "Model" beside
+# the checkpoints. The case that matters most is the one nobody can see going wrong: a weight whose
+# kind nothing determined must land in Other, and Other must stay on screen, because a model that
+# appears under no tab is indistinguishable from a model that is not installed. Driven by a fixture
+# inventory covering all ten kinds plus the REAL sidecars this library's intelligence pass wrote.
+qt_add_executable(test_model_kind_tabs tests/cpp/test_model_kind_tabs.cpp)
+target_link_libraries(test_model_kind_tabs PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_kind_tabs COMMAND test_model_kind_tabs)
+
+# W5 Task 2: the card shows what the SITE says -- the title, the cover picture, the site badge and
+# the quantisation, all of which `<stem>.spellvision.json` has carried since the intelligence pass
+# ran and none of which the page read. Two rules here are not about layout: the display name
+# replaces the filename ON THE PAGE ONLY (the file is never renamed -- an owner requirement), and a
+# model with no sidecar must not render like one that was identified and had nothing to say. The
+# second is the one that would go quietly wrong: every FIELD of the two looks the same, and only
+# the sidecar's existence tells them apart. Driven by real sidecars from the F: library.
+qt_add_executable(test_model_card_sidecar tests/cpp/test_model_card_sidecar.cpp)
+target_link_libraries(test_model_card_sidecar PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_card_sidecar COMMAND test_model_card_sidecar)
+
+# W5 Task 3: the inspector, and the user's own picture. The details card showed one example image
+# and a truncated description; the sidecar carried six pictures, the site's description, the licence
+# and a `recommended` block with a PROVENANCE on every value -- and the provenance is the point,
+# because "10 steps, agreed by 10 of this model's own examples" and "10 steps, because the family
+# table says so" are different claims and the app has been rendering the owner's house checkpoint at
+# the wrong one. The case most likely to be quietly broken later is the user's own picture surviving
+# a refresh, so it is asserted from the cover-selection end here and end-to-end through the real
+# RefreshJob in tests/test_model_intel_user_picture.py. No socket: the panel builds requests and
+# consumes replies, and the test plays the worker.
+qt_add_executable(test_model_inspector tests/cpp/test_model_inspector.cpp)
+target_link_libraries(test_model_inspector PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_inspector COMMAND test_model_inspector)
+
+# W5 Task 4: "Refresh metadata", from inside the app. W2's cockpit caption told the user to run it
+# and the sentence had to be DELETED, because nothing in qt_ui/ started a model_intel_refresh at
+# all. Four properties make restoring that sentence honest, and two of them fail SILENTLY: a
+# per-model refresh that forgets its `files` list does not error, it walks 759 files and 2.09 TB;
+# and a key check added "for safety" would block the one CivitAI operation that is public (the
+# anonymous and keyed by-hash replies were verified identical against the live API). The other two
+# are the long job itself -- background, with progress -- and a cancel addressed by the job id that
+# only the started event carries.
+qt_add_executable(test_model_refresh_action tests/cpp/test_model_refresh_action.cpp)
+target_link_libraries(test_model_refresh_action PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_refresh_action COMMAND test_model_refresh_action)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -630,7 +787,12 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
-                      test_runtime_probe test_image_preview_controller
+                      test_runtime_probe test_image_preview_controller test_model_defaults_apply
+                      test_optimization_panel test_workflow_mode_resolver test_window_drop_target
+                      test_workflow_draft_builder test_workflow_drop_coordinator
+                      test_model_kind_tabs test_model_card_sidecar test_model_inspector
+                      test_model_refresh_action
+                      test_endpoint_registry test_endpoint_routing test_endpoint_panel
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

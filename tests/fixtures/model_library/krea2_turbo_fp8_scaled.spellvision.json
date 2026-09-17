@@ -1,0 +1,106 @@
+{
+ "schema": "spellvision.model-sidecar/1",
+ "identity": {
+  "file_name": "krea2_turbo_fp8_scaled.safetensors",
+  "size": 13141730784,
+  "hashes": {
+   "sha256": "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1",
+   "autov2": "eb4dd8c612"
+  },
+  "kind": "diffusion_model",
+  "family": "krea2",
+  "base_model": "Krea 2",
+  "quantisation": "fp8",
+  "sources": [
+   {
+    "site": "civitai",
+    "model_id": 2726029,
+    "version_id": 3064297,
+    "url": "https://civitai.com/models/2726029?modelVersionId=3064297",
+    "fetched_at": "2026-09-16T16:22:32.441109+00:00"
+   }
+  ]
+ },
+ "display": {
+  "name": {
+   "value": "Krea 2 Turbo Official Comfy-Org Checkpoints (Krea2)",
+   "user_override": false
+  },
+  "description_html": {
+   "value": "<p><strong>krea2_turbo_fp8</strong> - This is the official <strong>Comfy</strong> Krea 2 Turbo FP8 checkpoint. Uses <strong>~50% VRAM</strong> compared to BF16. Best on RTX 3000/4000 series rigs. Source: <a target=\"_blank\" rel=\"ugc\" href=\"https://huggingface.co/Comfy-Org/Krea-2\">https://huggingface.co/Comfy-Org/Krea-2</a></p>",
+   "user_override": false
+  },
+  "creator": null,
+  "license": {
+   "name": null,
+   "allowCommercialUse": null,
+   "allowDerivatives": null,
+   "allowNoCredit": null
+  },
+  "nsfw_level": 1,
+  "trigger_words": {
+   "value": [],
+   "user_override": false
+  },
+  "images": [
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/49cb45b4-0e6c-4ede-ab5c-41439dfd2ee0/original=true/134687632.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1\\0.jpg",
+    "width": 3072,
+    "height": 5019,
+    "nsfw_level": 1,
+    "is_cover": true,
+    "user_override": false,
+    "meta": {}
+   }
+  ]
+ },
+ "recommended": {
+  "steps": {
+   "value": 8,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "cfg": {
+   "value": 1.0,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "sampler": {
+   "value": "er_sde",
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "scheduler": {
+   "value": "simple",
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "width": {
+   "value": 1024,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "height": {
+   "value": 1024,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  }
+ },
+ "user": {
+  "notes": "",
+  "favorite": false
+ }
+}

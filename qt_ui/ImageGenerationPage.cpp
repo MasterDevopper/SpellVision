@@ -299,6 +299,9 @@ ImageGenerationPage::ImageGenerationPage(Mode mode, QWidget *parent)
             this, &ImageGenerationPage::onCatalogSignatureFinished);
 
     buildUi();
+    // After buildUi, before anything writes into the controls: every write from here on is either
+    // the app's (wrapped in ProgrammaticWrite) or the user's, and this is what tells them apart.
+    watchForUserEdits();
     applyTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this]() { applyTheme(); });
     reloadCatalogs();
@@ -1928,6 +1931,30 @@ void ImageGenerationPage::buildUi()
     });
 
     QWidget *aspectRow = makeStackedField(quickControlsCard, QStringLiteral("Aspect"), aspectPresetCombo);
+
+    // Spec 2.2 / plan Task 6 Step 3: orientation in SIMPLE. CLAUDE.md names it as the example of an
+    // intent-level control -- "orientation as Portrait / Landscape" -- and the point is that it must
+    // SWAP the resolved pair, not override it with a literal. The Aspect combo beside it does the
+    // other thing: it states 1216x832 whatever the model said, and the model's own answer is then
+    // blocked for the rest of the session. Orientation keeps the numbers the model published and
+    // changes only which way round they are, so a wan checkpoint that resolves 832x480 shows
+    // 480x832 in Portrait and is still showing wan's canvas.
+    //
+    // Visible in BOTH modes, because the house rule is that Advanced REVEALS IN PLACE and never
+    // relocates: hiding this in Advanced would move orientation from one control to two spin boxes
+    // in a different card, which is exactly the muscle-memory break the rule forbids.
+    orientationCombo_ = new ClickOnlyComboBox(quickControlsCard);
+    orientationCombo_->addItem(QStringLiteral("As published"), QString());
+    orientationCombo_->addItem(QStringLiteral("Portrait"), QStringLiteral("portrait"));
+    orientationCombo_->addItem(QStringLiteral("Landscape"), QStringLiteral("landscape"));
+    orientationCombo_->setToolTip(QStringLiteral(
+        "Turns the resolved canvas on its side. It keeps the size this model publishes and swaps "
+        "width for height -- unlike an Aspect preset, which replaces both."));
+    configureComboBox(orientationCombo_);
+    connect(orientationCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { applyOrientationPreference(); });
+    QWidget *orientationRow = makeStackedField(quickControlsCard, QStringLiteral("Orientation"),
+                                               orientationCombo_);
     samplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Sampler"), sampling_->samplerCombo());
     schedulerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Image Scheduler"), sampling_->schedulerCombo());
     videoSamplerRow_ = makeStackedField(quickControlsCard, QStringLiteral("Video Sampler"), sampling_->videoSamplerCombo());
@@ -1977,6 +2004,7 @@ void ImageGenerationPage::buildUi()
     samplerSchedulerLayout_ = new QBoxLayout(QBoxLayout::TopToBottom);
     samplerSchedulerLayout_->setContentsMargins(0, 0, 0, 0);
     samplerSchedulerLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
+    samplerSchedulerLayout_->addWidget(orientationRow);
     samplerSchedulerLayout_->addWidget(aspectRow);
     samplerSchedulerLayout_->addWidget(samplerRow_);
     samplerSchedulerLayout_->addWidget(schedulerRow_);
@@ -2320,11 +2348,35 @@ void ImageGenerationPage::buildUi()
         opLayout->addLayout(operatingPointButtonRow_, 1);
         // USER clicks apply the bundle (buttonClicked, not toggled -- programmatic setChecked won't fire).
         connect(operatingPointGroup_, &QButtonGroup::buttonClicked, this, [this](QAbstractButton *b) {
+            // Re-picking a point is a deliberate ask for that point's whole bundle, so it clears
+            // the record of hand-edits first -- the existing comment on applyOperatingPoint already
+            // stated this rule ("a manual control edit after is their override, and re-picking a
+            // point resets it"); until W2 there was nothing holding the override for it to reset.
+            clearUserEditedFields();
             applyOperatingPoint(b->property("opName").toString());
         });
     }
     operatingPointCard_->setVisible(false);
     samplingTab->addWidget(operatingPointCard_);
+
+    // W2: the honesty surface for a value the user did not choose. It sits directly under the Speed
+    // chips and above steps/CFG for the same reason the chips do -- it describes the numbers below
+    // it -- and it is visible in BOTH Simple and Advanced: a default nobody chose has to say where
+    // it came from whichever mode you are looking at it in. ErrorPillLabel rather than a plain
+    // QLabel so the sentence elides to the inspector's width instead of being cut mid-word, with
+    // the full text on hover; its colour is a theme token (QLabel#ModelDefaultsProvenance).
+    //
+    // ElidingLabel rather than the action row's ErrorPillLabel, and the reason is worth recording:
+    // the pill would have done the job, but it would have been the SECOND ErrorPillLabel on this
+    // page, and tests/cpp/test_action_row_pill.cpp reaches the readiness pill with an unnamed
+    // findChild<ErrorPillLabel*>() -- so adding one here silently handed that test a different
+    // widget. ElidingLabel is also the better fit on its own terms: it is the house elision helper,
+    // and its Ignored horizontal size policy means a long provenance sentence can never raise this
+    // page's minimum width, which is what the responsive-matrix gate measures.
+    modelDefaultsCaptionLabel_ = new spellvision::widgets::ElidingLabel(operatingPointCard_->parentWidget());
+    modelDefaultsCaptionLabel_->setObjectName(QStringLiteral("ModelDefaultsProvenance"));
+    modelDefaultsCaptionLabel_->setVisible(false);
+    samplingTab->addWidget(modelDefaultsCaptionLabel_);
 
     moveRowWidgets(stepsCfgLayout_, samplingTab);
     moveRowWidgets(seedBatchLayout_, samplingTab);

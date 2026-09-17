@@ -57,11 +57,24 @@ USER_FACING: frozenset[str] = frozenset({
     "start_download", "download_status", "cancel_download", "delete_model",
     "resolve_missing_models", "civitai_variants",
     "family_install_plan", "apply_family_install_plan", "resolve_component_stack",
+    # The settings one model wants. The cockpit asks on every checkpoint change (W2), which is what
+    # promoted it out of DIAGNOSTIC: MainWindow::fetchModelDefaultsAsync is the route.
+    "model_recommended_settings",
+    # Model intelligence, from the Models page (W5). `model_intel_refresh` is the Refresh metadata
+    # action -- per-model from the inspector (with a `files` list) and library-wide from the
+    # toolbar, both through `ModelRefreshController`; `model_intel_cancel` is its Stop button; and
+    # `model_intel_set_user` is "Use my picture…".
+    "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
     # Workflows: import, discover, launch-readiness, dependency retry, delete.
     "import_workflow", "discover_comfy_workflows", "check_workflow_launch_readiness",
     "retry_workflow_dependencies", "delete_workflow_profile", "build_node_class_index",
     # Video family contracts drive the family status surface.
     "video_family_contracts",
+    # The optimization ledger (W3 T6). ManagerPage's optimization panel is the route: one row per
+    # lever, installed vs ACTIVE vs measured. It was DIAGNOSTIC while the row shape was settling --
+    # promoting it then would have asserted a route that did not exist, which is the one direction
+    # this ratchet can catch.
+    "optimization_results",
     # LTX prompt-API submission, reachable only through history-requeue / explicit opt-in.
     "ltx_prompt_api_gated_submission", "ltx_requeue_draft_gated_submission",
     "ltx_ui_queue_history_contract",
@@ -124,6 +137,18 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # is Phase D3 and explicitly not started (CLAUDE.md §5), so this is an unfinished feature rather
     # than a wiring oversight. Classified honestly here rather than left to look like either.
     "t23d",
+    # Model intelligence (W1). `model_intel_refresh`, `model_intel_cancel` and
+    # `model_intel_set_user` left this list in W5, when the Models page grew the Refresh metadata
+    # action and the "Use my picture" flow. The two below stayed: the inspector reads
+    # `<stem>.spellvision.json` off disk rather than asking `model_intel_get` for it, and nothing
+    # asks `model_roots_status` -- the page decides for itself which roots are scannable
+    # (`scannableModelsRoots`). Both are honestly CLI-only today; neither is an oversight, and
+    # promoting either would assert a route that does not exist.
+    "model_intel_get", "model_roots_status",
+    # W6 Task 2: "can this job run on that endpoint". DIAGNOSTIC until Task 4 gives the endpoint
+    # picker a route in qt_ui/ -- the ratchet requires a literal there for anything called
+    # user-facing, and claiming the route before it exists is the one direction it cannot catch.
+    "endpoint_capability",
 })
 
 # Never addressed by a person.

@@ -7,9 +7,14 @@
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
+#include "assets/ModelInspectorPanel.h"
+#include "assets/ModelIntelSidecar.h"
+#include "assets/ModelKindTabs.h"
+#include "assets/ModelRefreshController.h"
 #include "assets/CatalogPickerDialog.h"
 #include "style/SvKit.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "widgets/ElidingLabel.h"
 
 #include <QClipboard>
 #include <QDebug>
@@ -41,6 +46,7 @@
 #include <QDropEvent>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
@@ -198,6 +204,7 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
         {QStringLiteral("name"), entry.name},
         {QStringLiteral("displayName"), entry.displayName},
         {QStringLiteral("type"), entry.type},
+        {QStringLiteral("kind"), entry.kind},
         {QStringLiteral("family"), entry.family},
         {QStringLiteral("sizeText"), entry.sizeText},
         {QStringLiteral("status"), entry.status},
@@ -207,6 +214,11 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
         {QStringLiteral("metadataPath"), entry.metadataPath},
         {QStringLiteral("sha256"), entry.sha256},
         {QStringLiteral("baseModel"), entry.baseModel},
+        {QStringLiteral("siteBadge"), entry.siteBadge},
+        {QStringLiteral("quantisation"), entry.quantisation},
+        {QStringLiteral("coverPath"), entry.coverPath},
+        {QStringLiteral("previewNsfwLevel"), entry.previewNsfwLevel},
+        {QStringLiteral("identification"), entry.identification},
     };
 }
 
@@ -216,6 +228,12 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
     entry.name = object.value(QStringLiteral("name")).toString();
     entry.displayName = object.value(QStringLiteral("displayName")).toString();
     entry.type = object.value(QStringLiteral("type")).toString();
+    // A cache written before W5 carries no kind. Deriving it from the path here rather than
+    // leaving it empty is what keeps a warm start from parking the whole library in Other until
+    // the background rescan lands.
+    entry.kind = object.value(QStringLiteral("kind")).toString().trimmed();
+    if (entry.kind.isEmpty())
+        entry.kind = spellvision::assets::ModelKindTabs::kindFromPath(object.value(QStringLiteral("path")).toString());
     entry.family = object.value(QStringLiteral("family")).toString();
     entry.sizeText = object.value(QStringLiteral("sizeText")).toString();
     entry.status = object.value(QStringLiteral("status")).toString();
@@ -225,6 +243,11 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
     entry.metadataPath = object.value(QStringLiteral("metadataPath")).toString();
     entry.sha256 = object.value(QStringLiteral("sha256")).toString();
     entry.baseModel = object.value(QStringLiteral("baseModel")).toString();
+    entry.siteBadge = object.value(QStringLiteral("siteBadge")).toString();
+    entry.quantisation = object.value(QStringLiteral("quantisation")).toString();
+    entry.coverPath = object.value(QStringLiteral("coverPath")).toString();
+    entry.previewNsfwLevel = object.value(QStringLiteral("previewNsfwLevel")).toInt();
+    entry.identification = object.value(QStringLiteral("identification")).toInt();
     return entry;
 }
 
@@ -256,20 +279,17 @@ QString ModelManagerPage::detectFamily(const QString &path)
     return QStringLiteral("unknown");
 }
 
-QString ModelManagerPage::detectType(const QString &path)
+QString ModelManagerPage::kindForWeight(const QString &path)
 {
-    const QString normalized = path.toLower();
-    if (normalized.contains(QStringLiteral("loras")))
-        return QStringLiteral("LoRA");
-    if (normalized.contains(QStringLiteral("vae")))
-        return QStringLiteral("VAE");
-    if (normalized.contains(QStringLiteral("clip_vision")) || normalized.contains(QStringLiteral("text_encoders")))
-        return QStringLiteral("Encoder");
-    if (normalized.contains(QStringLiteral("upscale")) || normalized.contains(QStringLiteral("upscaler")))
-        return QStringLiteral("Upscaler");
-    if (normalized.contains(QStringLiteral("controlnet")))
-        return QStringLiteral("ControlNet");
-    return QStringLiteral("Model");
+    // The classifier's answer first. `detectType` used to decide this from six path substrings,
+    // which put `clip_vision` and `text_encoders` in one "Encoder" bucket and had no name at all
+    // for an embedding or a style model -- so those sat under "Model" next to the checkpoints.
+    const spellvision::assets::ModelIntel intel = spellvision::assets::readModelIntel(path);
+    if (intel.present && !intel.kind.isEmpty())
+        return intel.kind;
+    // No sidecar: the folder a ComfyUI library files a kind under. It answers in the same
+    // vocabulary and ends at "other" rather than guessing "checkpoint".
+    return spellvision::assets::ModelKindTabs::kindFromPath(path);
 }
 
 bool ModelManagerPage::loadCache()
@@ -380,8 +400,35 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
 
         ModelEntry entry;
         entry.name = info.fileName();
-        entry.type = detectType(path);
+
+        // W5: ONE read of `<stem>.spellvision.json` per weight. The kind, the name the site gave
+        // the file, the site badge, the quantisation and the cover all come out of the same
+        // document -- reading it twice would let two answers about one file diverge.
+        const spellvision::assets::ModelIntel intel = spellvision::assets::readModelIntel(path);
+        entry.kind = intel.present && !intel.kind.isEmpty()
+            ? intel.kind
+            : spellvision::assets::ModelKindTabs::kindFromPath(path);
+        entry.type = spellvision::assets::ModelKindTabs::kindLabel(entry.kind);
         entry.family = detectFamily(path);
+        entry.identification = static_cast<int>(intel.identification());
+        if (intel.identified())
+        {
+            // The display name goes on the PAGE. Nothing here touches the file.
+            if (!intel.displayName.isEmpty())
+                entry.displayName = intel.displayName;
+            entry.siteBadge = intel.primarySource().siteLabel();
+        }
+        entry.quantisation = intel.quantisation;
+        if (!intel.family.isEmpty())
+            entry.family = intel.family;
+        if (!intel.sha256.isEmpty())
+            entry.sha256 = intel.sha256;
+        const spellvision::assets::ModelIntelImage cover = intel.coverImage();
+        if (!cover.localPath.isEmpty() && QFileInfo::exists(cover.localPath))
+        {
+            entry.coverPath = cover.localPath;
+            entry.previewNsfwLevel = cover.nsfwLevel;
+        }
         entry.sizeText = humanSize(info.size());
         entry.status = QStringLiteral("Installed");
         entry.path = QDir::toNativeSeparators(path);
@@ -400,13 +447,18 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
         {
             ++result.metadataCount;
             const spellvision::assets::ModelMetadata meta = spellvision::assets::parseModelMetadata(sidecars.metadataPath);
-            entry.sha256 = meta.sha256;
+            if (entry.sha256.isEmpty())
+                entry.sha256 = meta.sha256;
             entry.baseModel = meta.baseModel;
-            entry.displayName = meta.modelName.trimmed();
+            // The import sidecar's model_name only fills a gap now: `<stem>.spellvision.json` is
+            // the identity document, and a name it established must not be overwritten by the
+            // older, thinner one.
+            if (entry.displayName.trimmed().isEmpty())
+                entry.displayName = meta.modelName.trimmed();
             // base_model is authoritative for family when present (fixes flat-folder Wan LoRAs; adds
             // the SDXL/Pony/Illustrious/Flux distinction). Path heuristic remains the fallback.
             const QString famFromBase = familyFromBaseModel(meta.baseModel);
-            if (!famFromBase.isEmpty())
+            if (!famFromBase.isEmpty() && !intel.present)
                 entry.family = famFromBase;
         }
 
@@ -456,6 +508,7 @@ void ModelManagerPage::refreshInventory()
     if (refreshWatcher_->isRunning())
         return;
 
+    emit inventoryRefreshStarted();
     const QString modelsRoot = resolveModelsRoot();
     const QString downloadsRoot = resolveDownloadsRoot();
     const QStringList extra = spellvision::shell::extraModelsRootsFromSettings();
@@ -485,6 +538,11 @@ void ModelManagerPage::onRefreshFinished()
     persistCache(result.entries, result.checkedAtMs);
     applyEntries(result, QStringLiteral("live"));
     setRefreshBusy(false);
+    // A metadata refresh ENDS by rescanning the inventory, and re-selecting the row rebuilds the
+    // inspector from disk -- which clears its status line. Measured on the live page: the outcome
+    // of the refresh the user had just watched was on screen for about a second and then wiped by
+    // its own follow-up. Re-assert it after the rebuild.
+    syncMetadataRefreshRow();
 }
 
 void ModelManagerPage::applyEntries(const RefreshResult &result, const QString &sourceLabel)
@@ -576,13 +634,20 @@ void ModelManagerPage::populateGridFromEntries()
                                       QStringLiteral(".pth"), QStringLiteral(".bin"),
                                       QStringLiteral(".onnx")};
 
+    // Read the setting ONCE per rebuild rather than per card: a QSettings hit inside a loop over
+    // 759 weights is the kind of cost that only shows up on the owner's library.
+    const int nsfwCeiling = spellvision::assets::nsfwPreviewCeiling();
+
     QVector<spellvision::assets::ModelCardModel::Card> cards;
     cards.reserve(entries_.size());
     for (const ModelEntry &e : entries_)
     {
         spellvision::assets::ModelCardModel::Card c;
-        c.fullName = e.displayName.trimmed().isEmpty() ? e.name : e.displayName;
-        QString stripped = c.fullName;
+        // The tooltip is the FILE. The card prints the display name when the site gave one --
+        // the site's own title rather than loxsUtopicWorldKrea2_v20Quants.safetensors --
+        // and the file on disk keeps its name, which is an explicit owner requirement.
+        c.fullName = e.name;
+        QString stripped = e.name;
         for (const QString &ext : kExts)
         {
             if (stripped.endsWith(ext, Qt::CaseInsensitive))
@@ -591,10 +656,18 @@ void ModelManagerPage::populateGridFromEntries()
                 break;
             }
         }
-        c.strippedName = stripped;
+        c.strippedName = e.displayName.trimmed().isEmpty() ? stripped : e.displayName.trimmed();
         c.type = e.type;
+        c.kind = e.kind;
         c.family = e.family;
-        c.previewPath = e.imagePreviewPath; // image sidecar; mp4 hover-play is S4
+        // The sidecar's cover first (the picture the site publishes for this weight), then the
+        // hand-placed `<stem>.png` the old S0 scan resolved. mp4 hover-play is S4.
+        c.previewPath = e.coverPath.isEmpty() ? e.imagePreviewPath : e.coverPath;
+        c.siteBadge = e.siteBadge;
+        c.quantisation = e.quantisation;
+        c.identification = static_cast<spellvision::assets::ModelIdentification>(e.identification);
+        c.previewNsfwLevel = e.previewNsfwLevel;
+        c.blurPreview = spellvision::assets::previewShouldBlur(e.previewNsfwLevel, nsfwCeiling);
         c.nativePath = e.path;
         c.sha256 = e.sha256;
         c.modelValue = e.name;
@@ -607,42 +680,22 @@ void ModelManagerPage::populateGridFromEntries()
 
 void ModelManagerPage::rebuildFilterCombos()
 {
-    if (!typeFilterCombo_ || !familyFilterCombo_)
+    if (!familyFilterCombo_)
         return;
 
-    QStringList types;
     QStringList families;
-    types.reserve(entries_.size());
     families.reserve(entries_.size());
     for (const ModelEntry &e : entries_) {
-        if (!e.type.trimmed().isEmpty())
-            types.push_back(e.type.trimmed());
         if (!e.family.trimmed().isEmpty())
             families.push_back(e.family.trimmed());
     }
-    types.removeDuplicates();
     families.removeDuplicates();
-    std::sort(types.begin(), types.end(), [](const QString &a, const QString &b) {
-        return a.compare(b, Qt::CaseInsensitive) < 0;
-    });
     std::sort(families.begin(), families.end(), [](const QString &a, const QString &b) {
         return a.compare(b, Qt::CaseInsensitive) < 0;
     });
 
-    const QString prevType = typeFilterCombo_->currentData().toString();
     const QString prevFamily = familyFilterCombo_->currentData().toString();
 
-    {
-        QSignalBlocker blockType(typeFilterCombo_);
-        typeFilterCombo_->clear();
-        typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
-        for (const QString &t : types)
-            typeFilterCombo_->addItem(t, t);
-        int idx = typeFilterCombo_->findData(prevType);
-        if (idx < 0)
-            idx = 0;
-        typeFilterCombo_->setCurrentIndex(idx);
-    }
     {
         QSignalBlocker blockFamily(familyFilterCombo_);
         familyFilterCombo_->clear();
@@ -655,11 +708,23 @@ void ModelManagerPage::rebuildFilterCombos()
         familyFilterCombo_->setCurrentIndex(idx);
     }
 
-    if (cardProxy_) {
-        cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
+    if (cardProxy_)
         cardProxy_->setFamilyFilter(familyFilterCombo_->currentData().toString());
-    }
+    rebuildKindTabs();
     applyTreeFilters();
+}
+
+void ModelManagerPage::rebuildKindTabs()
+{
+    if (!kindTabBar_)
+        return;
+    QStringList kinds;
+    kinds.reserve(entries_.size());
+    for (const ModelEntry &e : entries_)
+        kinds.push_back(e.kind);
+    kindTabBar_->setCounts(spellvision::assets::ModelKindTabs::counts(kinds));
+    if (cardProxy_)
+        cardProxy_->setKindTab(kindTabBar_->currentTabId());
 }
 
 void ModelManagerPage::applyTreeFilters()
@@ -668,24 +733,27 @@ void ModelManagerPage::applyTreeFilters()
         return;
 
     const QString needle = searchModelEdit_ ? searchModelEdit_->text().trimmed().toLower() : QString();
-    const QString typeFilter = typeFilterCombo_ ? typeFilterCombo_->currentData().toString() : QStringLiteral("All");
+    const QString kindTab = kindTabBar_ ? kindTabBar_->currentTabId()
+                                        : spellvision::assets::ModelKindTabs::allTabId();
     const QString familyFilter = familyFilterCombo_ ? familyFilterCombo_->currentData().toString() : QStringLiteral("All");
-    const bool typeAll = typeFilter.isEmpty() || typeFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
     const bool familyAll = familyFilter.isEmpty() || familyFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
 
+    // The tree row index is the entry index (applyEntries builds them in lockstep), so the list
+    // view filters on the same `kind` the grid does rather than on the label in its Type column.
     for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row) {
         QTreeWidgetItem *item = modelsTree_->topLevelItem(row);
         if (!item)
             continue;
         const QString type = item->text(1);
         const QString family = item->text(2);
+        const QString kind = (row < entries_.size()) ? entries_.at(row).kind : QString();
         const QString haystack = QStringLiteral("%1 %2 %3 %4")
                                      .arg(item->text(0), type, family, item->data(0, Qt::UserRole).toString())
                                      .toLower();
         bool hide = false;
         if (!needle.isEmpty() && !haystack.contains(needle))
             hide = true;
-        if (!typeAll && type.compare(typeFilter, Qt::CaseInsensitive) != 0)
+        if (!spellvision::assets::ModelKindTabs::tabAccepts(kindTab, kind))
             hide = true;
         if (!familyAll && family.compare(familyFilter, Qt::CaseInsensitive) != 0)
             hide = true;
@@ -706,17 +774,78 @@ void ModelManagerPage::onCardFavoriteToggled(const QModelIndex &index)
     cardModel_->setFavorite(row, next);
 }
 
+void ModelManagerPage::applyModelIntelReply(const QJsonObject &reply)
+{
+    if (inspectorPanel_)
+        inspectorPanel_->applyWorkerReply(reply);
+    // The controller runs SECOND so its ending is the one on screen. The panel re-reads the
+    // sidecar a refresh just wrote; the controller writes what the pass actually did, including
+    // the counts a "Metadata refreshed." would have covered up.
+    if (refreshController_)
+        refreshController_->applyWorkerReply(reply);
+}
+
+QStringList ModelManagerPage::currentModelRoots() const
+{
+    return spellvision::shell::scannableModelsRoots(
+        resolveModelsRoot(),
+        spellvision::shell::extraModelsRootsFromSettings());
+}
+
+void ModelManagerPage::syncMetadataRefreshRow()
+{
+    if (!refreshController_)
+        return;
+    const bool running = refreshController_->isRunning();
+
+    if (metadataProgressRow_)
+        metadataProgressRow_->setVisible(running);
+    if (metadataRefreshButton_)
+        metadataRefreshButton_->setEnabled(!running);
+    if (metadataCancelButton_)
+        metadataCancelButton_->setEnabled(refreshController_->canCancel());
+    if (metadataProgressBar_)
+    {
+        const int percent = refreshController_->percent();
+        if (percent < 0)
+        {
+            // Busy, not 0%. The worker has not counted the library yet, and a bar sitting at zero
+            // for the minutes that takes is indistinguishable from one that is stuck.
+            metadataProgressBar_->setRange(0, 0);
+        }
+        else
+        {
+            metadataProgressBar_->setRange(0, 100);
+            metadataProgressBar_->setValue(percent);
+        }
+    }
+    if (metadataProgressLabel_)
+        metadataProgressLabel_->setText(refreshController_->progressText());
+
+    // The inspector's own button and status line follow the same job: a library pass and a
+    // per-model pass are the same command, and a second "Refresh metadata" that looks available
+    // while one is running is a click that gets refused.
+    if (inspectorPanel_)
+    {
+        inspectorPanel_->setRefreshBusy(running);
+        if (!refreshController_->statusText().isEmpty())
+            inspectorPanel_->setRefreshStatus(refreshController_->statusText(),
+                                              refreshController_->statusIsError());
+    }
+    // Deliberately NOT the summary card: its first line is the library's own census (installed
+    // assets, families, the models root), and writing the refresh outcome over it replaced a
+    // standing fact with a transient one -- seen on the live page as "Examined 1 · 1 identified"
+    // sitting where "Installed assets: 759" belongs. The refresh has two places of its own.
+}
+
 void ModelManagerPage::updateDetailsForRow(int row)
 {
     if (!modelDetailsLabel_)
         return;
 
-    currentTriggerWords_.clear();
     auto hideExtras = [this]() {
-        if (modelTriggersLabel_) modelTriggersLabel_->hide();
-        if (copyTriggersButton_) copyTriggersButton_->hide();
-        if (modelDescriptionLabel_) modelDescriptionLabel_->hide();
-        if (exampleImageLabel_) exampleImageLabel_->hide();
+        if (inspectorPanel_)
+            inspectorPanel_->clear();
     };
 
     if (row < 0 || row >= entries_.size())
@@ -754,53 +883,17 @@ void ModelManagerPage::updateDetailsForRow(int row)
         lines << QStringLiteral("No metadata — local file only.");
     modelDetailsLabel_->setText(lines.join(QLatin1Char('\n')));
 
-    if (exampleImageLabel_)
-    {
-        QPixmap pix;
-        if (!e.imagePreviewPath.isEmpty())
-            pix.load(e.imagePreviewPath);
-        if (pix.isNull())
-        {
-            exampleImageLabel_->clear();
-            exampleImageLabel_->hide();
-        }
-        else
-        {
-            exampleImageLabel_->setPixmap(pix.scaledToHeight(160, Qt::SmoothTransformation));
-            exampleImageLabel_->show();
-        }
-    }
-
-    // Trigger words (civitai.trainedWords) + copy button.
-    currentTriggerWords_ = meta.triggerWords;
     if (deleteModelButton_)
         deleteModelButton_->setVisible(!e.path.trimmed().isEmpty());
-    if (!currentTriggerWords_.isEmpty())
-    {
-        modelTriggersLabel_->setText(QStringLiteral("Triggers: %1").arg(currentTriggerWords_.join(QStringLiteral(", "))));
-        modelTriggersLabel_->show();
-        copyTriggersButton_->show();
-    }
-    else
-    {
-        modelTriggersLabel_->hide();
-        copyTriggersButton_->hide();
-    }
 
-    // Description (strip HTML, collapse whitespace, truncate — the card stays compact).
-    QString desc = meta.description;
-    if (!desc.isEmpty())
+    // Everything the sidecar knows -- the gallery, the description, the trigger words, the licence
+    // and the settings this model publishes with their provenance -- is one unit, and it reads the
+    // document itself rather than being handed four already-flattened strings.
+    if (inspectorPanel_)
     {
-        desc.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
-        desc = desc.simplified();
-        if (desc.size() > 600)
-            desc = desc.left(600) + QStringLiteral("…");
-        modelDescriptionLabel_->setText(desc);
-        modelDescriptionLabel_->show();
-    }
-    else
-    {
-        modelDescriptionLabel_->hide();
+        inspectorPanel_->setModelRoots(spellvision::shell::scannableModelsRoots(
+            resolveModelsRoot(), spellvision::shell::extraModelsRootsFromSettings()));
+        inspectorPanel_->showModel(e.path, e.name);
     }
 
     updateWorkflowSectionForRow(row);
@@ -1137,12 +1230,16 @@ void ModelManagerPage::buildUi()
     searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
     searchModelEdit_->setClearButtonEnabled(true);
 
-    typeFilterCombo_ = new QComboBox(this);
-    typeFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
-    typeFilterCombo_->setMinimumContentsLength(10);
-    typeFilterCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
-    typeFilterCombo_->setToolTip(QStringLiteral("Filter by asset type (Checkpoint, LoRA, …)"));
+    // The Type combo is gone: the TAB is the type now (W5 Task 1). A combo whose vocabulary came
+    // from a path substring could not name an embedding, and a filter you have to open to read
+    // cannot show you that the library holds 23 LoRAs and one VAE.
+    kindTabBar_ = new spellvision::assets::ModelKindTabBar(this);
+    connect(kindTabBar_, &spellvision::assets::ModelKindTabBar::tabChanged, this,
+            [this](const QString &tabId) {
+                if (cardProxy_)
+                    cardProxy_->setKindTab(tabId);
+                applyTreeFilters();
+            });
 
     familyFilterCombo_ = new QComboBox(this);
     familyFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
@@ -1189,18 +1286,56 @@ void ModelManagerPage::buildUi()
     setRole(addFolderButton_, svstyle::Role::Secondary);
     addFolderButton_->setToolTip(QStringLiteral("Also scan another drive or a removable disk. Locked or unplugged volumes are skipped."));
 
+    // W5 Task 4. "Refresh Models" rescans the FOLDERS; this asks the site who each weight IS. Two
+    // different questions that a single button could not answer, which is why the caption W2 wrote
+    // ("run Refresh metadata on the Models page") had to be deleted rather than repointed.
+    metadataRefreshButton_ = new QPushButton(QStringLiteral("Refresh metadata"), this);
+    metadataRefreshButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    metadataRefreshButton_->setCursor(Qt::PointingHandCursor);
+    setRole(metadataRefreshButton_, svstyle::Role::Secondary);
+    metadataRefreshButton_->setToolTip(QStringLiteral(
+        "Ask Civitai and Hugging Face who each weight is, and write what they say beside it: the "
+        "name, the pictures, the trigger words and the settings it was published with.\n"
+        "No account or API key is needed. The whole library takes a while — it runs in the "
+        "background and you can stop it at any time."));
+
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
-    toolbarRow->addWidget(typeFilterCombo_);
     toolbarRow->addWidget(familyFilterCombo_);
     toolbarRow->addWidget(favoritesToggleButton_);
     toolbarRow->addWidget(gridToggleButton_);
     toolbarRow->addWidget(listToggleButton_);
     toolbarRow->addWidget(refreshButton_);
+    toolbarRow->addWidget(metadataRefreshButton_);
     toolbarRow->addWidget(rebuildCacheButton_);
     toolbarRow->addWidget(openRootButton_);
     toolbarRow->addWidget(addFolderButton_);
+
+    // --- W5 Task 4: the metadata-refresh progress row ---
+    //
+    // Hidden entirely while nothing is running. A bar parked at 0% with no job behind it is a
+    // claim about a denominator nobody counted, and on a page whose other long action already owns
+    // the word "Refreshing" it would read as a second, stuck one.
+    metadataProgressBar_ = new QProgressBar(this);
+    metadataProgressBar_->setObjectName(QStringLiteral("ModelsMetadataProgress"));
+    metadataProgressBar_->setTextVisible(false);
+    metadataProgressBar_->setMinimumWidth(160);
+    metadataProgressLabel_ = new spellvision::widgets::ElidingLabel(this);
+    metadataProgressLabel_->setObjectName(QStringLiteral("ModelsMeta"));
+    metadataCancelButton_ = new QPushButton(QStringLiteral("Stop"), this);
+    metadataCancelButton_->setObjectName(QStringLiteral("ModelsActionButton"));
+    metadataCancelButton_->setCursor(Qt::PointingHandCursor);
+    setRole(metadataCancelButton_, svstyle::Role::Secondary);
+
+    metadataProgressRow_ = new QWidget(this);
+    auto *metadataRow = new QHBoxLayout(metadataProgressRow_);
+    metadataRow->setContentsMargins(0, 0, 0, 0);
+    metadataRow->setSpacing(tight);
+    metadataRow->addWidget(metadataProgressBar_);
+    metadataRow->addWidget(metadataProgressLabel_, 1);
+    metadataRow->addWidget(metadataCancelButton_);
+    metadataProgressRow_->hide();
 
     // --- Tree: the visual centre; sits on its own themed surface ---
     modelsTree_ = new QTreeWidget(this);
@@ -1277,33 +1412,34 @@ void ModelManagerPage::buildUi()
     modelDetailsLabel_->setWordWrap(true);
     modelDetailsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    // Trigger words (civitai.trainedWords, doc 22 §0 correction #1) + copy-to-clipboard.
-    modelTriggersLabel_ = new QLabel(this);
-    modelTriggersLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
-    modelTriggersLabel_->setWordWrap(true);
-    modelTriggersLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    modelTriggersLabel_->hide();
-    copyTriggersButton_ = new QPushButton(QStringLiteral("Copy trigger words"), this);
-    copyTriggersButton_->setObjectName(QStringLiteral("ModelsActionButton"));
-    copyTriggersButton_->setCursor(Qt::PointingHandCursor);
-    setRole(copyTriggersButton_, svstyle::Role::Secondary);
-    copyTriggersButton_->hide();
-    connect(copyTriggersButton_, &QPushButton::clicked, this, [this]() {
-        if (!currentTriggerWords_.isEmpty())
-            QGuiApplication::clipboard()->setText(currentTriggerWords_.join(QStringLiteral(", ")));
-    });
-    auto *triggersRow = new QHBoxLayout();
-    triggersRow->setContentsMargins(0, 0, 0, 0);
-    triggersRow->setSpacing(tight);
-    triggersRow->addWidget(modelTriggersLabel_, 1);
-    triggersRow->addWidget(copyTriggersButton_, 0, Qt::AlignTop);
+    inspectorPanel_ = new spellvision::assets::ModelInspectorPanel(this);
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::workerRequested,
+            this, &ModelManagerPage::modelIntelRequested);
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::applyRecommendedRequested,
+            this, &ModelManagerPage::applyModelSettingsRequested);
 
-    modelDescriptionLabel_ = new QLabel(this);
-    modelDescriptionLabel_->setObjectName(QStringLiteral("ModelsMeta"));
-    modelDescriptionLabel_->setWordWrap(true);
-    modelDescriptionLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    modelDescriptionLabel_->setMaximumHeight(64); // keep the card compact; long descriptions truncate
-    modelDescriptionLabel_->hide();
+    // W5 Task 4. ONE owner for the refresh conversation, shared by the per-model button in the
+    // inspector and the library button in the toolbar -- otherwise the two actions can drift into
+    // sending different wires for the same command, and only one of them carries the `files` list
+    // that keeps a single model's refresh from reading 2.09 TB.
+    refreshController_ = new spellvision::assets::ModelRefreshController(this);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::workerRequested,
+            this, &ModelManagerPage::modelIntelRequested);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::stateChanged,
+            this, &ModelManagerPage::syncMetadataRefreshRow);
+    connect(refreshController_, &spellvision::assets::ModelRefreshController::refreshFinished,
+            this, [this](const QString &weightPath, const QJsonObject &) {
+                // The cockpit's cached answers were resolved from the sidecars this pass just
+                // rewrote, so they are now claims nobody has re-checked.
+                emit modelIntelRefreshFinished(weightPath);
+                // And the CARD's kind is read at scan time, so a sidecar written just now does not
+                // move a model between tabs until the inventory is read again.
+                refreshInventory();
+            });
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::refreshRequested,
+            this, [this](const QString &weightPath) {
+                refreshController_->startModelRefresh(currentModelRoots(), weightPath);
+            });
 
     // --- S3 bound-workflow row: name / task / readiness + Bind / Use / Resolve actions ---
     workflowBindingLabel_ = new QLabel(this);
@@ -1371,13 +1507,7 @@ void ModelManagerPage::buildUi()
     detailsCol->setContentsMargins(snug, snug, snug, snug);
     detailsCol->setSpacing(hair);
     detailsCol->addWidget(modelDetailsLabel_);
-    exampleImageLabel_ = new QLabel(this);
-    exampleImageLabel_->setObjectName(QStringLiteral("ModelsExampleImage"));
-    exampleImageLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    exampleImageLabel_->hide();
-    detailsCol->addWidget(exampleImageLabel_);
-    detailsCol->addLayout(triggersRow);
-    detailsCol->addWidget(modelDescriptionLabel_);
+    detailsCol->addWidget(inspectorPanel_);
     detailsCol->addWidget(workflowBindingLabel_);
     detailsCol->addWidget(workflowNoteLabel_);
     detailsCol->addLayout(workflowRow);
@@ -1385,10 +1515,18 @@ void ModelManagerPage::buildUi()
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);
     mainLayout->addLayout(toolbarRow);
+    mainLayout->addWidget(metadataProgressRow_);
+    mainLayout->addWidget(kindTabBar_);
     mainLayout->addWidget(viewStack_, 1);
     mainLayout->addWidget(detailsCard, 0);
 
     connect(refreshButton_, &QPushButton::clicked, this, &ModelManagerPage::refreshInventory);
+    connect(metadataRefreshButton_, &QPushButton::clicked, this, [this]() {
+        refreshController_->startLibraryRefresh(currentModelRoots());
+    });
+    connect(metadataCancelButton_, &QPushButton::clicked, this, [this]() {
+        refreshController_->cancel();
+    });
     connect(rebuildCacheButton_, &QPushButton::clicked, this, &ModelManagerPage::rebuildThumbnailCache);
     connect(openRootButton_, &QPushButton::clicked, this, [this]()
     {
@@ -1424,11 +1562,6 @@ void ModelManagerPage::buildUi()
     {
         if (cardProxy_)
             cardProxy_->setNeedle(text); // filter the grid (primary view)
-        applyTreeFilters();
-    });
-    connect(typeFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (cardProxy_ && typeFilterCombo_)
-            cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
         applyTreeFilters();
     });
     connect(familyFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {

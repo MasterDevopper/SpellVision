@@ -49,34 +49,61 @@ MODEL_LOAD_LOCK = threading.RLock()
 
 
 VIDEO_RUNTIME_LOCK = threading.Lock()
-VIDEO_RUNTIME_CACHE: dict[str, Any] = {
-    "active_command": None,
-    "active_signature": None,
-    "active_summary": None,
-    "active_family": None,
-    "active_stack_kind": None,
-    "active_backend_type": None,
-    "active_backend_name": None,
-    "updated_at": None,
-    "reset_reason": None,
-    "last_success_at": None,
-    "last_prompt_id": None,
-    "last_output": None,
-    "last_error": None,
-    "last_failure_code": None,
-    "invalidated_at": None,
-    "invalidation_reason": None,
-    "comfy_runtime_endpoint": None,
-    "comfy_runtime_pid": None,
-    "comfy_runtime_detected_pid": None,
-    "comfy_runtime_started_at": None,
-    "comfy_runtime_state": None,
-    "comfy_runtime_ownership": None,
-    "comfy_runtime_running": False,
-    "comfy_runtime_healthy": False,
-    "comfy_runtime_endpoint_alive": False,
-    "comfy_runtime_checked_at": None,
-}
+
+
+def _empty_video_runtime_cache() -> dict[str, Any]:
+    return {
+        "active_command": None,
+        "active_signature": None,
+        "active_summary": None,
+        "active_family": None,
+        "active_stack_kind": None,
+        "active_backend_type": None,
+        "active_backend_name": None,
+        "updated_at": None,
+        "reset_reason": None,
+        "last_success_at": None,
+        "last_prompt_id": None,
+        "last_output": None,
+        "last_error": None,
+        "last_failure_code": None,
+        "invalidated_at": None,
+        "invalidation_reason": None,
+        "comfy_runtime_endpoint": None,
+        "comfy_runtime_pid": None,
+        "comfy_runtime_detected_pid": None,
+        "comfy_runtime_started_at": None,
+        "comfy_runtime_state": None,
+        "comfy_runtime_ownership": None,
+        "comfy_runtime_running": False,
+        "comfy_runtime_healthy": False,
+        "comfy_runtime_endpoint_alive": False,
+        "comfy_runtime_checked_at": None,
+    }
+
+
+# One cache PER ENDPOINT. It was a single module global compared against the AMBIENT endpoint, so
+# alternating a local job with a remote one invalidated the remote's warm runtime every single
+# time -- "comfy_endpoint_changed_or_unknown" every other render, and a cold 22B load to pay for
+# it. The endpoint is part of the identity of a warm runtime, not a property to compare it against.
+VIDEO_RUNTIME_CACHES: dict[str, dict[str, Any]] = {}
+
+
+def video_runtime_cache_for(endpoint: str | None = None) -> dict[str, Any]:
+    """The warm-runtime record for one ComfyUI. Created empty on first ask; never None."""
+    key = str(endpoint or comfy_endpoint()).rstrip("/")
+    with VIDEO_RUNTIME_LOCK:
+        cache = VIDEO_RUNTIME_CACHES.get(key)
+        if cache is None:
+            cache = _empty_video_runtime_cache()
+            VIDEO_RUNTIME_CACHES[key] = cache
+        return cache
+
+
+def forget_video_runtime_caches() -> None:
+    """Drop every endpoint's record. Tests and a full unload call it."""
+    with VIDEO_RUNTIME_LOCK:
+        VIDEO_RUNTIME_CACHES.clear()
 
 
 def cuda_memory_snapshot() -> dict[str, float | None]:
@@ -203,29 +230,37 @@ def image_runtime_cache_active() -> bool:
         return bool(MODEL_CACHE.get("key") and (MODEL_CACHE.get("pipe") is not None or MODEL_CACHE.get("img2img_pipe") is not None))
 
 
-def _video_runtime_cache_snapshot() -> dict[str, Any]:
+def _video_runtime_cache_snapshot(endpoint: str | None = None) -> dict[str, Any]:
+    cache = video_runtime_cache_for(endpoint)
     with VIDEO_RUNTIME_LOCK:
-        return dict(VIDEO_RUNTIME_CACHE)
+        return dict(cache)
 
 
-def active_video_runtime_signature_for_command(command: str) -> str | None:
+def active_video_runtime_signature_for_command(command: str, endpoint: str | None = None) -> str | None:
     command = str(command or "").strip().lower()
     if command not in {"t2v", "i2v"}:
         return None
+    cache = video_runtime_cache_for(endpoint)
     with VIDEO_RUNTIME_LOCK:
-        active_command = str(VIDEO_RUNTIME_CACHE.get("active_command") or "").strip().lower()
-        active_signature = str(VIDEO_RUNTIME_CACHE.get("active_signature") or "").strip()
+        active_command = str(cache.get("active_command") or "").strip().lower()
+        active_signature = str(cache.get("active_signature") or "").strip()
     if active_command == command and active_signature:
         return active_signature
     return None
 
 
 
-def comfy_runtime_identity_snapshot(result_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def comfy_runtime_identity_snapshot(
+    result_payload: dict[str, Any] | None = None,
+    req: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Who answered, on WHICH endpoint. The status call used to be made with an empty request, so
+    it always described the ambient endpoint however remote the job was."""
     result_payload = result_payload or {}
     status: dict[str, Any] = {}
+    status_req = {"comfy_api_url": comfy_endpoint(req)}
     try:
-        status = _ws().handle_comfy_runtime_status_command({})
+        status = _ws().handle_comfy_runtime_status_command(status_req)
         if not isinstance(status, dict):
             status = {}
     except Exception as exc:
@@ -240,7 +275,7 @@ def comfy_runtime_identity_snapshot(result_payload: dict[str, Any] | None = None
     endpoint = _first_nonempty_text(
         result_payload.get("comfy_runtime_endpoint"),
         status.get("endpoint"),
-        comfy_endpoint(),
+        comfy_endpoint(req),
     )
     pid = _ws()._safe_int(result_payload.get("comfy_runtime_pid") or status.get("pid"), 0)
     detected_pid = _ws()._safe_int(result_payload.get("comfy_runtime_detected_pid") or status.get("detected_pid"), 0)
@@ -267,7 +302,11 @@ def _runtime_identity_value(value: Any) -> str:
     return str(value or "").strip()
 
 
-def video_runtime_truth_for_snapshot(video_snapshot: dict[str, Any], request_signature: str = "") -> dict[str, Any]:
+def video_runtime_truth_for_snapshot(
+    video_snapshot: dict[str, Any],
+    request_signature: str = "",
+    req: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     active_signature = _runtime_identity_value(video_snapshot.get("active_signature"))
     if not active_signature:
         return {
@@ -279,7 +318,7 @@ def video_runtime_truth_for_snapshot(video_snapshot: dict[str, Any], request_sig
             "healthy": False,
         }
 
-    identity = comfy_runtime_identity_snapshot()
+    identity = comfy_runtime_identity_snapshot(req=req)
     same_signature = not request_signature or active_signature == request_signature
 
     cached_endpoint = _runtime_identity_value(video_snapshot.get("comfy_runtime_endpoint"))
@@ -329,7 +368,7 @@ def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: 
     details = _ws().video_request_metadata_from_request(req)
     signature = _ws().affinity_signature_for_request(req)
     summary = _ws().affinity_summary_for_request(req)
-    runtime_identity = comfy_runtime_identity_snapshot(result_payload)
+    runtime_identity = comfy_runtime_identity_snapshot(result_payload, req=req)
     cache_entry = {
         "active_command": command,
         "active_signature": signature,
@@ -358,8 +397,9 @@ def update_video_runtime_cache_from_result(req: dict[str, Any], result_payload: 
         "comfy_runtime_endpoint_alive": bool(runtime_identity.get("endpoint_alive", False)),
         "comfy_runtime_checked_at": runtime_identity.get("checked_at"),
     }
+    cache = video_runtime_cache_for(cache_entry["comfy_runtime_endpoint"] or comfy_endpoint(req))
     with VIDEO_RUNTIME_LOCK:
-        VIDEO_RUNTIME_CACHE.update(cache_entry)
+        cache.update(cache_entry)
     return dict(cache_entry)
 
 
@@ -394,9 +434,12 @@ def runtime_prep_metadata(req: dict[str, Any]) -> dict[str, Any]:
 def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None" = None, job: "JobRecord | None" = None) -> dict[str, Any]:
     command = str(req.get("command") or req.get("task_command") or req.get("task_type") or "").strip().lower()
     target = "video" if _ws().is_video_request(req) else ("image" if command in {"t2i", "i2i"} else "workflow")
+    # The endpoint this job is on. Everything below -- which warm record to read, which ComfyUI to
+    # ask to free memory, whose queue to wait on -- is about THIS machine and no other.
+    endpoint = comfy_endpoint(req)
     active_image_key = image_runtime_cache_key()
     image_active = image_runtime_cache_active()
-    video_snapshot = _video_runtime_cache_snapshot()
+    video_snapshot = _video_runtime_cache_snapshot(endpoint)
     video_signature = str(video_snapshot.get("active_signature") or "").strip()
     request_signature = _ws().affinity_signature_for_request(req) if target == "video" else ""
 
@@ -405,11 +448,13 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
     video_truth: dict[str, Any] = {}
 
     if target == "video" and video_signature:
-        video_truth = video_runtime_truth_for_snapshot(video_snapshot, request_signature)
+        video_truth = video_runtime_truth_for_snapshot(video_snapshot, request_signature, req)
         if not video_truth.get("ok"):
-            reset_video_runtime_cache(f"stale_video_runtime:{video_truth.get('reason') or 'unknown'}")
+            reset_video_runtime_cache(
+                f"stale_video_runtime:{video_truth.get('reason') or 'unknown'}", endpoint=endpoint,
+            )
             notes.append(f"Video warm cache invalidated: {video_truth.get('reason') or 'unknown'}")
-            video_snapshot = _video_runtime_cache_snapshot()
+            video_snapshot = _video_runtime_cache_snapshot(endpoint)
             video_signature = ""
         elif emitter is not None and job is not None:
             emitter.status(job, "reusing healthy Comfy video runtime for matching Wan stack")
@@ -432,8 +477,12 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
         # ComfyUI's separate process, so without the /free handshake a 22B video model stays put
         # while diffusers tries to load a checkpoint into what's left.
         memory_before = cuda_memory_snapshot()
-        comfy_free = request_comfy_free_memory()  # best-effort, never raises
-        idle = wait_until_comfy_queue_idle(timeout_sec=60.0)
+        # api_url, ALWAYS. Both of these accepted one and every caller omitted it, so they went to
+        # whatever comfy_endpoint() resolved to with no request in hand -- for a job on the second
+        # box that is the cross-firing /free: it unloads the models on the OTHER machine, returns
+        # 200, and is recorded as a success.
+        comfy_free = request_comfy_free_memory(api_url=endpoint)  # best-effort, never raises
+        idle = wait_until_comfy_queue_idle(api_url=endpoint, timeout_sec=60.0)
         cleanup = {
             "memory_before": memory_before,
             "comfy_free": comfy_free,
@@ -480,8 +529,10 @@ def prepare_runtime_for_request(req: dict[str, Any], emitter: "JobEmitter | None
     return metadata
 
 
-def reset_video_runtime_cache(reason: str = "manual") -> dict[str, Any]:
-    before = _video_runtime_cache_snapshot()
+def reset_video_runtime_cache(reason: str = "manual", endpoint: str | None = None) -> dict[str, Any]:
+    """Reset ONE endpoint's record. Resetting all of them because one job changed endpoint is the
+    thrash this keying exists to stop."""
+    before = _video_runtime_cache_snapshot(endpoint)
     reset_entry = {
         "active_command": None,
         "active_signature": None,
@@ -510,11 +561,12 @@ def reset_video_runtime_cache(reason: str = "manual") -> dict[str, Any]:
         "comfy_runtime_endpoint_alive": False,
         "comfy_runtime_checked_at": None,
     }
+    cache = video_runtime_cache_for(endpoint)
     with VIDEO_RUNTIME_LOCK:
-        VIDEO_RUNTIME_CACHE.update(reset_entry)
+        cache.update(reset_entry)
     return {
         "previous": before,
-        "current": _video_runtime_cache_snapshot(),
+        "current": _video_runtime_cache_snapshot(endpoint),
         "reason": reason,
     }
 
@@ -524,13 +576,15 @@ def invalidate_video_runtime_cache_for_failure(job: "JobRecord", code: str, mess
     if command not in {"t2v", "i2v"}:
         return None
 
+    endpoint = comfy_endpoint(getattr(job, "request", None) or None)
     reason = f"job_failed:{code or 'generation_error'}"
-    reset = reset_video_runtime_cache(reason)
+    reset = reset_video_runtime_cache(reason, endpoint=endpoint)
+    cache = video_runtime_cache_for(endpoint)
     with VIDEO_RUNTIME_LOCK:
-        VIDEO_RUNTIME_CACHE["last_error"] = str(message or "")[:500]
-        VIDEO_RUNTIME_CACHE["last_failure_code"] = code or "generation_error"
-        VIDEO_RUNTIME_CACHE["invalidated_at"] = utc_now_iso()
-        VIDEO_RUNTIME_CACHE["invalidation_reason"] = reason
+        cache["last_error"] = str(message or "")[:500]
+        cache["last_failure_code"] = code or "generation_error"
+        cache["invalidated_at"] = utc_now_iso()
+        cache["invalidation_reason"] = reason
 
     cleanup: dict[str, Any] | None = None
     lowered = str(message or "").lower()
@@ -631,7 +685,7 @@ def handle_runtime_memory_control_command(req: dict[str, Any]) -> dict[str, Any]
         )
 
     if command == "unload_video_runtime":
-        reset = reset_video_runtime_cache("manual_unload_video_runtime")
+        reset = reset_video_runtime_cache("manual_unload_video_runtime", endpoint=comfy_endpoint(req))
         memory_before = cuda_memory_snapshot()
         memory_after = clear_cuda_memory()
         return runtime_memory_ack(
@@ -643,9 +697,10 @@ def handle_runtime_memory_control_command(req: dict[str, Any]) -> dict[str, Any]
         )
 
     if command == "unload_all_runtimes":
+        endpoint = comfy_endpoint(req)
         image_cleanup = unload_cached_pipelines()
-        video_reset = reset_video_runtime_cache("manual_unload_all_runtimes")
-        comfy_free = request_comfy_free_memory()
+        video_reset = reset_video_runtime_cache("manual_unload_all_runtimes", endpoint=endpoint)
+        comfy_free = request_comfy_free_memory(api_url=endpoint)
         memory_after = clear_cuda_memory()
         comfy_ok = bool(comfy_free.get("ok"))
         return runtime_memory_ack(

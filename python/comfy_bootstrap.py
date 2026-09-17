@@ -280,6 +280,8 @@ def build_launch_command(
     apply_launch_policy: bool = True,
     probe_attention: bool = True,
     vram_headroom: Any = None,
+    arm: dict[str, Any] | None = None,
+    arm_source: str = "arm",
 ) -> list[str]:
     root = Path(comfy_root) if comfy_root else default_comfy_root()
     entry = detect_comfy_entrypoint(root)
@@ -291,7 +293,18 @@ def build_launch_command(
     # launcher's start the same process, and they disagreed. `extra_args` had been the seam for it
     # and no caller ever passed one -- a parameter is not a policy, it is a place a policy could
     # have gone.
-    if apply_launch_policy:
+    #
+    # `arm` is a SEPARATE seam from `apply_launch_policy`/`vram_headroom`, on purpose: passing
+    # `arm=None` (the default) must walk the exact branch this function walked before `arm` existed,
+    # byte for byte, because every launch in this repo that is not an explicit A/B goes through this
+    # path. A wave about measuring optimizations must not change what it measures.
+    #
+    # `arm_source` only names the arm in the log lines -- a remembered arm and a freshly requested
+    # one emit identical flags, and the stderr log is the only record that a backend changed.
+    if arm is not None:
+        command.extend(comfy_launch_policy.arm_args(
+            arm, python_path, probe=probe_attention, source=arm_source))
+    elif apply_launch_policy:
         command.extend(comfy_launch_policy.launch_args(
             python_path, probe=probe_attention, vram_headroom=vram_headroom))
     if extra_args:
@@ -308,6 +321,9 @@ def bootstrap_comfy_runtime(
     create_dirs: bool = True,
     apply_launch_policy: bool = False,
     probe_attention: bool = True,
+    vram_headroom: Any = None,
+    arm: dict[str, Any] | None = None,
+    arm_source: str = "arm",
 ) -> dict[str, Any]:
     root = Path(comfy_root) if comfy_root else default_comfy_root()
     layout = ensure_runtime_layout(root) if create_dirs else {
@@ -323,9 +339,16 @@ def bootstrap_comfy_runtime(
     # it on a poll loop, and resolving the attention backend means probing an interpreter with a
     # subprocess. ComfyRuntimeManager.start() asks for the policy; nothing that merely describes the
     # runtime should pay for it.
+    #
+    # `vram_headroom` had NO parameter here until now, so a worker-managed launch could never pass
+    # `--reserve-vram` -- the lever was reachable from the PowerShell launcher and from
+    # `build_launch_command` directly, but not from the function ComfyRuntimeManager.start() actually
+    # calls. Forwarded through unconditionally: it is inert unless `apply_launch_policy` (or `arm`)
+    # is also set, the same way `probe_attention` already was.
     launch_cmd = build_launch_command(
         root, python_executable=resolved_python, host=host, port=port,
         apply_launch_policy=apply_launch_policy, probe_attention=probe_attention,
+        vram_headroom=vram_headroom, arm=arm, arm_source=arm_source,
     )
     models_root = root / "models"
     input_root = root / "input"
