@@ -54,6 +54,10 @@ class Lever:
     ``arm`` is a ``comfy_launch_policy.arm_args`` dict and means the cell needs a ComfyUI restart;
     ``request`` is worker-request keys and means it does not. A lever has one or the other, never
     both -- a cell that changed two things at once would measure their sum.
+
+    ``arm`` states ONLY the lever's own keys -- it is a delta against ``BASELINE_LEVER.arm``, not a
+    whole launch configuration. ``measure_optimizations_matrix.composed_arm`` adds the baseline's,
+    so an axis this lever is silent about is the baseline's value rather than the environment's.
     """
 
     id: str
@@ -71,6 +75,9 @@ class Lever:
 # The baseline is pinned EXPLICITLY, both flags spelled. A bare launch that happens to land on SDPA
 # is not evidence that SDPA was asked for -- which is exactly how this morning's silent relaunch
 # turned a sage session into an SDPA one with nothing in the data to say so.
+# It is also the ONE place the configuration every arm shares is stated: `Lever.arm` below is a
+# DELTA against this, never a whole launch configuration. `composed_arm` (measure_optimizations_
+# matrix) is what turns a delta into the configuration a cell actually launches.
 BASELINE_LEVER = Lever(
     id="sdpa_baseline",
     label="SDPA (core default, pinned)",

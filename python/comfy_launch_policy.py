@@ -369,10 +369,16 @@ def arm_args(
     else:
         args.extend(attention_args(backend))
 
-    fast = arm.get("fast")
-    if fast is not None:
+    # The `fast` convention, and it is PRESENCE-based on purpose. An absent key passes no flag at
+    # all; `fast: []` -- present and empty -- is the bare `--fast`, which ComfyUI reads as every
+    # PerformanceFeature (fp16_accumulation, fp8_matrix_mult, cublas_ops, autotune); a non-empty
+    # list names exactly those features. The middle case is the dangerous one: a row labelled
+    # "fp16_accumulation" that launched bare would have measured all four under the name of one, so
+    # the names are appended here and read back by `optimization_provenance.fast_from_argv` /
+    # `measure_optimizations_rows.verify_arm`, which expand a bare flag the same way.
+    if "fast" in arm and arm["fast"] is not None:
         args.append(FAST_FLAG)
-        args.extend(str(name) for name in fast)
+        args.extend(str(name) for name in arm["fast"])
 
     if arm.get("dynamic_vram") is False:
         args.append(DISABLE_DYNAMIC_VRAM_FLAG)

@@ -73,8 +73,34 @@ class ArmVerification:
     observed: dict[str, Any]
 
 
+def _fast_expected(wanted: Any) -> list[str]:
+    """What ``fast_from_argv`` must report for a ``fast`` value the arm asked for.
+
+    The convention, pinned here and in ``comfy_launch_policy.arm_args``: an ABSENT ``fast`` key
+    means no ``--fast`` at all; ``fast: []`` -- present and empty -- means the bare flag, which
+    ComfyUI reads as every PerformanceFeature; a non-empty list means exactly those. Verification
+    has to expand the bare form the same way the reader does, or ``fast: []`` would be rejected for
+    doing precisely what it asked for, and a named list that launched bare would be accepted for
+    enabling four features under the name of one.
+    """
+    names = [str(name) for name in (wanted or [])]
+    return names or list(provenance_probe.ALL_FAST_FEATURES)
+
+
 def verify_arm(arm: dict[str, Any] | None, restart_reply: dict[str, Any]) -> ArmVerification:
-    """Read the arm back out of the restart reply's argv. A request is not evidence."""
+    """Read the arm back out of the restart reply's argv. A request is not evidence.
+
+    Every axis is checked, including the ones the arm is SILENT about: absent ``fast`` means the
+    argv must carry no ``--fast``, absent ``dynamic_vram`` means it must still be on, absent
+    ``vram_headroom`` means no ``--reserve-vram``. Checking only the keys an arm names is how an
+    arm that differed from its baseline on an unnamed axis verified clean -- the whole point of
+    reading the argv back is to catch what the request did not say.
+
+    Attention is the one axis that cannot be checked from absence: with no flag, the launch policy
+    resolves it from the environment, so "no key" has no single right answer. Lever arms always
+    name it (``measure_optimizations_matrix.composed_arm``); a restore arm that could not reproduce
+    it says so through ``StartingState.unreproducible`` instead.
+    """
     arm = arm or {}
     argv = restart_reply.get("argv")
     if not isinstance(argv, list) or not argv:
@@ -96,17 +122,29 @@ def verify_arm(arm: dict[str, Any] | None, restart_reply: dict[str, Any]) -> Arm
         mismatches.append(
             f"asked for attention {str(arm['attention'])!r}, argv says {observed['attention_backend']!r}"
         )
-    if "fast" in arm and sorted(observed["fast_flags"]) != sorted(str(f) for f in arm["fast"]):
-        mismatches.append(f"asked for --fast {list(arm['fast'])}, argv says {observed['fast_flags']}")
-    if "dynamic_vram" in arm and observed["dynamic_vram"] is not bool(arm["dynamic_vram"]):
+    if "fast" in arm:
+        expected = _fast_expected(arm["fast"])
+        if sorted(observed["fast_flags"]) != sorted(expected):
+            mismatches.append(
+                f"asked for --fast {expected}, argv says {observed['fast_flags']} "
+                f"(argv: {' '.join(str(token) for token in argv)})"
+            )
+    elif observed["fast_flags"]:
+        mismatches.append(f"asked for no --fast, argv says --fast {observed['fast_flags']}")
+
+    wanted_dynamic = bool(arm["dynamic_vram"]) if "dynamic_vram" in arm else True
+    if observed["dynamic_vram"] is not wanted_dynamic:
         mismatches.append(
-            f"asked for dynamic_vram {arm['dynamic_vram']}, argv says {observed['dynamic_vram']}"
+            f"asked for dynamic_vram {wanted_dynamic}, argv says {observed['dynamic_vram']}"
         )
+
+    got = observed["reserve_vram_gb"]
     if "vram_headroom" in arm:
         wanted = float(arm["vram_headroom"])
-        got = observed["reserve_vram_gb"]
         if got is None or float(got) != wanted:
             mismatches.append(f"asked for --reserve-vram {wanted:g}, argv says {got}")
+    elif got is not None:
+        mismatches.append(f"asked for no --reserve-vram, argv says --reserve-vram {got:g}")
 
     if mismatches:
         return ArmVerification(False, "; ".join(mismatches), observed)

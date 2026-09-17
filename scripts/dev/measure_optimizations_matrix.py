@@ -11,6 +11,16 @@ published over a 30% spread.
 **A lever only appears where it does something.** ``--fast fp8_matrix_mult`` is inert on a bf16
 checkpoint, so a cell for it elsewhere would report the measurement noise of an unchanged
 configuration as a delta.
+
+**An arm differs from the baseline in exactly the lever under test.** ``composed_arm`` is where
+that is made true: a ``Lever.arm`` states only the lever's own keys, and the baseline's arm supplies
+every axis the lever is silent about. Without it, the first live 36-render run launched
+``dynamic_vram_off``, ``fast_fp16_accumulation`` and ``fixed_vram_budget`` with NO attention flag --
+which on this box resolves to sage, because sageattention is installed -- against a baseline pinned
+to ``--use-pytorch-cross-attention``. The run reported zero failures and its every non-attention
+delta was the lever PLUS a backend change. Composition is done here, from ``BASELINE_LEVER.arm``,
+rather than by spelling the shared flags into each lever, so there stays exactly one place the
+common configuration is stated.
 """
 from __future__ import annotations
 
@@ -87,6 +97,17 @@ def build_matrix(
     return cells
 
 
+def composed_arm(lever_id: str) -> dict[str, Any] | None:
+    """The launch arm a lever actually runs: the baseline's arm with the lever's own keys on top.
+
+    ``sage_attention`` overrides the attention axis, because that lever IS attention. A graph lever
+    (no arm of its own) composes to the baseline arm, which is the launch it rides inside.
+    """
+    composed = dict(levers.BASELINE_LEVER.arm or {})
+    composed.update(levers.lever(lever_id).arm or {})
+    return composed or None
+
+
 def arm_sequence(cells: Sequence[Cell]) -> list[ArmStep]:
     """The cells grouped into launches, baseline first.
 
@@ -101,7 +122,8 @@ def arm_sequence(cells: Sequence[Cell]) -> list[ArmStep]:
     for cell in cells:
         lever = levers.lever(cell.lever)
         name = lever.id if lever.arm else levers.BASELINE_LEVER.id
-        arms[name] = lever.arm if lever.arm else levers.BASELINE_LEVER.arm
+        # The composed arm, never `lever.arm` -- see composed_arm and the module docstring.
+        arms[name] = composed_arm(name)
         grouped.setdefault(name, []).append(cell)
 
     ordered = [levers.BASELINE_LEVER.id] + sorted(n for n in grouped if n != levers.BASELINE_LEVER.id)

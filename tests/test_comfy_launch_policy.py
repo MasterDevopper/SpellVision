@@ -378,6 +378,27 @@ def test_an_arm_naming_fast_features_produces_the_flag_and_names() -> None:
     assert args[args.index(policy.FAST_FLAG) + 1:] == ["fp16_accumulation"]
 
 
+def test_a_named_fast_feature_never_launches_as_a_bare_flag() -> None:
+    """Bare `--fast` enables EVERY PerformanceFeature -- fp16_accumulation, fp8_matrix_mult,
+    cublas_ops and autotune. An arm that named one feature and launched bare would measure four
+    levers under the name of one, and the row would look like a clean single-lever measurement."""
+    args = policy.arm_args({"attention": "sdpa", "fast": ["fp16_accumulation"]}, "py")
+    index = args.index(policy.FAST_FLAG)
+    assert args[index + 1:index + 2] == ["fp16_accumulation"], (
+        "the feature list must follow the flag; a bare --fast is a different launch"
+    )
+
+
+def test_an_empty_fast_list_is_the_bare_flag_and_an_absent_key_is_no_flag() -> None:
+    """The convention, pinned so it cannot drift: `fast: []` is PRESENT and means the bare flag
+    (every feature); no `fast` key at all means no `--fast`. The two are not the same launch, and
+    `arm_args` distinguishes them by presence, not by truthiness."""
+    bare = policy.arm_args({"attention": "sdpa", "fast": []}, "py")
+    assert policy.FAST_FLAG in bare
+    assert bare[bare.index(policy.FAST_FLAG) + 1:] == []
+    assert policy.FAST_FLAG not in policy.arm_args({"attention": "sdpa"}, "py")
+
+
 def test_an_arm_disabling_dynamic_vram_produces_the_flag() -> None:
     args = policy.arm_args({"attention": "sdpa", "dynamic_vram": False}, "py")
     assert policy.DISABLE_DYNAMIC_VRAM_FLAG in args

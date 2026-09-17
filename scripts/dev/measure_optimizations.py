@@ -90,6 +90,7 @@ from measure_optimizations_matrix import (  # noqa: E402
     RunPlan,
     arm_sequence,
     build_matrix,
+    composed_arm,
     describe,
     load_requests,
     runs_for_cell,
@@ -100,7 +101,8 @@ from measure_optimizations_matrix import (  # noqa: E402
 __all__ = [
     "ArmStep", "ArmVerification", "Baseline", "Cell", "DEFAULT_OUT_DIR", "MAX_SEED",
     "RUNS_PER_CELL", "RestoreResult", "RunPlan", "RunResult", "StartingState", "arm_sequence",
-    "build_matrix", "build_rows", "capture_starting_state", "describe", "describe_restore",
+    "build_matrix", "build_rows", "capture_starting_state", "composed_arm", "describe",
+    "describe_restore",
     "describe_starting_state", "ledger", "link", "main", "measure_quality", "quality_verdict",
     "render", "restore_starting_state", "run_arms_with_restore", "runner", "runs_for_cell",
     "session_secret", "verify_arm",

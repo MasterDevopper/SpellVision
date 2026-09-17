@@ -170,6 +170,109 @@ def test_every_arm_axis_is_read_back_not_assumed(arm: dict, argv: tuple, ok: boo
     assert harness.verify_arm(arm, _restart_reply(*argv)).ok is ok
 
 
+# --- discipline 3b: an arm differs from the baseline in EXACTLY the lever under test -------------
+#
+# The 36-render run of 2026-09-16 completed with zero failures and produced uninterpretable numbers.
+# Its baseline pinned --use-pytorch-cross-attention; dynamic_vram_off, fast_fp16_accumulation and
+# fixed_vram_budget named no attention at all, so the launch policy resolved that axis from the
+# environment -- and sageattention is installed on this box, so all three launched on SAGE. "fp16
+# accumulation is 6.3% faster than baseline" was really "fp16_accumulation PLUS sage, against sdpa".
+
+
+def test_every_launch_lever_composes_the_baselines_attention() -> None:
+    """The lever under test is the ONLY thing that may differ. A lever that says nothing about
+    attention inherits the baseline's, rather than falling through to whatever is installed."""
+    baseline_attention = levers.BASELINE_LEVER.arm["attention"]
+    for lever in levers.runnable_levers():
+        if lever.id in {levers.BASELINE_LEVER.id, "sage_attention"}:
+            continue
+        arm = harness.composed_arm(lever.id)
+        assert arm.get("attention") == baseline_attention, (
+            f"{lever.id} would launch with the environment's attention backend, not the baseline's"
+        )
+
+
+def test_the_sage_lever_overrides_the_baselines_attention() -> None:
+    """The one lever that IS attention has to win the axis it exists to change."""
+    assert harness.composed_arm("sage_attention")["attention"] == "sage"
+    assert harness.composed_arm(levers.BASELINE_LEVER.id)["attention"] == "sdpa"
+
+
+def test_composition_adds_the_baseline_without_dropping_the_levers_own_keys() -> None:
+    assert harness.composed_arm("fast_fp16_accumulation") == {
+        "attention": "sdpa", "fast": ["fp16_accumulation"],
+    }
+    assert harness.composed_arm("dynamic_vram_off") == {"attention": "sdpa", "dynamic_vram": False}
+    assert harness.composed_arm("fixed_vram_budget") == {"attention": "sdpa", "vram_headroom": 22.0}
+
+
+def test_a_graph_lever_composes_to_the_baseline_launch_it_rides_in() -> None:
+    assert harness.composed_arm("vae_tiling") == levers.BASELINE_LEVER.arm
+
+
+def test_the_baseline_is_stated_once_not_copied_into_each_lever() -> None:
+    """Composition, not duplication: every launch lever except the attention one must be SILENT
+    about attention in its own declaration, or the baseline stops being the single place the shared
+    configuration is stated and the next change to it half-lands."""
+    for lever in levers.ALL_LEVERS:
+        if lever.id in {levers.BASELINE_LEVER.id, "sage_attention", "ck_int8_attention"}:
+            continue
+        assert "attention" not in (lever.arm or {}), (
+            f"{lever.id} spells its own attention; the baseline must supply it"
+        )
+
+
+def test_every_arm_the_matrix_will_launch_pins_its_attention() -> None:
+    """The property the live run violated, asserted against the sequence that actually runs."""
+    for step in harness.arm_sequence(harness.build_matrix()):
+        assert "attention" in (step.arm or {}), f"arm {step.name} leaves attention to the environment"
+
+
+def test_verify_arm_refuses_an_argv_whose_attention_is_not_the_arms() -> None:
+    """THE plant for defect 1. This is exactly what the live run launched for dynamic_vram_off: the
+    requested lever took, and the attention backend silently changed with it."""
+    check = harness.verify_arm(
+        harness.composed_arm("dynamic_vram_off"),
+        _restart_reply("--use-sage-attention", "--disable-dynamic-vram"),
+    )
+    assert check.ok is False
+    assert "attention" in check.reason and "sage" in check.reason
+
+
+def test_verify_arm_refuses_a_bare_fast_when_features_were_named() -> None:
+    """THE plant for defect 2. Bare `--fast` turns on all four PerformanceFeatures; a row labelled
+    fp16_accumulation that launched bare would measure four levers under the name of one."""
+    check = harness.verify_arm(
+        {"attention": "sdpa", "fast": ["fp16_accumulation"]},
+        _restart_reply("--use-pytorch-cross-attention", "--fast"),
+    )
+    assert check.ok is False
+    assert "fp16_accumulation" in check.reason
+    assert "fp8_matrix_mult" in check.reason, "the reason has to name what the bare flag turned on"
+
+
+def test_verify_arm_accepts_a_bare_fast_when_the_arm_asked_for_one() -> None:
+    """The other half of the convention: `fast: []` IS the bare flag, so it must verify."""
+    check = harness.verify_arm(
+        {"attention": "sdpa", "fast": []},
+        _restart_reply("--use-pytorch-cross-attention", "--fast"),
+    )
+    assert check.ok is True
+
+
+def test_verify_arm_refuses_an_axis_the_arm_never_named() -> None:
+    """An unnamed axis is not an unchecked one. The confound arrived on an axis nobody wrote down,
+    so absence has to mean "at the default", not "do not look"."""
+    for argv, needle in (
+        (("--use-pytorch-cross-attention", "--fast", "autotune"), "no --fast"),
+        (("--use-pytorch-cross-attention", "--disable-dynamic-vram"), "dynamic_vram"),
+        (("--use-pytorch-cross-attention", "--reserve-vram", "22"), "no --reserve-vram"),
+    ):
+        check = harness.verify_arm({"attention": "sdpa"}, _restart_reply(*argv))
+        assert check.ok is False, argv
+        assert needle in check.reason
+
+
 # --- discipline 4: memory is only reported at a fixed reserve -----------------------------------
 
 
@@ -953,7 +1056,21 @@ def test_a_resumed_run_still_carries_the_skipped_baselines_mean(tmp_path, monkey
 # could encode a shape the real worker never produces (this wave has already been bitten twice by
 # exactly that).
 
-_REAL_SIDECAR = ROOT / "runtime" / "optimization_renders" / "ltx_t2v_sage_attention_warm_2_5935368.json"
+# Resolved by GLOB, not by one filename. The sidecar names carry the render's seed, and the seed is
+# fresh on every run by design (it is what defeats ComfyUI's node cache) -- so pinning one name made
+# this test pass exactly until the matrix was re-run, which is the same class of mistake the rest of
+# this file exists to catch. Newest match wins; absent entirely, the test skips rather than failing
+# on a directory that is not in git.
+_SIDECAR_DIR = ROOT / "runtime" / "optimization_renders"
+_SIDECAR_GLOB = "ltx_t2v_sage_attention_warm_*.json"
+
+
+def _real_sidecar() -> Path | None:
+    found = sorted(
+        (path for path in _SIDECAR_DIR.glob(_SIDECAR_GLOB) if "_native_prompt_api" not in path.name),
+        key=lambda path: path.stat().st_mtime,
+    )
+    return found[-1] if found else None
 
 
 def _flat_result_terminal(job_id: str, *, state: str = "completed") -> dict:
@@ -968,17 +1085,23 @@ def test_a_real_sidecar_from_the_failed_run_supplies_the_timing_and_provenance()
     """The number was always there. Point the reader at the actual sidecar one of the 36 failed
     renders wrote and it must recover both the seconds and the build that produced them, even though
     the terminal message (correctly, per `_flat_result_terminal`) carries neither."""
-    assert _REAL_SIDECAR.is_file(), f"the archived sidecar is missing: {_REAL_SIDECAR}"
+    sidecar = _real_sidecar()
+    if sidecar is None:
+        pytest.skip(f"no archived sidecar matching {_SIDECAR_GLOB} under {_SIDECAR_DIR}")
+    recorded = json.loads(sidecar.read_text(encoding="utf-8"))
 
     outcome = harness.render.outcome_from(
         _flat_result_terminal("opt_695910b4f3c8"),
         tag="warm_2", seed=5935368, wall_seconds=36.58,
-        requested_dest=str(_REAL_SIDECAR.with_suffix(".mp4")),
-        requested_metadata=str(_REAL_SIDECAR),
+        requested_dest=str(sidecar.with_suffix(".mp4")),
+        requested_metadata=str(sidecar),
     )
 
     assert outcome.ok, outcome.reason
-    assert outcome.seconds == pytest.approx(36.44)
+    # Read back independently from the file, so the assertion is "the reader went to the sidecar",
+    # not "the reader produced a number someone once typed here".
+    assert outcome.seconds == pytest.approx(recorded["generation_time_sec"])
+    assert outcome.seconds != pytest.approx(36.58), "the wall time is not the render time"
     assert outcome.provenance["provenance_source"] == "render_sidecar"
     assert outcome.provenance["attention_backend"] == "sage"
     assert outcome.provenance["comfy_version"] == "0.34.0"
