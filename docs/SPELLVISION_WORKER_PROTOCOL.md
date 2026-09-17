@@ -685,8 +685,8 @@ cannot quietly go stale the way the "Planned commands" list did.
 
 | audience | count | what it means |
 |---|---|---|
-| user-facing | 59 | reachable from the UI by a normal user action |
-| diagnostic | 60 | for inspecting state; safe, but not part of a normal flow |
+| user-facing | 62 | reachable from the UI by a normal user action |
+| diagnostic | 57 | for inspecting state; safe, but not part of a normal flow |
 | internal | 16 | worker-to-worker or test-only; not a public surface |
 | **total** | **135** | |
 
