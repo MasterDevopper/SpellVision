@@ -50,6 +50,11 @@ seam between two of these steps rather than inside any one of them.
    which is only possible because it was moved out of `MainWindow`, where reaching it meant
    launching the GUI. Note it has side effects despite its name: it creates the output directory.
 2. **The submission policy decides whether to send it.** `qt_ui/workers/WorkerSubmissionPolicy`.
+   Then `qt_ui/generation/EndpointRouting::chooseEndpoint` decides WHICH MACHINE. Auto takes the
+   first idle enabled endpoint in registry order whose capability check passes, so a free local GPU
+   always wins; an explicit pick that cannot run the job is refused there, by name, and never
+   rerouted. Only a non-local choice puts `comfy_api_url` in the request — a single-machine install
+   sends exactly what it always sent.
 3. **It goes over the socket.** `qt_ui/workers/WorkerSocketClient` carries every one-shot command.
    (It replaced spawning `python worker_client.py` per RPC: ~79 ms → ~1.4 ms, on a 1.8 s poll.)
 4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 135
@@ -115,7 +120,8 @@ coupled component — see §7 for why that has not been split.
 | Home | `HomePage`, `HomeDashboardPage`, `HomeDashboardModuleRegistry`, `Dashboard*` | The outputs gallery and its module primitives |
 | Theming | `ThemeManager.{h,cpp}` | 26 tokens, five presets, runtime icon recoloring, contrast self-check |
 | Queue | `QueueManager`, `QueueTableModel`, `QueueFilterProxyModel`, `shell/QueueUiPresenter` | Local queue model, view and presentation |
-| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness. `CockpitLayout` places the cockpit's prompt, canvas and action cards for the shell layout in force |
+| Generation flow | `generation/` | Request building, result routing, status, mode state, sampling, video policy and readiness. `CockpitLayout` places the cockpit's prompt, canvas and action cards for the shell layout in force. `EndpointRouting` decides which machine a job goes to and refuses, by name, before anything is enqueued |
+| Endpoints | `shell/EndpointRegistry.{h,cpp}`, `shell/EndpointProbe.{h,cpp}`, `shell/EndpointPanel.{h,cpp}` | The machines this install may render on. `EndpointRegistry` is the data (QSettings `runtime/endpoints`; entry 0 is the local master and cannot be removed or re-addressed from the list); `EndpointProbe` asks each one `/system_stats`, `/queue` and `/models/checkpoints`; `EndpointPanel` is the Runtime page's rows. Replaced a hardcoded IP, a second copy of it in a probe, and a health check that read `"healthy=yes"` out of a QLabel's text |
 | Worker transport | `workers/` | `WorkerSocketClient`, `WorkerRequestBuilder`, `WorkerResponseParser`, `WorkerCommandRunner`, `WorkerQueueController`, `WorkerProcessController`, `WorkerSubmissionPolicy` |
 | Preview | `preview/` | Image and video preview lifecycle, aspect cap, file settling |
 | Assets | `assets/` | Catalog scanning, model/LoRA stacks, family licence surfacing |

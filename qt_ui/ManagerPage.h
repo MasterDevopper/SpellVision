@@ -3,6 +3,8 @@
 #include <QJsonObject>
 #include <QString>
 #include <QWidget>
+
+#include "shell/EndpointPanel.h"
 #include <functional>
 
 class QCheckBox;
@@ -87,13 +89,10 @@ private:
     QString selectedRepoUrl() const;
     QString selectedInstallMethod() const;
     void setBusy(bool busy);
-    void probeSpellNodeWorker();
-    void updateWorkersLabel(bool localHealthy);
-    void persistDualPcSettings();
-    void restoreDualPcSettings();
-    void browseDualPcShare();
-    void enableDistributedPack();
-    void updateDualPcEnableState();
+    // Re-reads the endpoint registry and asks every enabled endpoint for its own status. Replaces
+    // probeSpellNodeWorker(), which probed a host spelled as a C++ literal and then decided the
+    // LOCAL master's health by looking for "healthy=yes" inside another QLabel's text.
+    void refreshEndpointStatuses();
 
     QString projectRoot_;
     QString pythonExecutable_;
@@ -107,13 +106,7 @@ private:
     QLabel *nodeSummaryLabel_ = nullptr;
     QLabel *cacheSourceLabel_ = nullptr;
     QLabel *lastCheckedLabel_ = nullptr;
-    QLabel *workersLabel_ = nullptr;
-    QCheckBox *dualPcConsentCheck_ = nullptr;
-    QLineEdit *dualPcShareEdit_ = nullptr;
-    QPushButton *dualPcShareBrowseButton_ = nullptr;
-    QPushButton *enableDistributedButton_ = nullptr;
-    bool spellNodeOnline_ = false;
-    bool spellNodeProbed_ = false;
+    spellvision::shell::EndpointPanel *endpointPanel_ = nullptr;
     QLabel *cachePathLabel_ = nullptr;
     QLabel *comfyVersionLabel_ = nullptr;
     QPushButton *updateComfyButton_ = nullptr;

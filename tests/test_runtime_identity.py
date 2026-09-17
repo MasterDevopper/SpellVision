@@ -95,34 +95,63 @@ def test_request_comfy_python_ignores_worker_python_key(tmp_path: Path, monkeypa
     assert Path(value) == isolated.resolve()
 
 
-def test_runtime_page_lists_distributed_workers() -> None:
-    """T6: Runtime must list local master + SpellNode. Fail-closed if offline.
-    VRAM does not add."""
-    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
-    hdr = (ROOT / "qt_ui" / "ManagerPage.h").read_text(encoding="utf-8")
-    assert "192.168.1.127" in cpp
-    assert "127.0.0.1:8188" in cpp
-    assert "does not pool VRAM" in cpp
-    assert "workersLabel_" in hdr
+def test_runtime_page_lists_its_endpoints_from_data() -> None:
+    """T6: Runtime lists the machines this install may render on, and it lists them from DATA.
+
+    This replaces three greps that held the old shape in place: that ManagerPage.cpp contains the
+    literal "192.168.1.127", that it contains "ComfyUI-Distributed", and that enableDistributedPack
+    installs a zipball. All three described a design the W6 research overturned, and the first of
+    them actively required the defect -- a ratchet asserting that the second machine is spelled in
+    the C++ is a ratchet against ever having more than one.
+    """
+    root = ROOT / "qt_ui" / "shell"
+    registry = (root / "EndpointRegistry.h").read_text(encoding="utf-8")
+    panel = (root / "EndpointPanel.h").read_text(encoding="utf-8")
+    manager = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+
+    assert "runtime/endpoints" in (root / "EndpointRegistry.cpp").read_text(encoding="utf-8")
+    assert "familiesAllowed" in registry
+    assert "endpointPanel_" in manager
+
+    # The honesty line stays. Two machines are two machines.
+    panel_body = (root / "EndpointPanel.cpp").read_text(encoding="utf-8")
+    assert "does not pool VRAM" in panel_body
+
+    # And the health of the master is no longer a substring of a caption.
+    assert 'text().contains(QStringLiteral("healthy=yes"))' not in manager
 
 
-def test_runtime_dual_pc_share_needs_consent() -> None:
-    """T6: dest share + Distributed enable only after explicit consent. No OneDrive default."""
-    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
-    hdr = (ROOT / "qt_ui" / "ManagerPage.h").read_text(encoding="utf-8")
-    assert 'QStringLiteral("runtime/dualPcConsent")' in cpp
-    assert 'QStringLiteral("runtime/dualPcShareFolder")' in cpp
-    assert "ComfyUI-Distributed" in cpp
-    assert "dualPcConsentCheck_" in hdr
-    assert "OneDrive" not in cpp
-    assert "git clone" not in cpp.lower()
+def test_the_distributed_pack_is_gone_and_stays_gone() -> None:
+    """T6: ComfyUI-Distributed was chosen in Doc 54 and overturned by the research.
+
+    With no reachable worker it logs "Falling back to master execution" and runs the job on the
+    master -- the opposite of the fail-closed requirement -- and its master-free mode is an open
+    feature request. It also needs its own Collector and Seed nodes in every graph. The Enable
+    button could never have installed it on the second machine in any case: install_custom_node is
+    in LOCAL_INSTALL_COMMANDS and is refused for a remote endpoint by design, so it wrote the pack
+    into THIS machine's custom_nodes and reported success.
+    """
+    manager = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
+    assert "ComfyUI-Distributed" not in manager
+    assert "robertvoy" not in manager
+    assert "dualPcShareFolder" not in manager
+    assert "dualPcConsent" not in manager
+
+    # The guard that made the button pointless is still there, and still the reason.
+    tcp = (ROOT / "python" / "worker_tcp.py").read_text(encoding="utf-8")
+    assert "LOCAL_INSTALL_COMMANDS" in tcp
+    assert "install_custom_node" in tcp
 
 
-def test_enable_distributed_installs_via_worker_zipball() -> None:
-    """T6 Enable must write the pack via zipball, and refuse while Comfy is generating."""
-    cpp = (ROOT / "qt_ui" / "ManagerPage.cpp").read_text(encoding="utf-8")
-    body = cpp.split("void ManagerPage::enableDistributedPack", 1)[1]
-    assert "install_custom_node" in body
-    assert "https://github.com/robertvoy/ComfyUI-Distributed" in body
-    assert "queue_running" in body
-    assert "git clone" not in body.lower()
+def test_remote_queuing_is_one_consent() -> None:
+    """T6: one consent, and it governs the thing that needs consenting to -- sending a prompt and
+    its input image to another machine, unauthenticated, because ComfyUI has no auth.
+
+    The share-folder consent it replaces guarded `runtime/dualPcShareFolder`, a QSettings value with
+    no consumer anywhere in the tree: the user was asked to approve something nothing read.
+    """
+    panel = (ROOT / "qt_ui" / "shell" / "EndpointPanel.cpp").read_text(encoding="utf-8")
+    window = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
+    assert "runtime/allowRemoteQueuing" in panel
+    # Read where it matters: immediately before the enqueue, not only where it is set.
+    assert "runtime/allowRemoteQueuing" in window
