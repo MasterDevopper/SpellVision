@@ -941,3 +941,66 @@ def test_a_resumed_run_still_carries_the_skipped_baselines_mean(tmp_path, monkey
     sage = next(row for row in second.rows if row["lever"] == "sage_attention" and row["warm"])
     assert sage["baseline_mean"] == pytest.approx(100.0)
     assert sage["delta_pct"] == pytest.approx(-50.0)
+
+
+# --- the sidecar fix: real artefacts from the failed 36-render run ------------------------------
+#
+# The matrix that ran live on 2026-09-16 produced 36 real renders and recorded zero rows, because
+# the reader looked for `generation_time_sec` on `terminal["result"]`, and the worker's actual last
+# message on this socket (`EventEmitter.result`, worker_tcp.py) has no nested "result" key at all --
+# it flattens the job's fields onto the top level. The sidecars those 36 renders wrote are still on
+# disk. This section points the reader at one of them directly, rather than a synthetic fixture that
+# could encode a shape the real worker never produces (this wave has already been bitten twice by
+# exactly that).
+
+_REAL_SIDECAR = ROOT / "runtime" / "optimization_renders" / "ltx_t2v_sage_attention_warm_2_5935368.json"
+
+
+def _flat_result_terminal(job_id: str, *, state: str = "completed") -> dict:
+    """The shape `EventEmitter.result` actually sends: no nested "result" key, just the job's
+    fields (would-be `asdict(job.result)`) flattened alongside type/ok/job_id/state. This is what
+    every real completed render's terminal message looks like -- unlike `_completed()` above, which
+    models the earlier `job_update` push that never survives to be the terminal message."""
+    return {"type": "result", "ok": state == "completed", "job_id": job_id, "state": state}
+
+
+def test_a_real_sidecar_from_the_failed_run_supplies_the_timing_and_provenance() -> None:
+    """The number was always there. Point the reader at the actual sidecar one of the 36 failed
+    renders wrote and it must recover both the seconds and the build that produced them, even though
+    the terminal message (correctly, per `_flat_result_terminal`) carries neither."""
+    assert _REAL_SIDECAR.is_file(), f"the archived sidecar is missing: {_REAL_SIDECAR}"
+
+    outcome = harness.render.outcome_from(
+        _flat_result_terminal("opt_695910b4f3c8"),
+        tag="warm_2", seed=5935368, wall_seconds=36.58,
+        requested_dest=str(_REAL_SIDECAR.with_suffix(".mp4")),
+        requested_metadata=str(_REAL_SIDECAR),
+    )
+
+    assert outcome.ok, outcome.reason
+    assert outcome.seconds == pytest.approx(36.44)
+    assert outcome.provenance["provenance_source"] == "render_sidecar"
+    assert outcome.provenance["attention_backend"] == "sage"
+    assert outcome.provenance["comfy_version"] == "0.34.0"
+
+
+def test_an_unreadable_sidecar_is_refused_not_wall_clocked(tmp_path) -> None:
+    """THE plant: point the reader at a metadata path that does not exist, with a terminal message
+    (the real flat shape) that carries no number either. It must refuse with the existing reasoning
+    -- the round-trip wall time is not the thing under test -- rather than silently recording
+    `wall_seconds` as if it were a render time."""
+    missing = tmp_path / "does_not_exist_5935368.json"
+    assert not missing.exists()
+
+    outcome = harness.render.outcome_from(
+        _flat_result_terminal("opt_missing"),
+        tag="warm_2", seed=5935368, wall_seconds=36.58,
+        requested_dest=str(tmp_path / "does_not_exist_5935368.mp4"),
+        requested_metadata=str(missing),
+    )
+
+    assert outcome.ok is False
+    assert outcome.seconds is None
+    assert "generation_time_sec" in outcome.reason
+    assert "round-trip wall time (36.58 s)" in outcome.reason
+    assert "sidecar" in outcome.reason.lower()

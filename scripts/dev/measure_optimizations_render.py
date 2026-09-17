@@ -3,24 +3,27 @@
 The matrix above this module decides WHAT to run; this decides what a single render is, and it
 refuses in three places rather than computing:
 
-**The seconds come from the job's own record.** ``link.render`` also returns a stopwatch reading
-around the whole request, and that number includes queue admission, request transport and the
-keyframe upload -- none of which is the thing under test. The worker already writes
-``generation_time_sec`` into every result envelope and its sidecar, so that is the number a row
-carries; a completed job that did not report one is a FAILED run here, with that as its reason,
-rather than a wall-clock figure quietly substituted for a render time. The wall reading is kept
-alongside it, because the gap between the two is exactly what "cold" means.
+**The seconds come from the render's own sidecar, not the wire.** ``link.render`` also returns a
+stopwatch reading around the whole request, and that number includes queue admission, request
+transport and the keyframe upload -- none of which is the thing under test. The terminal message on
+this socket is no better: its LAST message flattens the job's fields with no nested ``"result"`` key
+at all, so a reader that looks for one there finds nothing on every real run (see
+``measure_optimizations_sidecar``). The render's sidecar, at the ``metadata_output`` path this
+harness itself put on the request, has no such ambiguity. A completed job whose sidecar AND
+result both carry no number is a FAILED run here, with that as its reason, rather than a wall-clock
+figure quietly substituted for a render time. The wall reading is kept alongside it, because the gap
+between the two is exactly what "cold" means.
 
 **Every render gets its own seed.** Not its own filename -- the recorded trap on this project is a
 re-submit that changed only the output filename, hit ComfyUI's node cache, and came back "12.1 s /
 23.62 GB" for work that never happened. The cache is keyed on the graph, and the seed is in the
 graph. The dest is made unique too, but only so renders do not overwrite each other.
 
-**The provenance comes back with the render.** ``result.optimizations`` is the block
-``worker_metadata._optimizations_block`` probed from the RUNNING ComfyUI's argv at the moment this
-render ran -- which is a stronger statement than the arm this harness asked for. Where a result
-carries none, the fallback is the argv read back from the restart reply, marked as such in
-``provenance_source``, because a row that cannot say what produced its number is excluded by the
+**The provenance comes from that same sidecar.** Its ``optimizations`` block is probed from the
+RUNNING ComfyUI's argv at the moment THIS render ran, read off disk rather than off a probe taken at
+some other moment. Where the sidecar is unreadable the result envelope's own ``optimizations`` is
+next, and where neither carries one the fallback is the restart reply's argv -- each marked as such
+in ``provenance_source``, because a row that cannot say what produced its number is excluded by the
 ledger and a row that pretends is worse.
 
 One thing this module deliberately cannot supply: a peak VRAM figure for a native ComfyUI route.
@@ -38,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import measure_optimizations_link as link
+import measure_optimizations_sidecar as sidecar_probe
 
 # The cockpit's own seed range (SamplingController.cpp: setRange(0, 2147483647)).
 MAX_SEED = 2_147_483_647
@@ -174,9 +178,12 @@ def outcome_from(
     seed: int,
     wall_seconds: float,
     requested_dest: str,
+    requested_metadata: str = "",
     fallback_provenance: dict[str, Any] | None = None,
 ) -> RenderOutcome:
-    """Read one render's result, refusing anything that is not a completed job with its own time."""
+    """Read one render's result, refusing anything that is not a completed job with its own time.
+    ``requested_metadata`` (the sidecar path this harness put on the request) is checked first, for
+    both the seconds and the provenance."""
     terminal = terminal if isinstance(terminal, dict) else {}
     result = terminal.get("result") if isinstance(terminal.get("result"), dict) else {}
     job_id = str(terminal.get("job_id") or result.get("job_id") or "")
@@ -185,25 +192,18 @@ def outcome_from(
         return RenderOutcome(ok=False, tag=tag, seed=seed, wall_seconds=wall_seconds,
                              job_id=job_id, reason=_terminal_reason(terminal))
 
-    seconds = result.get("generation_time_sec")
-    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
-        return RenderOutcome(
-            ok=False, tag=tag, seed=seed, wall_seconds=wall_seconds, job_id=job_id,
-            reason=("the job completed but reported no generation_time_sec; the round-trip wall "
-                    f"time ({wall_seconds:.2f} s) includes queue and upload and is not the thing "
-                    "under test, so this run contributes no timing"),
-        )
+    sidecar, sidecar_error = sidecar_probe.read_sidecar(requested_metadata)
+    seconds = sidecar_probe.resolve_seconds(sidecar, result)
+    if seconds is None:
+        reason = ("the job completed but reported no generation_time_sec, in its sidecar or its "
+                  f"result; the round-trip wall time ({wall_seconds:.2f} s) includes queue and "
+                  "upload and is not the thing under test, so this run contributes no timing")
+        if sidecar_error:
+            reason += f" (sidecar: {sidecar_error})"
+        return RenderOutcome(ok=False, tag=tag, seed=seed, wall_seconds=wall_seconds,
+                             job_id=job_id, reason=reason)
 
-    provenance = result.get("optimizations")
-    if isinstance(provenance, dict) and provenance:
-        provenance = {**provenance, "provenance_source": "render_result"}
-    else:
-        provenance = {
-            **dict(fallback_provenance or {}),
-            "provenance_source": "restart_argv",
-            "probe_error": ("the render's result carried no optimizations block; this provenance "
-                            "was read from the restart reply's argv instead"),
-        }
+    provenance = sidecar_probe.resolve_provenance(sidecar, result, fallback_provenance)
 
     dest = str(
         result.get("output") or result.get("video_output") or result.get("video_path")
@@ -250,7 +250,8 @@ def render_once(
         return RenderOutcome(ok=False, tag=tag, seed=seed, job_id=job_id,
                              reason=f"the render request raised: {exc!r}")
     return outcome_from(terminal, tag=tag, seed=seed, wall_seconds=wall_seconds,
-                        requested_dest=output, fallback_provenance=fallback_provenance)
+                        requested_dest=output, requested_metadata=metadata_output,
+                        fallback_provenance=fallback_provenance)
 
 
 # --- resume ---------------------------------------------------------------------------------------
