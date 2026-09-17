@@ -149,16 +149,28 @@ def build_rows(
     provenance: dict[str, Any],
     baseline: Baseline,
     verification: ArmVerification,
+    has_cold: bool = True,
+    runs: Sequence[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """One cold row and one warm row, both normalized by the ledger before they are returned."""
+    """One cold row and one warm row, both normalized by the ledger before they are returned.
+
+    ``has_cold=False`` says the first entry of ``results`` is NOT the discarded run -- the cold
+    render failed and only timed ones came back. Without it the first surviving warm run would be
+    relabelled cold, which is the same species of quiet mislabelling as recording a number under an
+    arm it did not run on: the archive's 159.27 s and 120.72 s are one configuration cold and warm,
+    and a row that says the wrong one cannot be read.
+
+    ``runs`` is every attempt including the failed ones, carried onto the row so a reader can see
+    what was tried rather than only what survived.
+    """
     if not results:
         return []
     guards = levers.required_guards(cell.lever, cell.mode)
     is_baseline = cell.lever == levers.BASELINE_LEVER.id
 
-    def _row(runs: Sequence[RunResult], warm: bool) -> dict[str, Any]:
+    def _row(timed: Sequence[RunResult], warm: bool) -> dict[str, Any]:
         merged: dict[str, Any] = {}
-        for run in runs:
+        for run in timed:
             merged.update(run.quality_values or {})
         verdict = quality_verdict(guards, merged)
 
@@ -173,7 +185,7 @@ def build_rows(
                 f"({', '.join(verdict['unmeasured'])}); a lever that is faster and wrong is not a win"
             )
 
-        peaks = [run.peak_vram_gb for run in runs if run.peak_vram_gb is not None]
+        peaks = [run.peak_vram_gb for run in timed if run.peak_vram_gb is not None]
         return ledger.normalize_row({
             "family": cell.family,
             "mode": cell.mode,
@@ -182,7 +194,7 @@ def build_rows(
             "arm_requested": dict(step.arm or {}),
             "arm_verified": verification.ok,
             "arm_verification": verification.reason,
-            "seconds": [run.seconds for run in runs],
+            "seconds": [run.seconds for run in timed],
             "baseline_mean": None if is_baseline else baseline.mean,
             "warm": warm,
             "quality": verdict,
@@ -192,13 +204,16 @@ def build_rows(
                 "baseline_reserve_vram_gb": baseline.reserve_vram_gb,
             },
             "exclusions": exclusions,
-            "dest": runs[-1].dest,
-            "job_id": runs[-1].job_id,
+            "runs": [dict(entry) for entry in (runs or [])],
+            "dest": timed[-1].dest,
+            "job_id": timed[-1].job_id,
             # Every sage number is an SA1 number. Recorded on every row rather than only the sage
             # ones, so a reader comparing two rows never has to go looking for which is which.
             "sageattention_installed": levers.SAGEATTENTION_INSTALLED,
         })
 
+    if not has_cold:
+        return [_row(results, warm=True)]
     rows = [_row(results[:1], warm=False)]
     if len(results) > 1:
         rows.append(_row(results[1:], warm=True))

@@ -23,8 +23,10 @@ below are not research hygiene -- they are this box's history:
    is precisely why their numbers never reached a sidecar.
 
 Rules 3-5 live in ``measure_optimizations_rows``; the wire lives in ``measure_optimizations_link``;
-the pixels live in ``measure_optimizations_quality``. This module owns the matrix, the arm order and
-the CLI.
+the pixels live in ``measure_optimizations_quality``; the matrix and the arm order live in
+``measure_optimizations_matrix``; one render and the resume check live in
+``measure_optimizations_render``; the loop that spends the hours lives in
+``measure_optimizations_run``. This module owns the CLI.
 
 **A seventh discipline, added once the six above were in place: give the stack back.** Every arm
 restarts a ComfyUI this harness does not own. Before this, nothing restored it, so the harness left
@@ -36,29 +38,29 @@ no attention flag at all is not the same as pinning ``{"attention": "sdpa"}`` --
 than claiming a fidelity it did not perform, and a restore that itself fails is reported, not
 swallowed.
 
-**Task 4 ends at ``--dry-run``.** Running the live matrix is Task 5: it restarts the owner's ComfyUI
-once per arm and renders for hours, so a bare invocation deliberately refuses. ``run_arms_with_restore``
-is the shape Task 5's loop runs inside of.
+**The live matrix runs from here.** It restarts the owner's ComfyUI once per arm and renders for
+hours, so it needs an explicit ``--requests`` file: a run with nothing to render still refuses, and
+the harness never invents a request. Rows are appended as each cell finishes, a re-run skips what
+the ledger already holds on matching provenance, and the arm loop runs inside
+``run_arms_with_restore`` so the stack is handed back on every exit.
 
     python scripts/dev/measure_optimizations.py --dry-run
     python scripts/dev/measure_optimizations.py --dry-run --family krea2 --lever sage_attention
+    python scripts/dev/measure_optimizations.py --family krea2 --family ltx \\
+        --requests runtime/optimization_requests.json
 """
 from __future__ import annotations
 
 import argparse
-import json
-import random
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import measure_optimizations_link as link  # noqa: E402,F401  (the live path's transport)
-import optimization_levers as levers  # noqa: E402
 from measure_optimizations_rows import (  # noqa: E402
     ArmVerification,
     Baseline,
@@ -77,168 +79,56 @@ from measure_optimizations_restore import (  # noqa: E402
     restore_starting_state,
     run_arms_with_restore,
 )
+import measure_optimizations_render as render  # noqa: E402,F401  (re-exported)
+import measure_optimizations_run as runner  # noqa: E402
+import optimization_results as ledger  # noqa: E402
+from measure_optimizations_matrix import (  # noqa: E402
+    MAX_SEED,
+    RUNS_PER_CELL,
+    ArmStep,
+    Cell,
+    RunPlan,
+    arm_sequence,
+    build_matrix,
+    describe,
+    load_requests,
+    runs_for_cell,
+)
 
+# Re-exported so one import reaches the whole harness: the tests, and any later reader, address
+# `measure_optimizations.X` rather than having to know which of the seven modules X lives in.
 __all__ = [
-    "ArmStep", "ArmVerification", "Baseline", "Cell", "RestoreResult", "RunPlan", "RunResult",
-    "StartingState", "arm_sequence", "build_matrix", "build_rows", "capture_starting_state",
-    "describe", "describe_restore", "describe_starting_state", "link", "main", "measure_quality",
-    "quality_verdict", "restore_starting_state", "run_arms_with_restore", "runs_for_cell",
-    "verify_arm",
+    "ArmStep", "ArmVerification", "Baseline", "Cell", "DEFAULT_OUT_DIR", "MAX_SEED",
+    "RUNS_PER_CELL", "RestoreResult", "RunPlan", "RunResult", "StartingState", "arm_sequence",
+    "build_matrix", "build_rows", "capture_starting_state", "describe", "describe_restore",
+    "describe_starting_state", "ledger", "link", "main", "measure_quality", "quality_verdict",
+    "render", "restore_starting_state", "run_arms_with_restore", "runner", "runs_for_cell",
+    "session_secret", "verify_arm",
 ]
 
-# The cockpit's own seed range (SamplingController.cpp: setRange(0, 2147483647)). A harness seed
-# outside the range a user can type would measure a configuration nobody can reproduce.
-MAX_SEED = 2_147_483_647
-
-RUNS_PER_CELL = 3  # one discarded, then two timed.
-
-_RANDOM = random.SystemRandom()
+# Where the harness's own renders land. Deliberately NOT the owner's gallery: an hours-long matrix
+# writes a hundred plates whose only purpose is to be measured, and a run that fills the folder the
+# owner actually looks at has made itself expensive to run twice.
+DEFAULT_OUT_DIR = ROOT / "runtime" / "optimization_renders"
 
 
-@dataclass(frozen=True)
-class Cell:
-    """One measurement: this lever, on this family, in this mode."""
+def session_secret(port: int, override: str | None = None) -> str:
+    """The per-launch secret every non-probe worker command must carry (security pass v1).
 
-    family: str
-    mode: str
-    lever: str
-
-
-@dataclass(frozen=True)
-class ArmStep:
-    """The cells that share one ComfyUI launch, so the restart is paid once rather than per cell."""
-
-    name: str
-    arm: dict[str, Any] | None
-    cells: tuple[Cell, ...]
-
-
-@dataclass(frozen=True)
-class RunPlan:
-    index: int
-    seed: int
-    warm: bool
-
-
-def build_matrix(
-    families: Sequence[str] | None = None,
-    lever_ids: Sequence[str] | None = None,
-) -> list[Cell]:
-    """Every cell to measure.
-
-    The baseline lever is always included, even when the caller narrows to one lever: a row carries
-    its own ``baseline_mean``, so measuring a lever without measuring the thing it is compared
-    against produces a row with no delta at all.
-
-    A lever with a ``families`` restriction only appears on those families. ``--fast
-    fp8_matrix_mult`` is inert on a bf16 checkpoint, so a cell for it elsewhere would report the
-    measurement noise of an unchanged configuration as a delta.
+    Resolved the way any client resolves it -- environment, then the file the running worker
+    published for that port -- because this harness does not spawn the worker, it borrows the one
+    the owner is already running.
     """
-    family_modes = {
-        family: modes for family, modes in levers.DEFAULT_FAMILIES.items()
-        if not families or family in families
-    }
-    wanted = set(lever_ids or ())
-    if wanted:
-        wanted.add(levers.BASELINE_LEVER.id)
-
-    cells: list[Cell] = []
-    for lever in levers.runnable_levers():
-        if wanted and lever.id not in wanted:
-            continue
-        for family, modes in family_modes.items():
-            if lever.families and family not in lever.families:
-                continue
-            for mode in modes:
-                cells.append(Cell(family=family, mode=mode, lever=lever.id))
-    return cells
-
-
-def arm_sequence(cells: Sequence[Cell]) -> list[ArmStep]:
-    """The cells grouped into launches, baseline first.
-
-    Baseline first because every other row needs its family's ``baseline_mean``, and that number
-    travels WITH the row -- there is no later lookup to fall back on.
-
-    Graph levers (``vae_tiling``) ride inside the baseline launch. They change the graph, not the
-    process, so restarting for one would measure a restart.
-    """
-    grouped: dict[str, list[Cell]] = {}
-    arms: dict[str, dict[str, Any] | None] = {}
-    for cell in cells:
-        lever = levers.lever(cell.lever)
-        name = lever.id if lever.arm else levers.BASELINE_LEVER.id
-        arms[name] = lever.arm if lever.arm else levers.BASELINE_LEVER.arm
-        grouped.setdefault(name, []).append(cell)
-
-    ordered = [levers.BASELINE_LEVER.id] + sorted(n for n in grouped if n != levers.BASELINE_LEVER.id)
-    return [
-        ArmStep(name=name, arm=arms[name], cells=tuple(grouped[name]))
-        for name in ordered if name in grouped
-    ]
-
-
-def runs_for_cell() -> list[RunPlan]:
-    """Three runs: one discarded and two timed, each on its own fresh seed.
-
-    The seed is what defeats ComfyUI's node cache. Changing the output filename is NOT enough -- the
-    cache is keyed on the graph, and the recorded trap on this project is a re-submit that changed
-    only the filename and came back in 12.1 s with a 23.62 GB "peak" that was never measured.
-    """
-    return [
-        RunPlan(index=index, seed=_RANDOM.randrange(0, MAX_SEED + 1), warm=index > 0)
-        for index in range(RUNS_PER_CELL)
-    ]
-
-
-def load_requests(path: str | None) -> dict[str, Any]:
-    """``"family:mode"`` -> a worker request.
-
-    The harness will not invent a render request: a cell with no template is REPORTED and skipped,
-    never filled in with a guess about which checkpoints the operator meant.
-    """
-    if not path:
-        return {}
+    if override:
+        return link.session_secret(override)
     try:
-        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        print(f"could not read the request templates at {path}: {exc}")
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+        from worker_auth import read_session_secret
 
+        return read_session_secret(port)
+    except Exception:  # noqa: BLE001 -- an unreadable secret is a refusal from the worker, not a crash here.
+        import os
 
-def describe(steps: Sequence[ArmStep], requests: dict[str, Any]) -> str:
-    """The plan, in the order it would run, including what it will NOT measure and why."""
-    lines: list[str] = ["", "ARM SEQUENCE -- one ComfyUI restart per arm, baseline first", ""]
-    total = 0
-    for position, step in enumerate(steps, start=1):
-        lines.append(f"  {position}. restart into arm {step.name!r}: {step.arm}")
-        lines.append("     then read the argv back from the restart reply; a mismatch marks every "
-                     "row below it and excludes it from deltas")
-        for cell in step.cells:
-            guards = ", ".join(levers.required_guards(cell.lever, cell.mode))
-            missing = "" if f"{cell.family}:{cell.mode}" in requests else "   [NO REQUEST TEMPLATE -- skipped]"
-            lines.append(
-                f"       {cell.family}/{cell.mode} x {cell.lever}: {RUNS_PER_CELL} runs "
-                f"(1 cold + 2 timed), fresh seed each, guards [{guards}]{missing}"
-            )
-            total += RUNS_PER_CELL
-        lines.append("")
-    lines.append(f"  {total} renders across {len(steps)} arms. No render was performed.")
-
-    lines += ["", "DECLARED AND WITHHELD -- on this core, not askable from this repository:", ""]
-    lines += [f"  {lever.id}: {lever.blocked_reason}" for lever in levers.blocked_levers()]
-    lines += ["", "CUT -- not reachable on core 0.34.0 + torch 2.10/cu128:", ""]
-    lines += [f"  {name}: {reason}" for name, reason in levers.CUT_LEVERS.items()]
-    lines += [
-        "",
-        f"Every row records sageattention {levers.SAGEATTENTION_INSTALLED} -- SA1, Triton kernels. "
-        "The research puts the first real measurement at SA2.2, whose wheel is not installed, and "
-        "installing it in the owner's live ComfyUI venv is not this wave's call (W3-P3). Read every "
-        "sage number as SA1.",
-        "",
-    ]
-    return "\n".join(lines)
+        return link.session_secret(os.environ.get(link.SESSION_FILE_ENV))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -254,6 +144,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="restrict to this lever (repeatable); the baseline is always included")
     parser.add_argument("--requests", default=None,
                         help='JSON file mapping "family:mode" to a worker request')
+    parser.add_argument("--force", action="store_true",
+                        help="re-measure cells the ledger already holds a matching warm row for")
+    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR),
+                        help=f"where this run's renders land (default: {DEFAULT_OUT_DIR})")
+    parser.add_argument("--artefact-guard", action="store_true",
+                        help="add one untimed render per cell at a seed shared with the baseline "
+                             "cell, so the artefact guard has an equal-seed comparison; without it "
+                             "that guard reports not_measured and excludes its rows")
+    parser.add_argument("--host", default=link.HOST, help="worker host")
+    parser.add_argument("--port", type=int, default=link.PORT, help="worker port")
+    parser.add_argument("--session-file", default=None,
+                        help="the worker's session-secret file, when it is not where a client "
+                             "would look for it")
+    parser.add_argument("--timeout", type=float, default=1800.0,
+                        help="seconds to wait on one worker request; a render is the unit here, so "
+                             "this is deliberately long")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     steps = arm_sequence(build_matrix(families=args.family or None, lever_ids=args.lever or None))
@@ -263,13 +169,49 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(describe(steps, requests))
         return 0
 
-    print(
-        "Running the live matrix is Task 5. It restarts ComfyUI once per arm and renders for hours,\n"
-        "on the stack the owner is using, so this harness refuses to start it from a bare\n"
-        "invocation. The plan follows; run it from Task 5 with an explicit request-template file.\n"
+    if not requests:
+        # The live matrix restarts the owner's ComfyUI once per arm and renders for hours. Starting
+        # that with nothing to render is never what anyone meant, so a bare invocation still
+        # refuses -- and says what it wanted rather than exiting silently.
+        print(
+            "Nothing to render: this run has no request templates, and this harness will not "
+            "invent one -- a made-up checkpoint or step count would measure a render nobody asked "
+            "for.\nPass --requests with a JSON file mapping \"family:mode\" to a real worker "
+            "request.\n"
+        )
+        print(describe(steps, requests))
+        return 2
+
+    options = runner.Options(
+        requests=requests,
+        out_dir=Path(args.out_dir),
+        force=args.force,
+        artefact_guard=args.artefact_guard,
+        link_kwargs={
+            "host": args.host,
+            "port": args.port,
+            "timeout": args.timeout,
+            "secret": session_secret(args.port, args.session_file),
+        },
     )
+
     print(describe(steps, requests))
-    return 2
+    print(f"LIVE RUN -- {len(steps)} arms, renders to {options.out_dir}, rows appended to "
+          f"{ledger.ledger_path()} as each cell finishes.\n")
+
+    try:
+        tally = runner.run_matrix(steps, options)
+    except runner.RestartFailed as exc:
+        # The arm is the independent variable. Nothing measured under an arm that did not launch
+        # could be read, so this stops rather than producing rows nobody can interpret -- and the
+        # stack was still handed back on the way out of run_arms_with_restore.
+        print(f"\nABORTED: {exc}")
+        print("  the arm is the independent variable; rows recorded under an arm that did not "
+              "launch cannot be interpreted.\n")
+        return 1
+
+    print(runner.describe_tally(tally, ledger.ledger_path()))
+    return 0 if tally.clean else 1
 
 
 if __name__ == "__main__":

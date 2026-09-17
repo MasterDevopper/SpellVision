@@ -542,3 +542,402 @@ def test_when_nothing_could_be_probed_the_restore_is_not_attempted(monkeypatch) 
     )
     assert result.attempted is False and result.ok is False
     assert any("NOT ATTEMPTED" in line for line in printed)
+
+
+# --- the execution loop (Task 5) -----------------------------------------------------------------
+#
+# Everything above covers the rules a row is held to. These cover the loop that produces the rows:
+# restart, read the arm back, render cold-then-twice on fresh seeds, guard, record. Nothing here
+# opens a socket -- harness.link.render and harness.link.restart_into_arm are the two fakes, and the
+# probe uses the same _FakeProbeOpener the restore tests already use.
+
+import measure_optimizations_run as runner  # noqa: E402
+import optimization_results as results_ledger  # noqa: E402
+
+
+def _argv_for(arm: dict | None) -> list[str]:
+    """What ComfyUI would actually be launched with for this arm.
+
+    Built here rather than imported from comfy_launch_policy so the fake cannot drift into agreeing
+    with the code under test by construction -- the point of reading argv back is that it is a
+    SECOND source.
+    """
+    argv = ["main.py"]
+    arm = arm or {}
+    if "attention" in arm:
+        argv.append("--use-sage-attention" if arm["attention"] == "sage"
+                    else "--use-pytorch-cross-attention")
+    if arm.get("fast"):
+        argv.append("--fast")
+        argv.extend(str(name) for name in arm["fast"])
+    if arm.get("dynamic_vram") is False:
+        argv.append("--disable-dynamic-vram")
+    if "vram_headroom" in arm:
+        argv += ["--reserve-vram", str(arm["vram_headroom"])]
+    return argv
+
+
+_FAKE_PROVENANCE = {
+    "attention_backend": "sdpa", "fast_flags": [], "dynamic_vram": True, "reserve_vram_gb": None,
+    "comfy_version": "0.34.0",
+}
+
+
+def _completed(seconds: float = 10.0, *, dest: str = "", job_id: str = "job-1",
+               provenance: dict | None = None) -> dict:
+    """A terminal job_update. ``provenance=None`` means "whatever arm is actually running", which
+    the rig fills in from the argv it last launched -- the same thing the worker's own
+    _optimizations_block probes off the live process."""
+    return {
+        "type": "job_update", "job_id": job_id, "state": "completed",
+        "result": {
+            "output": dest,
+            "generation_time_sec": seconds,
+            "optimizations": dict(provenance) if provenance is not None else None,
+        },
+    }
+
+
+def _provenance_of(argv: list[str]) -> dict:
+    """What a render launched with this argv would report about itself."""
+    import optimization_provenance as probe
+
+    return {
+        "attention_backend": probe.attention_from_argv(argv),
+        "fast_flags": probe.fast_from_argv(argv),
+        "dynamic_vram": probe.dynamic_vram_from_argv(argv),
+        "reserve_vram_gb": probe.reserve_vram_from_argv(argv),
+        "comfy_version": "0.34.0",
+    }
+
+
+def _failed(message: str = "CUDA out of memory") -> dict:
+    return {"type": "job_update", "job_id": "job-x", "state": "failed",
+            "error": {"code": "generation_error", "message": message}}
+
+
+def _narrow_steps() -> list:
+    """Two arms, one cell each: the smallest matrix that still has a baseline and a lever."""
+    return harness.arm_sequence(
+        harness.build_matrix(families=("krea2",), lever_ids=("sage_attention",))
+    )
+
+
+def _requests() -> dict:
+    return {"krea2:t2i": {"command": "t2i", "steps": 10,
+                          "original_output": "C:/out/plate.png",
+                          "original_metadata_output": "C:/out/plate.json"}}
+
+
+class _Rig:
+    """A whole fake run: every render answered from a script, every request captured."""
+
+    def __init__(self, tmp_path, monkeypatch, *, responder=None, restarter=None):
+        self.sent: list[dict] = []
+        self.rows_seen_at_render: list[int] = []
+        self.printed: list[str] = []
+        self.arms: list[dict | None] = []
+        self._responder = responder or (lambda request, index: _completed(10.0 + index))
+        self._restarter = restarter
+        self.running: dict = dict(_FAKE_PROVENANCE)
+
+        monkeypatch.setattr(results_ledger, "_LEDGER_PATH_OVERRIDE",
+                            tmp_path / "optimization_results.jsonl")
+        monkeypatch.setattr(harness.link, "render", self._render)
+        monkeypatch.setattr(harness.link, "restart_into_arm", self._restart)
+        monkeypatch.setattr(runner, "measure_quality",
+                            lambda *_a, **_kw: {"black_fraction": 0.01, "artefact_delta": 0.5})
+        self.out_dir = tmp_path / "renders"
+
+    def _render(self, request, **_kwargs):
+        self.sent.append(request)
+        self.rows_seen_at_render.append(len(results_ledger.read()))
+        message = self._responder(request, len(self.sent) - 1)
+        result = message.get("result")
+        if isinstance(result, dict) and result.get("optimizations") is None:
+            result["optimizations"] = dict(self.running)
+        return 99.0, message
+
+    def _restart(self, arm, **_kwargs):
+        self.arms.append(arm)
+        reply = (self._restarter(arm) if self._restarter is not None
+                 else {"type": "comfy_runtime_ack", "ok": True, "argv": _argv_for(arm)})
+        if reply.get("ok") is not False:
+            self.running = _provenance_of(list(reply.get("argv") or []))
+        return reply
+
+    def run(self, *, steps=None, requests=None, force=False, artefact_guard=False):
+        options = runner.Options(
+            requests=_requests() if requests is None else requests,
+            out_dir=self.out_dir,
+            force=force,
+            artefact_guard=artefact_guard,
+            probe_kwargs={
+                "opener": _FakeProbeOpener(_system_stats(["main.py", "--use-sage-attention"]))
+            },
+        )
+        return runner.run_matrix(steps or _narrow_steps(), options, printer=self.printed.append)
+
+    @property
+    def rows(self) -> list[dict]:
+        return results_ledger.read()
+
+
+def test_the_run_tags_cover_exactly_the_runs_a_cell_performs() -> None:
+    assert len(runner.RUN_TAGS) == harness.RUNS_PER_CELL
+
+
+def test_a_full_fake_run_records_every_cell_it_measured(tmp_path, monkeypatch) -> None:
+    """One warm row per cell -- the measurement -- and its cold row beside it, because a discarded
+    run nobody wrote down is how a 32% spread between two runs of ONE arm stays invisible."""
+    rig = _Rig(tmp_path, monkeypatch)
+    steps = _narrow_steps()
+    tally = rig.run(steps=steps)
+
+    cells = [cell for step in steps for cell in step.cells]
+    warm = [row for row in rig.rows if row["warm"] is True]
+    cold = [row for row in rig.rows if row["warm"] is False]
+    assert len(warm) == len(cells)
+    assert len(cold) == len(cells)
+    assert {(row["family"], row["mode"], row["lever"]) for row in warm} == {
+        (cell.family, cell.mode, cell.lever) for cell in cells
+    }
+    assert tally.cells_measured == len(cells)
+    assert tally.renders_ok == len(cells) * harness.RUNS_PER_CELL
+
+
+def test_every_render_in_the_whole_run_gets_its_own_seed(tmp_path, monkeypatch) -> None:
+    """ComfyUI's node cache is keyed on the graph, and the seed is in the graph. The recorded trap
+    on this project is a re-submit that changed only the output filename and came back in 12.1 s."""
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run()
+    seeds = [request["seed"] for request in rig.sent]
+    assert len(set(seeds)) == len(seeds)
+    assert all(0 <= seed <= harness.MAX_SEED for seed in seeds)
+    assert len({request["output"] for request in rig.sent}) == len(rig.sent)
+
+
+def test_the_seconds_come_from_the_job_not_from_the_stopwatch(tmp_path, monkeypatch) -> None:
+    """link.render also returns a wall reading, and it includes queue admission and upload. The
+    worker's own generation_time_sec is the render; the round trip is not."""
+    rig = _Rig(tmp_path, monkeypatch, responder=lambda _req, index: _completed(12.5))
+    rig.run()
+    warm = [row for row in rig.rows if row["warm"]][0]
+    assert warm["seconds"] == [12.5, 12.5]
+    assert 99.0 not in warm["seconds"], "the wall time must never reach a row as the render time"
+
+
+def test_a_completed_job_that_reported_no_time_is_a_failed_run(tmp_path, monkeypatch) -> None:
+    def no_time(_request, _index):
+        message = _completed(10.0)
+        message["result"].pop("generation_time_sec")
+        return message
+
+    rig = _Rig(tmp_path, monkeypatch, responder=no_time)
+    tally = rig.run()
+    assert rig.rows == []
+    assert tally.renders_failed == len(_narrow_steps()) * harness.RUNS_PER_CELL
+    assert any("generation_time_sec" in entry for entry in tally.failed_cells)
+
+
+def test_a_restart_whose_argv_does_not_match_marks_and_excludes_its_rows(tmp_path, monkeypatch) -> None:
+    """THE plant, now on the live path. ComfyUI was running with sage this morning, died, was
+    relaunched and came back on SDPA. A request for an arm is not evidence the arm took."""
+    def always_sdpa(_arm):
+        return {"type": "comfy_runtime_ack", "ok": True,
+                "argv": ["main.py", "--use-pytorch-cross-attention"]}
+
+    rig = _Rig(tmp_path, monkeypatch, restarter=always_sdpa)
+    tally = rig.run()
+
+    sage = [row for row in rig.rows if row["lever"] == "sage_attention"]
+    assert sage, "the cells still run -- an unverified arm is recorded, not skipped"
+    for row in sage:
+        assert row["arm_verified"] is False
+        assert row["excluded_from_delta"] is True
+        assert row["delta_pct"] is None
+        assert any("arm" in reason for reason in row["exclusions"])
+    assert any("sage_attention" in entry for entry in tally.unverified_arms)
+    assert any("ARM NOT VERIFIED" in line for line in rig.printed)
+
+
+def test_a_failed_render_does_not_abort_the_matrix(tmp_path, monkeypatch) -> None:
+    """One dead render must not take the other thirty-five with it."""
+    def one_bad(_request, index):
+        return _failed() if index == 1 else _completed(10.0 + index)
+
+    rig = _Rig(tmp_path, monkeypatch, responder=one_bad)
+    tally = rig.run()
+
+    assert tally.renders_failed == 1
+    assert tally.cells_measured == 2, "the matrix kept going"
+    warm = [row for row in rig.rows if row["warm"]]
+    assert len(warm) == 2
+    first = next(row for row in rig.rows if row["lever"] == "sdpa_baseline" and row["warm"])
+    assert len(first["seconds"]) == 1
+    assert any("one timed run" in reason for reason in first["exclusions"])
+    assert any(entry["ok"] is False and entry["reason"] for entry in first["runs"])
+
+
+def test_a_failed_cold_run_does_not_relabel_a_warm_run_as_cold(tmp_path, monkeypatch) -> None:
+    """159.27 s and 120.72 s are one configuration cold and warm. A row that says the wrong one
+    cannot be read, and the first SURVIVING run is not automatically the cold one."""
+    def cold_dies(_request, index):
+        return _failed("cold OOM") if index == 0 else _completed(10.0 + index)
+
+    rig = _Rig(tmp_path, monkeypatch, responder=cold_dies)
+    rig.run(steps=_narrow_steps()[:1])
+
+    assert [row["warm"] for row in rig.rows] == [True]
+    assert rig.rows[0]["seconds"] == [11.0, 12.0]
+
+
+def test_a_failed_restart_aborts_the_run_and_still_hands_the_stack_back(tmp_path, monkeypatch) -> None:
+    """The arm is the independent variable: nothing measured under an arm that did not launch is
+    interpretable. But the owner's ComfyUI is still theirs."""
+    def dead(arm):
+        if arm == {"attention": "sdpa"}:
+            return {"type": "comfy_runtime_ack", "ok": True, "argv": _argv_for(arm)}
+        return {"type": "comfy_runtime_ack", "ok": False, "error": "comfy would not come back up"}
+
+    rig = _Rig(tmp_path, monkeypatch, restarter=dead)
+    with pytest.raises(runner.RestartFailed, match="would not come back up"):
+        rig.run()
+    assert any("RESTORE" in line for line in rig.printed)
+
+
+def test_the_resume_check_skips_a_cell_the_ledger_already_holds(tmp_path, monkeypatch) -> None:
+    """This run is measured in hours. A re-run must not re-render what is already recorded -- but
+    only where the recorded row carries the same provenance, or "already measured" would mean
+    "measured once, on some other build"."""
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run()
+    assert len(rig.sent) == 6
+
+    again = _Rig(tmp_path, monkeypatch)
+    tally = again.run()
+    assert again.sent == []
+    assert tally.cells_skipped == 2
+    assert any("already holds a warm row" in line for line in again.printed)
+
+
+def test_force_re_measures_a_cell_the_ledger_already_holds(tmp_path, monkeypatch) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run()
+    again = _Rig(tmp_path, monkeypatch)
+    tally = again.run(force=True)
+    assert len(again.sent) == 6
+    assert tally.cells_skipped == 0
+
+
+def test_a_row_recorded_under_other_provenance_does_not_count_as_measured(tmp_path, monkeypatch) -> None:
+    other = dict(_FAKE_PROVENANCE, attention_backend="sage", fast_flags=["fp16_accumulation"])
+    rig = _Rig(tmp_path, monkeypatch,
+               responder=lambda _req, index: _completed(10.0 + index, provenance=other))
+    rig.run()
+    again = _Rig(tmp_path, monkeypatch)
+    again.run()
+    assert len(again.sent) == 6, "a matching label is not a matching build"
+
+
+def test_rows_are_appended_as_each_cell_finishes_not_at_the_end(tmp_path, monkeypatch) -> None:
+    """A crash forty minutes into an hours-long run must not cost the thirty minutes before it.
+
+    Proved by watching the ledger DURING the run: the renders of the second cell must already see
+    the first cell's rows on disk. Batching the appends to the end makes every reading zero.
+    """
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run()
+    assert rig.rows_seen_at_render[:3] == [0, 0, 0], "nothing is recorded before a cell finishes"
+    assert rig.rows_seen_at_render[3] == 2, (
+        "the first cell's cold and warm rows must be on disk before the second cell renders"
+    )
+
+
+def test_a_cell_with_no_request_template_is_reported_rather_than_invented(tmp_path, monkeypatch) -> None:
+    """The harness will not guess a checkpoint or a step count -- that would measure a render
+    nobody asked for."""
+    rig = _Rig(tmp_path, monkeypatch)
+    tally = rig.run(requests={})
+    assert rig.sent == []
+    assert rig.rows == []
+    assert tally.missing_templates == ["krea2:t2i", "krea2:t2i"]
+    assert any("will not invent" in line for line in rig.printed)
+
+
+def test_the_baseline_mean_travels_to_the_lever_row(tmp_path, monkeypatch) -> None:
+    """A delta is never computed against a baseline looked up from another session or build."""
+    rig = _Rig(tmp_path, monkeypatch,
+               responder=lambda _req, index: _completed(100.0 if index < 3 else 50.0))
+    rig.run()
+    sage = next(row for row in rig.rows if row["lever"] == "sage_attention" and row["warm"])
+    assert sage["baseline_mean"] == pytest.approx(100.0)
+    assert sage["delta_pct"] == pytest.approx(-50.0)
+
+
+def test_the_progress_output_names_the_arm_the_cell_and_the_run(tmp_path, monkeypatch) -> None:
+    """This goes to a terminal for an hour; it is the operator's only window."""
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run()
+    lines = [line for line in rig.printed if "run 1/3" in line]
+    assert lines and "COLD" in lines[0]
+    assert "sdpa_baseline" in lines[0] and "krea2/t2i" in lines[0] and "seed=" in lines[0]
+    assert any("finished:" in line for line in rig.printed)
+
+
+def test_the_artefact_guard_adds_one_untimed_equal_seed_render_when_asked(tmp_path, monkeypatch) -> None:
+    """Every timed render gets a fresh seed, so an equal-seed comparison needs its own render. It
+    is never timed, so a node-cache hit on it cannot reach a measurement."""
+    steps = harness.arm_sequence(
+        harness.build_matrix(families=("krea2",), lever_ids=("vae_tiling",))
+    )
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run(steps=steps, artefact_guard=True)
+
+    def _is_guard(request):
+        return Path(request["output"]).stem.endswith("_" + runner.GUARD_TAG + "_"
+                                                     + str(request["seed"]))
+
+    guard = [request for request in rig.sent if _is_guard(request)]
+    assert len(guard) == 2, "one guard render per cell, baseline included"
+    assert len({request["seed"] for request in guard}) == 1, "the guard seed is shared across arms"
+    timed = [request for request in rig.sent if not _is_guard(request)]
+    assert all(request["seed"] != guard[0]["seed"] for request in timed)
+    for row in rig.rows:
+        assert all(entry["seed"] != guard[0]["seed"] for entry in row["runs"])
+
+
+def test_the_lever_request_keys_are_the_only_thing_the_harness_changes(tmp_path, monkeypatch) -> None:
+    """vae_tiling is a request key, not a launch flag. Everything else in the template is the
+    operator's and is sent unedited."""
+    steps = harness.arm_sequence(
+        harness.build_matrix(families=("krea2",), lever_ids=("vae_tiling",))
+    )
+    rig = _Rig(tmp_path, monkeypatch)
+    rig.run(steps=steps)
+    tiled = [request for request in rig.sent if request.get("enable_vae_tiling") is True]
+    assert len(tiled) == harness.RUNS_PER_CELL
+    assert all(request["steps"] == 10 for request in rig.sent), "the template is not rewritten"
+
+
+def test_the_live_path_refuses_when_there_are_no_request_templates(capsys) -> None:
+    """A bare invocation still refuses: restarting the owner's ComfyUI five times to render nothing
+    is never what anyone meant."""
+    assert harness.main([]) == 2
+    assert "will not" in capsys.readouterr().out.lower()
+
+
+def test_a_resumed_run_still_carries_the_skipped_baselines_mean(tmp_path, monkeypatch) -> None:
+    """The feature that saves an hour must not cost the comparison. A resumed run whose baseline
+    cell is skipped still has to hand that family's baseline_mean to every lever below it, or the
+    levers measured after the resume record numbers with nothing to compare them against."""
+    first = _Rig(tmp_path, monkeypatch, responder=lambda _req, _index: _completed(100.0))
+    first.run(steps=_narrow_steps()[:1])
+
+    second = _Rig(tmp_path, monkeypatch, responder=lambda _req, _index: _completed(50.0))
+    tally = second.run()
+
+    assert tally.cells_skipped == 1, "the baseline cell was already measured"
+    sage = next(row for row in second.rows if row["lever"] == "sage_attention" and row["warm"])
+    assert sage["baseline_mean"] == pytest.approx(100.0)
+    assert sage["delta_pct"] == pytest.approx(-50.0)
