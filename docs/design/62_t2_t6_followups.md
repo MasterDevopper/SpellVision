@@ -103,9 +103,19 @@ Its **render** path is not exposed the way the drop path was: `:1004` spends the
 
 Closing it needs Flows to carry a compile verdict it does not currently request. **Inferring one from the file's presence is exactly the mistake `fe3ad7d` just removed**, so this is a real change, not a one-liner.
 
-**3r. A drop while ComfyUI is down now refuses — owner's call.** `object_info_available: false` is treated as a refusal, so the app answers "we could not check" with a refusal rather than opening from a file of unknown age. Defensible, and a behaviour change nobody asked for. The honest alternative if offline inspection is wanted back is to open with `safe_to_submit` closed and the reason shown as a warning — **not** to read the file.
+**3r. A drop while ComfyUI is down — FIXED 2026-09-17, the owner's way.** Asked directly, the owner chose: **open with the values loaded, submission closed, the reason shown as a warning.** `object_info_available: false` is no longer a refusal. It is a **third state**, and the distinction it turns on is that *"we could not check"* is a fact about the **machine** while *"we checked and it is broken"* is a fact about the **graph** — folding them together was defensible and cost offline inspection for nothing.
 
-Two consequences accepted: readiness for the 20 refusing workflows now answers `undetermined` rather than a verdict read off a broken prompt (honest; those rows go grey), and the 7 stale `prompt_api.json` files are ignored by every reader but neither deleted nor recompiled.
+- **Refused** (`errors` / `missing_classes` / `dangling_links`, or a failure carrying a reason): unchanged. No page, no draft, no readiness round trip, and the sentence naming the packs is the answer. **A fault the reply names outranks the offline flag**, so a reply that says both still refuses — asserted on both surfaces, because widening this path is the one way it could do harm.
+- **Unverified** (`object_info_available: false` and no fault named): the page **opens**, submission is **closed**, and the warning is *"ComfyUI is offline, so this workflow's nodes and models could not be checked…"*.
+- **Verified**: unchanged.
+
+**Where the offline values come from.** The **source graph**, never a `prompt_api.json` of unknown age — opening offline must not be the door the stale artefact comes back through. `WorkflowDraftBuilder::buildUnverified` drops any named path that is not the source workflow *itself*, so a caller cannot hand it one; the worker's offline reply now carries `graph_format` (a fact about the file, needing no schema), so an **api-prompt** graph fills the cockpit completely while a **UI graph** opens with no values at all. Fewer fields, honestly empty, and the warning says why.
+
+**Submission is closed by construction, not by a label.** The unverified draft carries `safe_to_submit: false`, and `finalizeDraft` treats the builder's verdict as a **ceiling** — so a readiness pass answering `ready` cannot reopen it. Asserted as that outcome on the draft the cockpit reads, not as a property beside it.
+
+**One vocabulary.** `WorkflowDropCoordinator::schemaUnavailableWarning` is the single author of the sentence, called by `WorkflowCompileVerdict` exactly as `compileRefusal` already is, with a test asserting the two surfaces cannot drift. The plant — folding the offline state back into the refusal set — failed 6 of the new cases while both refusal guards kept passing.
+
+Still true of the rest: the 7 stale `prompt_api.json` files are ignored by every reader but neither deleted nor recompiled. **Newly visible:** a drop made while ComfyUI is down pays the `/object_info` transport's full **120 s** retry budget before the page opens — correct for a mid-model-swap blip, far too slow for a ComfyUI that is simply not running, and not this fix's scope.
 
 **3b. A first-ever import of a workflow with missing node packs times out at 120 s.** cm-cli cold is ~128 s; the cache is why the *second* drop works. Either raise the budget for a cold import or make the first call warm the cache without holding the request. `python/node_dependency_resolver.py`.
 

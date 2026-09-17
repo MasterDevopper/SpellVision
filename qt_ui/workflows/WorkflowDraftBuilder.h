@@ -88,6 +88,21 @@ public:
     // a real owner workflow's prompt, because the graphs that matter are the ones nobody here wrote.
     static Result buildFromPrompt(const QJsonObject &prompt, const Source &source);
 
+    // A draft for a workflow NOTHING HAS VERIFIED, because ComfyUI was unreachable when the compile
+    // was asked for. "We could not check" is not "this is broken": the workflow is exactly as
+    // readable as it was a minute ago, so it opens for inspection -- and it is never submittable.
+    //
+    // It ignores `source.compiledPromptPath` on purpose. That path names an artefact whose age
+    // nothing vouches for, and reading it is the defect this whole arc removed; opening offline must
+    // not become the door it comes back through. The only file it may read is the SOURCE graph, and
+    // only when that graph is already an API prompt. A UI graph cannot be read without the live
+    // schema, so it opens with no values at all -- fewer fields, honestly empty, and `reason` says
+    // why. `reason` is prepended to the draft's warnings and is the sentence the user sees.
+    //
+    // What it does NOT relax: a shape with no page to open on (v2v, audio, 3d) is still refused,
+    // because there is still nowhere to put it.
+    static Result buildUnverified(const Source &source, const QString &reason);
+
     // Which file the draft would be read from, or empty when there is none.
     static QString resolvePromptPath(const Source &source);
 

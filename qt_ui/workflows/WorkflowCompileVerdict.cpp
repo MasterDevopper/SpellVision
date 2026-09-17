@@ -39,6 +39,23 @@ WorkflowCompileVerdict::fromCompileReply(const QJsonObject &compileReply,
     if (!prompt.refusal.isEmpty())
         return prompt;
 
+    // SECOND: ComfyUI was unreachable, so nobody checked. Not a refusal -- the graph is unchanged
+    // and just as readable -- and not a yes either. The row opens, submission closed, this sentence
+    // shown as a warning. The sentence is the drop path's own function for the same reason the
+    // refusal is: one cause, one message, and a test asserting the two cannot drift.
+    //
+    // The path may only ever be the SOURCE graph, and only when the worker says that graph is
+    // already an API prompt. `verified` stays FALSE -- it still means "a compile vouched for this",
+    // and no compile ran.
+    prompt.unverifiedReason = WorkflowDropCoordinator::schemaUnavailableWarning(compileReply);
+    if (!prompt.unverifiedReason.isEmpty())
+    {
+        prompt.schemaUnavailable = true;
+        if (stringAt(compileReply, QStringLiteral("graph_format")) == QStringLiteral("comfy_api_prompt"))
+            prompt.path = sourceWorkflowPath.trimmed();
+        return prompt;
+    }
+
     const QString named = stringAt(compileReply, QStringLiteral("compiled_prompt_path"));
     if (!named.isEmpty())
     {

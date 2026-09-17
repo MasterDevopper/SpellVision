@@ -959,9 +959,17 @@ void WorkflowLibraryPage::onApplyClicked()
 // same price Check Readiness already pays, and paid only when the user actually opens a workflow
 // rather than on every row of every refresh.
 //
-// Three outcomes, kept apart by WorkflowCompileVerdict: a refusal (the user gets the worker's own
-// sentence, with the packs and repository URLs the Python side resolved), a named path (the draft),
-// and silence (which is not a yes, and says so).
+// Four outcomes, kept apart by WorkflowCompileVerdict: a refusal (the user gets the worker's own
+// sentence, with the packs and repository URLs the Python side resolved), an UNVERIFIED reply --
+// ComfyUI unreachable, so nothing was checked, which opens from the source graph with submission
+// closed and the reason shown as a warning -- a named path (the draft), and silence (which is not a
+// yes, and says so).
+//
+// The unverified case was briefly folded into the refusal. It is separated again because "we could
+// not check" is a fact about the MACHINE and "we checked and it is broken" is a fact about the
+// GRAPH: the second has nothing to open, the first has a workflow that is exactly as readable as it
+// was a minute ago. What must not come back with it is the stale artefact -- so the values are read
+// from the source workflow and the import folder's prompt_api.json is never touched.
 void WorkflowLibraryPage::requestVerifiedDraft(int index)
 {
     if (index < 0 || index >= workflows_.size())
@@ -1007,6 +1015,32 @@ void WorkflowLibraryPage::requestVerifiedDraft(int index)
                     tr("Open Workflow"),
                     tr("%1 cannot be opened as a draft.\n\n%2").arg(record.displayName, compiled.refusal),
                     stderrText);
+                return;
+            }
+
+            // ComfyUI is down. Nothing checked this graph, but nothing found it broken either, and
+            // the workflow is exactly as readable as it was a minute ago -- so it OPENS, with the
+            // reason carried into the draft as a warning and submission closed by construction. The
+            // values come from the SOURCE graph; the import folder's prompt_api.json is not touched,
+            // because opening offline must not be the door the stale artefact comes back through.
+            if (compiled.schemaUnavailable)
+            {
+                WorkflowRecord unverified = record;
+                unverified.compiledPromptPath = compiled.path;
+                unverified.compiledPromptVerified = false;
+                buildUnverifiedDraft(unverified, compiled.unverifiedReason);
+
+                if (!unverified.reusableDraftPresent)
+                {
+                    showWorkerFailure(
+                        tr("Open Workflow"),
+                        tr("%1 cannot be opened as a draft.\n\n%2")
+                            .arg(record.displayName, unverified.reusableDraftReason),
+                        stderrText);
+                    return;
+                }
+
+                emit workflowDraftRequested(unverified.reusableDraft);
                 return;
             }
 
@@ -2624,6 +2658,29 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
     source.missingCustomNodes = record.missingCustomNodes;
 
     const auto result = spellvision::workflows::WorkflowDraftBuilder::build(source);
+    record.reusableDraftPresent = result.present;
+    record.reusableDraftSafeToSubmit = result.safeToSubmit;
+    record.reusableDraftReason = result.reason;
+    record.reusableDraft = result.draft;
+}
+
+// The same row when ComfyUI is down. Same Source, same builder, different route: the compiled
+// artefact is dropped rather than read, and the draft that comes back is never submittable.
+void WorkflowLibraryPage::buildUnverifiedDraft(WorkflowRecord &record, const QString &reason)
+{
+    spellvision::workflows::WorkflowDraftBuilder::Source source;
+    source.displayName = record.displayName;
+    source.profilePath = record.profilePath;
+    source.sourceWorkflowPath = record.sourceWorkflowPath;
+    source.sourceWorkflowFormat = record.sourceWorkflowFormat;
+    source.compiledPromptPath = record.compiledPromptPath;
+    source.modeId = record.modeId;
+    source.mediaType = record.mediaType;
+    source.backend = record.backend;
+    source.missingRuntimeAssets = record.missingRuntimeAssets;
+    source.missingCustomNodes = record.missingCustomNodes;
+
+    const auto result = spellvision::workflows::WorkflowDraftBuilder::buildUnverified(source, reason);
     record.reusableDraftPresent = result.present;
     record.reusableDraftSafeToSubmit = result.safeToSubmit;
     record.reusableDraftReason = result.reason;

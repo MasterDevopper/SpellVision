@@ -85,6 +85,22 @@ QJsonObject refusedCompileReply()
     return reply;
 }
 
+// What compile_workflow_prompt replies when ComfyUI is DOWN: `ok:false`, the flag, an empty
+// missing_classes -- it must not claim to know what is missing -- and, because nothing about the
+// FILE needs a schema, what kind of graph it is.
+QJsonObject unreachableCompileReply()
+{
+    QJsonObject reply;
+    reply.insert(QStringLiteral("type"), QStringLiteral("workflow_compile_result"));
+    reply.insert(QStringLiteral("ok"), false);
+    reply.insert(QStringLiteral("object_info_available"), false);
+    reply.insert(QStringLiteral("graph_format"), QStringLiteral("comfy_ui_graph"));
+    reply.insert(QStringLiteral("missing_classes"), QJsonArray());
+    reply.insert(QStringLiteral("reason"),
+                 QStringLiteral("ComfyUI is not reachable, so node availability could not be checked."));
+    return reply;
+}
+
 QJsonObject cleanCompileReply(const QString &slug)
 {
     QJsonObject reply;
@@ -136,7 +152,10 @@ private slots:
     void thatSameStaleFileWouldHaveBuiltAPerfectlyHealthyLookingDraft();
     void theRefusalIsTheDropPathsOwnSentenceAndCarriesThePack();
     void anOldWorkerThatNamesAPathBesideItsRefusalIsStillRefused();
-    void anUnreachableSchemaIsAnAnswerNotAnInvitationToGuess();
+    void anUnreachableSchemaIsUnverifiedRatherThanRefused();
+    void theOfflineDraftOpensUnsubmittableAndStillDoesNotReadTheStaleFile();
+    void bothSurfacesSayTheSameThingAboutAnOfflineComfy();
+    void aRefusalSurvivesTheSchemaFlagSayingUnreachable();
     void aCleanCompileVerifiesTheFileItJustWrote();
     void aCleanCompileStillBuildsTheDraftItBuiltBefore();
     void anApiPromptGraphIsItsOwnPromptAndOutranksTheDirectorysOlderFile();
@@ -220,23 +239,85 @@ void WorkflowCompileVerdictTest::anOldWorkerThatNamesAPathBesideItsRefusalIsStil
     QVERIFY2(compiled.refusal.contains(QStringLiteral("CR Text Concatenate")), qPrintable(compiled.refusal));
 }
 
-void WorkflowCompileVerdictTest::anUnreachableSchemaIsAnAnswerNotAnInvitationToGuess()
+void WorkflowCompileVerdictTest::anUnreachableSchemaIsUnverifiedRatherThanRefused()
 {
-    QJsonObject unreachable;
-    unreachable.insert(QStringLiteral("type"), QStringLiteral("workflow_compile_result"));
-    unreachable.insert(QStringLiteral("ok"), false);
-    unreachable.insert(QStringLiteral("object_info_available"), false);
-    unreachable.insert(QStringLiteral("missing_classes"), QJsonArray());
-    unreachable.insert(QStringLiteral("reason"),
-                       QStringLiteral("ComfyUI is not reachable, so node availability could not be checked."));
-
+    // Not a refusal. Nothing checked this graph, and nothing found it broken -- those are different
+    // answers, and only the second has nothing to show. The row still opens; what it may NOT do is
+    // claim to be verified, and what it may not read is the artefact in the folder.
     const auto compiled = WorkflowCompileVerdict::fromCompileReply(
-        unreachable,
+        unreachableCompileReply(),
         QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("workflow.json")));
 
-    QVERIFY(compiled.path.isEmpty());
+    QVERIFY2(compiled.refusal.isEmpty(), qPrintable(compiled.refusal));
+    QVERIFY(compiled.schemaUnavailable);
     QVERIFY(!compiled.verified);
-    QVERIFY2(compiled.refusal.contains(QStringLiteral("not reachable")), qPrintable(compiled.refusal));
+    QVERIFY2(compiled.unverifiedReason.contains(QStringLiteral("ComfyUI is offline")),
+             qPrintable(compiled.unverifiedReason));
+    // A UI graph needs the live schema to become a prompt, so offline there is no file to read --
+    // and above all not this one, which is sitting right there.
+    QVERIFY2(compiled.path.isEmpty(), qPrintable(compiled.path));
+    QVERIFY(QFileInfo::exists(stalePromptPath(slug_)));
+}
+
+void WorkflowCompileVerdictTest::theOfflineDraftOpensUnsubmittableAndStillDoesNotReadTheStaleFile()
+{
+    // The Flows row carries the constructed prompt_api.json path on the record, so the builder is
+    // handed it on purpose here: an offline open must drop it unread rather than trust the caller.
+    WorkflowDraftBuilder::Source source = sourceForImport(slug_);
+    source.compiledPromptPath = stalePromptPath(slug_);
+
+    const auto unverified = WorkflowDraftBuilder::buildUnverified(
+        source, WorkflowDropCoordinator::schemaUnavailableWarning(unreachableCompileReply()));
+
+    QVERIFY2(unverified.present, qPrintable(unverified.reason));
+    QVERIFY(!unverified.safeToSubmit);
+    QCOMPARE(unverified.draft.value(QStringLiteral("safe_to_submit")).toBool(true), false);
+
+    // Present, and still unused. thatSameStaleFileWouldHaveBuiltAPerfectlyHealthyLookingDraft above
+    // is the counterweight: read it and the extractor is delighted with it.
+    QVERIFY(QFileInfo::exists(stalePromptPath(slug_)));
+    const QString carried = unverified.draft.value(QStringLiteral("compiled_prompt_path")).toString();
+    QVERIFY2(!carried.contains(QStringLiteral("prompt_api.json")), qPrintable(carried));
+    QVERIFY(!unverified.draft.contains(QStringLiteral("steps")));
+    QVERIFY(!unverified.draft.contains(QStringLiteral("sampler")));
+
+    bool warned = false;
+    for (const QJsonValue &value : unverified.draft.value(QStringLiteral("warnings")).toArray())
+        warned = warned || value.toString().contains(QStringLiteral("ComfyUI is offline"));
+    QVERIFY(warned);
+}
+
+void WorkflowCompileVerdictTest::bothSurfacesSayTheSameThingAboutAnOfflineComfy()
+{
+    // One vocabulary, not two. The drop path and Flows meet the same condition and must hand the
+    // user the same sentence -- the same property the refusal already has, asserted the same way,
+    // because two wordings for "ComfyUI is down" start disagreeing on the first user who sees both.
+    const QJsonObject reply = unreachableCompileReply();
+
+    const auto flows = WorkflowCompileVerdict::fromCompileReply(
+        reply, QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("workflow.json")));
+    const auto drop = WorkflowDropCoordinator::compiledPromptFor(reply, QJsonObject());
+
+    QVERIFY(!flows.unverifiedReason.isEmpty());
+    QCOMPARE(flows.unverifiedReason, drop.unverifiedReason);
+    QCOMPARE(flows.unverifiedReason, WorkflowDropCoordinator::schemaUnavailableWarning(reply));
+    QCOMPARE(flows.refusal, drop.refusal);
+}
+
+void WorkflowCompileVerdictTest::aRefusalSurvivesTheSchemaFlagSayingUnreachable()
+{
+    // The regression guard. Widening the offline path must not hand a refused graph a way through:
+    // a reply that NAMES a fault has checked something, whatever it says about reachability.
+    QJsonObject reply = refusedCompileReply();
+    reply.insert(QStringLiteral("object_info_available"), false);
+
+    const auto compiled = WorkflowCompileVerdict::fromCompileReply(
+        reply, QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("workflow.json")));
+
+    QVERIFY(!compiled.schemaUnavailable);
+    QVERIFY(!compiled.verified);
+    QVERIFY(compiled.path.isEmpty());
+    QVERIFY2(compiled.refusal.contains(QStringLiteral("CR Text Concatenate")), qPrintable(compiled.refusal));
 }
 
 // --- 2: the regression --------------------------------------------------------------------------

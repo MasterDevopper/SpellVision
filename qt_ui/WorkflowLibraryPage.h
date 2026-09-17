@@ -217,6 +217,10 @@ private:
     static void applyCapabilityReport(WorkflowRecord &record, const QJsonObject &capability);
     static bool ensureCompiledPrompt(WorkflowRecord &record);
     static void buildReusableDraft(WorkflowRecord &record);
+    // The same row, built when NOTHING verified it because ComfyUI was unreachable. It reads the
+    // source graph and never the import folder's artefact, and the draft it produces is never
+    // submittable -- see WorkflowDraftBuilder::buildUnverified.
+    static void buildUnverifiedDraft(WorkflowRecord &record, const QString &reason);
     // Compile the row against the live schema and hand the cockpit a draft built from the path that
     // compile named -- or the refusal, with the packs it named, and no draft at all.
     void requestVerifiedDraft(int index);

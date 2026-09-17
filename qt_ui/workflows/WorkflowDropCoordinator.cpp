@@ -265,20 +265,48 @@ WorkflowDropCoordinator::Readiness WorkflowDropCoordinator::readinessOf(const QJ
     return ready.toBool() ? Readiness::Ready : Readiness::NotReady;
 }
 
+QString WorkflowDropCoordinator::schemaUnavailableWarning(const QJsonObject &compileReply)
+{
+    const QJsonValue schemaAvailable = compileReply.value(QStringLiteral("object_info_available"));
+    if (!schemaAvailable.isBool() || schemaAvailable.toBool())
+        return {};
+
+    // A fault the reply NAMES outranks the flag. If classes are missing, links dangle or the
+    // converter reported errors, then something did look at this graph and found it broken, and
+    // that is a refusal whatever else the reply says about reachability.
+    if (!stringListAt(compileReply, QStringLiteral("errors")).isEmpty()
+        || !stringListAt(compileReply, QStringLiteral("missing_classes")).isEmpty()
+        || !stringListAt(compileReply, QStringLiteral("dangling_links")).isEmpty())
+        return {};
+
+    // The user's words, not the worker's. The worker's own sentence ("ComfyUI is not reachable, so
+    // node availability could not be checked") is a report; what the user needs is that plus what it
+    // means for the page in front of them.
+    return QStringLiteral(
+        "ComfyUI is offline, so this workflow's nodes and models could not be checked. The values "
+        "shown were read from the workflow file itself; nothing has verified that this graph can "
+        "run, so it cannot be submitted until ComfyUI is running.");
+}
+
 QString WorkflowDropCoordinator::compileRefusal(const QJsonObject &compileReply)
 {
     const QStringList errors = stringListAt(compileReply, QStringLiteral("errors"));
     const QStringList missingClasses = stringListAt(compileReply, QStringLiteral("missing_classes"));
     const QStringList dangling = stringListAt(compileReply, QStringLiteral("dangling_links"));
-    const QJsonValue schemaAvailable = compileReply.value(QStringLiteral("object_info_available"));
-    const bool schemaUnavailable = schemaAvailable.isBool() && !schemaAvailable.toBool();
     const QJsonValue ok = compileReply.value(QStringLiteral("ok"));
     const QString said = firstNonEmpty({stringAt(compileReply, QStringLiteral("reason")),
                                         stringAt(compileReply, QStringLiteral("error"))});
     const bool failedWithAReason = ok.isBool() && !ok.toBool() && !said.isEmpty();
 
-    if (errors.isEmpty() && missingClasses.isEmpty() && dangling.isEmpty() && !schemaUnavailable
-        && !failedWithAReason)
+    // Not a refusal. "We could not check" is the third state, and it opens -- see
+    // schemaUnavailableWarning. It is tested BEFORE failedWithAReason because the offline reply
+    // carries `ok: false` and a reason of its own, which would otherwise read as a verdict on the
+    // graph. It is tested AFTER the arrays above, which schemaUnavailableWarning re-reads, so a
+    // reply that names a genuine fault still refuses.
+    if (!schemaUnavailableWarning(compileReply).isEmpty())
+        return {};
+
+    if (errors.isEmpty() && missingClasses.isEmpty() && dangling.isEmpty() && !failedWithAReason)
         return {};
 
     // The worker authors this sentence; it already names the packs and their repository URLs, and
@@ -342,6 +370,20 @@ WorkflowDropCoordinator::compiledPromptFor(const QJsonObject &compileReply,
     compiled.refusal = compileRefusal(compileReply);
     if (!compiled.refusal.isEmpty())
         return compiled;
+
+    // SECOND: nobody checked. The graph is not refused -- it is unverified, and it opens. The one
+    // thing that must not happen here is the stale-artefact route coming back in through a different
+    // door: no prompt_api.json is looked for, and the only file that may be read is the SOURCE graph
+    // the user just dropped, and only when that graph is already an API prompt. A UI graph needs the
+    // live schema to become one, so offline it yields no values at all -- fewer fields, honestly
+    // empty, with the warning saying why.
+    compiled.unverifiedReason = schemaUnavailableWarning(compileReply);
+    if (!compiled.unverifiedReason.isEmpty())
+    {
+        if (stringAt(compileReply, QStringLiteral("graph_format")) == QStringLiteral("comfy_api_prompt"))
+            compiled.path = stringAt(artifactsOf(importReply), QStringLiteral("workflow_path"));
+        return compiled;
+    }
 
     compiled.path = stringAt(compileReply, QStringLiteral("compiled_prompt_path"));
     if (!compiled.path.isEmpty())
@@ -572,6 +614,13 @@ void WorkflowDropCoordinator::onCompileReply(DropContext context, const QJsonObj
         return;
     }
 
+    // Not a refusal: nobody could check. The page opens with whatever the source graph yields, the
+    // reason rides into the draft as a warning, and `finish` builds it through the unverified route
+    // so that submission is closed by construction rather than by a label.
+    context.unverifiedReason = compiled.unverifiedReason;
+    if (!context.unverifiedReason.isEmpty())
+        log(context.unverifiedReason);
+
     if (compiled.fromStaleFallback)
     {
         // Never silent. This file was not written by the compile that just ran, and nothing in the
@@ -636,7 +685,12 @@ void WorkflowDropCoordinator::finish(const DropContext &context,
         draftSourceFor(context.importReply, context.compiledPromptPath, context.modeId);
     source.missingRuntimeAssets << missingRuntimeAssets;
 
-    const auto built = WorkflowDraftBuilder::build(source);
+    // Two routes, one builder. The unverified route ignores any compiled artefact and never returns
+    // a submittable draft, which `finalizeDraft` then keeps as a ceiling -- so a readiness pass that
+    // happens to answer "ready" cannot reopen submission on a graph nothing has verified.
+    const auto built = context.unverifiedReason.isEmpty()
+        ? WorkflowDraftBuilder::build(source)
+        : WorkflowDraftBuilder::buildUnverified(source, context.unverifiedReason);
     if (!built.present)
     {
         if (bindings_.refreshWorkflowLibrary)

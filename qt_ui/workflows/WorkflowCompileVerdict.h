@@ -25,6 +25,11 @@ namespace spellvision::workflows
 //
 //   a REFUSAL      -- the graph names classes the live schema does not publish. There is no prompt,
 //                     and the sentence naming the packs to install is the answer the user gets.
+//   UNVERIFIED     -- ComfyUI was unreachable, so nothing was checked. A fact about the MACHINE,
+//                     not about the graph: the row OPENS from the source workflow, with submission
+//                     closed and the reason shown as a warning. It was briefly folded into the
+//                     refusal above, which cost offline inspection for no gain; "we could not
+//                     check" and "we checked and it is broken" are different answers.
 //   a NAMED PATH   -- the file the compile just wrote. That, and only that, is verified.
 //   SILENCE        -- a reply carrying none of the above. It is not a yes.
 //
@@ -55,6 +60,12 @@ public:
         // Neither a path nor a refusal: nobody answered the question. Said out loud, because a
         // question nobody answered reading as "yes" is the defect this unit exists for.
         QString unverifiedReason;
+        // True for ONE of the unverified cases: ComfyUI was unreachable, so nothing could be
+        // checked. That is a fact about the machine and not about the graph, so the row still OPENS
+        // -- from the source workflow, never from an artefact -- with `unverifiedReason` shown as a
+        // warning and submission closed. Every other unverified reply is still a dead end here,
+        // because it means the WORKER did not answer, which is not the same as ComfyUI being down.
+        bool schemaUnavailable = false;
         // True only when `path` came from the compile. The one field a caller may key a draft on.
         bool verified = false;
     };

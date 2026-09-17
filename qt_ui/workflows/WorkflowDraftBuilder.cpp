@@ -812,6 +812,22 @@ QString couldNotRead(const QString &field)
 {
     return QStringLiteral("%1 could not be read from this workflow, so the page keeps its own.").arg(field);
 }
+
+// Who this draft is FOR -- the identity fields every draft carries whatever was or was not read out
+// of a prompt. One author, so the unverified draft cannot come out a different shape from the
+// verified one and have the cockpit notice.
+QJsonObject identityDraft(const WorkflowDraftBuilder::Source &source)
+{
+    QJsonObject draft;
+    draft.insert(QStringLiteral("source_name"), source.displayName);
+    draft.insert(QStringLiteral("source_profile_path"), source.profilePath);
+    draft.insert(QStringLiteral("source_workflow_path"), source.sourceWorkflowPath);
+    draft.insert(QStringLiteral("compiled_prompt_path"), source.compiledPromptPath);
+    draft.insert(QStringLiteral("mode_id"), WorkflowLaunchController::normalizeModeId(source.modeId));
+    draft.insert(QStringLiteral("media_type"), source.mediaType);
+    draft.insert(QStringLiteral("backend"), source.backend);
+    return draft;
+}
 } // namespace
 
 bool WorkflowDraftBuilder::isVideoMode(const QString &modeId, const QString &mediaType)
@@ -902,6 +918,93 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::build(const Source &source)
     Source resolved = source;
     resolved.compiledPromptPath = promptPath;
     return buildFromPrompt(doc.object(), resolved);
+}
+
+WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildUnverified(const Source &source,
+                                                                  const QString &reason)
+{
+    Result result;
+
+    // Unchanged. A shape with no page to open on has nowhere to go whether or not ComfyUI answered.
+    if (!isDraftableShape(source.modeId, source.mediaType))
+    {
+        result.reason = QStringLiteral(
+            "Only image, text-to-video, and image-to-video workflows can currently open as editable drafts.");
+        return result;
+    }
+
+    const QString warning = reason.trimmed().isEmpty()
+        ? QStringLiteral("Nothing has verified this workflow against the live ComfyUI schema, so it "
+                         "is opened for inspection and cannot be submitted.")
+        : reason.trimmed();
+
+    // The one file that may be read offline is the SOURCE GRAPH. Any other path -- above all the
+    // prompt_api.json a caller may still be carrying on the record -- is dropped unread, because
+    // nothing in an offline reply vouches for its age or for the converter that wrote it, and that
+    // artefact reaching the cockpit is the defect this whole arc removed. Enforced HERE rather than
+    // trusted of the caller: a builder that cannot be handed a stale artefact cannot read one.
+    Source offline = source;
+    const QString named = source.compiledPromptPath.trimmed();
+    const QString graph = source.sourceWorkflowPath.trimmed();
+    const bool namedIsTheSourceGraph =
+        !named.isEmpty() && !graph.isEmpty()
+        && QFileInfo(named).absoluteFilePath() == QFileInfo(graph).absoluteFilePath();
+    offline.compiledPromptPath = namedIsTheSourceGraph ? graph : QString();
+
+    const QString promptPath = resolvePromptPath(offline);
+    if (!promptPath.isEmpty())
+    {
+        QFile file(promptPath);
+        if (file.open(QIODevice::ReadOnly))
+        {
+            QJsonParseError parseError{};
+            const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+            if (parseError.error == QJsonParseError::NoError && doc.isObject()
+                && !doc.object().isEmpty())
+            {
+                Source resolved = offline;
+                resolved.compiledPromptPath = promptPath;
+                Result extracted = buildFromPrompt(doc.object(), resolved);
+                if (extracted.present)
+                {
+                    // Submission is closed by CONSTRUCTION, on the draft the cockpit actually reads,
+                    // not by a flag beside it. finalizeDraft treats this as a ceiling, so a readiness
+                    // pass answering "ready" cannot reopen it.
+                    extracted.safeToSubmit = false;
+                    extracted.draft.insert(QStringLiteral("safe_to_submit"), false);
+
+                    QJsonArray warnings;
+                    warnings.append(warning);
+                    for (const QJsonValue &value : extracted.draft.value(QStringLiteral("warnings")).toArray())
+                        warnings.append(value);
+                    extracted.draft.insert(QStringLiteral("warnings"), warnings);
+                    extracted.reason = warning;
+                    return extracted;
+                }
+            }
+        }
+    }
+
+    // Nothing readable: a UI graph, which needs the live schema to become a prompt. It still opens,
+    // with its identity and nothing else, because "we could not check" is not a reason to hide a
+    // workflow the user just asked for.
+    QJsonObject draft = identityDraft(offline);
+    draft.insert(QStringLiteral("lora_stack"), QJsonArray());
+
+    QJsonArray warnings;
+    warnings.append(warning);
+    warnings.append(QStringLiteral(
+        "None of this workflow's settings could be read, because converting it needs the live "
+        "ComfyUI schema. The page keeps its own values."));
+    draft.insert(QStringLiteral("warnings"), warnings);
+    draft.insert(QStringLiteral("safe_to_submit"), false);
+    draft.insert(QStringLiteral("supports_apply"), true);
+
+    result.present = true;
+    result.safeToSubmit = false;
+    result.reason = warning;
+    result.draft = draft;
+    return result;
 }
 
 WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonObject &prompt,
@@ -1064,14 +1167,7 @@ WorkflowDraftBuilder::Result WorkflowDraftBuilder::buildFromPrompt(const QJsonOb
 
     const CanvasSize canvas = canvasFromLatent(prompt, facts.latentRef);
 
-    QJsonObject draft;
-    draft.insert(QStringLiteral("source_name"), source.displayName);
-    draft.insert(QStringLiteral("source_profile_path"), source.profilePath);
-    draft.insert(QStringLiteral("source_workflow_path"), source.sourceWorkflowPath);
-    draft.insert(QStringLiteral("compiled_prompt_path"), source.compiledPromptPath);
-    draft.insert(QStringLiteral("mode_id"), WorkflowLaunchController::normalizeModeId(source.modeId));
-    draft.insert(QStringLiteral("media_type"), source.mediaType);
-    draft.insert(QStringLiteral("backend"), source.backend);
+    QJsonObject draft = identityDraft(source);
     // A field the graph did not yield is ABSENT, not zero. A key carrying 0 / 0.0 / 100 reaches the
     // cockpit as a value the workflow asked for, and the page cannot tell it from one it did: that is
     // how a graph with no readable settings came up as "cfg 0.0" rather than as the page's own
