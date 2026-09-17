@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 import optimization_commands  # noqa: E402
 import optimization_levers as levers  # noqa: E402
+import optimization_provenance  # noqa: E402
 import optimization_results as ledger  # noqa: E402
 
 
@@ -68,6 +69,11 @@ def _row(**overrides) -> dict:
 def ledger_path(tmp_path, monkeypatch) -> Path:
     path = tmp_path / "optimization_results.jsonl"
     monkeypatch.setattr(ledger, "_LEDGER_PATH_OVERRIDE", path)
+    # The command probes the RUNNING ComfyUI for the panel's active column. That is a read-only
+    # GET /system_stats, but a unit test whose answer depends on whether a render box happens to be
+    # up is not a unit test -- and on a box that IS up it would also make the suite wait on a
+    # socket. Stub it; the probe has its own tests in test_optimization_provenance.py.
+    monkeypatch.setattr(optimization_provenance, "probe", lambda *a, **k: _provenance())
     return path
 
 
@@ -345,11 +351,55 @@ def test_the_command_answers_on_an_empty_ledger(ledger_path) -> None:
     assert reply["rows"] == []
 
 
+def test_the_reply_carries_every_lever_not_only_the_measured_ones(ledger_path) -> None:
+    """The Runtime panel renders one row per catalogue entry.
+
+    Driving it from ``rows`` alone would mean a lever nobody has measured is absent from the table
+    entirely -- which reads as "there is no such option" rather than "nobody has timed it", and
+    that invisibility is the whole subject of this wave.
+    """
+    reply = optimization_commands.handle_optimization_results_command({})
+    ids = [entry["id"] for entry in reply["catalogue"]]
+    assert ids == [lever.id for lever in levers.ALL_LEVERS]
+    assert all(entry["label"] for entry in reply["catalogue"])
+    blocked = next(e for e in reply["catalogue"] if e["status"] == levers.BLOCKED)
+    assert blocked["blocked_reason"], "a blocked lever must carry the reason it cannot be asked for"
+
+
+def test_the_reply_carries_the_live_arm(ledger_path) -> None:
+    """Installed and active are different facts, and only the probe answers the second one."""
+    reply = optimization_commands.handle_optimization_results_command({})
+    assert reply["provenance"]["attention_backend"] == "sage"
+    assert "packages" in reply["provenance"]
+
+
+def test_a_probe_that_raises_does_not_take_the_ledger_with_it(ledger_path, monkeypatch) -> None:
+    """A dead ComfyUI must not make the measurements unreadable, and must not be reported as SDPA.
+
+    ``probe()`` already swallows a failed HTTP read into an honest ``unknown`` block; this covers
+    the rarer case where resolving the endpoint itself raises.
+    """
+    def boom(*args, **kwargs):
+        raise RuntimeError("no endpoint")
+
+    monkeypatch.setattr(optimization_provenance, "probe", boom)
+    reply = optimization_commands.handle_optimization_results_command({})
+    assert reply["ok"] is True
+    assert reply["provenance"]["attention_backend"] == "unknown"
+    assert "no endpoint" in reply["provenance"]["probe_error"]
+
+
 def test_the_command_is_classified_and_wired() -> None:
+    """USER_FACING since W3 T6: ManagerPage's optimization panel is the route.
+
+    The audience ratchet (tests/test_worker_command_audience.py) is what holds the other half --
+    a USER_FACING command with no ``qt_ui/`` call site fails there.
+    """
     import worker_command_audience as audience
     import worker_client
 
-    assert "optimization_results" in audience.DIAGNOSTIC
+    assert "optimization_results" in audience.USER_FACING
+    assert "optimization_results" not in audience.DIAGNOSTIC
     payload, _ = worker_client.normalize_worker_message({"type": "optimization_results", "ok": True}, None)
     assert payload["type"] == "optimization_results", (
         "an unregistered wire type arrives as client_warning with ok=False"

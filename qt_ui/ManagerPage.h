@@ -26,6 +26,11 @@ public:
 
 public slots:
     void refreshStatus();
+    // The optimization evidence panel: what is installed, what the RUNNING process was actually
+    // launched with, and what has been measured. Three different facts; the app used to show none
+    // of them. Its own request, not folded into comfy_manager_status, because it must be able to
+    // refresh while a long manager call is in flight.
+    void refreshOptimizationEvidence();
     // Unload the runtimes then clear the CUDA cache -- the lighter recovery for
     // wedged VRAM accounting, short of restarting the Comfy process. Cockpit
     // Unload models uses this same path.
@@ -57,6 +62,10 @@ private:
                                 std::function<void(const QJsonObject &)> callback);
     QJsonObject parseWorkerResponse(const QString &stdoutText, const QString &stderrText) const;
     void applyManagerStatus(const QJsonObject &payload);
+    // Renders one row per lever from an `optimization_results` reply. All four columns come from
+    // spellvision::shell::OptimizationEvidence, which is where the honesty rules live and where
+    // tests/cpp/test_optimization_panel.cpp holds them.
+    void applyOptimizationEvidence(const QJsonObject &payload);
     // Renders comfy_runtime_status.version_check. "Could not reach GitHub" must never render the
     // same as "up to date", so the unknown state carries its reason.
     void applyComfyVersionCheck(const QJsonObject &check);
@@ -110,6 +119,10 @@ private:
     QPushButton *updateComfyButton_ = nullptr;
     QString latestComfyRelease_;
     QString comfyReleaseUrl_;
+    QTableWidget *optimizationTable_ = nullptr;
+    QLabel *optimizationSummaryLabel_ = nullptr;
+    QPushButton *refreshOptimizationButton_ = nullptr;
+    bool optimizationRequestInFlight_ = false;
     QLabel *nodeIndexLabel_ = nullptr;
     QPushButton *buildNodeIndexButton_ = nullptr;
     bool nodeIndexBuilding_ = false;

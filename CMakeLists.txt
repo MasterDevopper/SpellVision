@@ -229,6 +229,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/QueueUiPresenter.cpp
     qt_ui/shell/QueueUiPresenter.h
 
+    qt_ui/shell/OptimizationEvidence.cpp
+    qt_ui/shell/OptimizationEvidence.h
     qt_ui/shell/TelemetryPresenter.cpp
     qt_ui/shell/TelemetryPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
@@ -624,6 +626,16 @@ qt_add_executable(test_model_defaults_apply tests/cpp/test_model_defaults_apply.
 target_link_libraries(test_model_defaults_apply PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME model_defaults_apply COMMAND test_model_defaults_apply)
 
+# W3 Task 6: the Runtime page tells you which optimizations your renders actually ran on.
+# Installed and active are different facts -- sageattention is installed in ComfyUI's venv on this
+# box and the running process was launched without the flag -- so a lever that is installed and not
+# active must never read as a benefit, and a lever with no verified row must say "not timed" rather
+# than show a blank that looks like zero. Driven by a fake ledger and a fake probe: no worker, no
+# socket, no ComfyUI.
+qt_add_executable(test_optimization_panel tests/cpp/test_optimization_panel.cpp)
+target_link_libraries(test_optimization_panel PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME optimization_panel COMMAND test_optimization_panel)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -642,6 +654,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
+                      test_optimization_panel
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

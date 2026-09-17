@@ -65,6 +65,11 @@ USER_FACING: frozenset[str] = frozenset({
     "retry_workflow_dependencies", "delete_workflow_profile", "build_node_class_index",
     # Video family contracts drive the family status surface.
     "video_family_contracts",
+    # The optimization ledger (W3 T6). ManagerPage's optimization panel is the route: one row per
+    # lever, installed vs ACTIVE vs measured. It was DIAGNOSTIC while the row shape was settling --
+    # promoting it then would have asserted a route that did not exist, which is the one direction
+    # this ratchet can catch.
+    "optimization_results",
     # LTX prompt-API submission, reachable only through history-requeue / explicit opt-in.
     "ltx_prompt_api_gated_submission", "ltx_requeue_draft_gated_submission",
     "ltx_ui_queue_history_contract",
@@ -133,11 +138,6 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # this list in W2, when the cockpit started asking it what a model wants.
     "model_intel_get", "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
     "model_roots_status",
-    # The optimization ledger (W3). Read-only over runtime/state/optimization_results.jsonl, whose
-    # only writer is scripts/dev/measure_optimizations.py. DIAGNOSTIC deliberately: the row shape
-    # has to settle against a real matrix run before a surface is built on it, and W3 T6 is where a
-    # qt_ui/ route would promote it.
-    "optimization_results",
 })
 
 # Never addressed by a person.

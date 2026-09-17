@@ -3,6 +3,7 @@
 #include "ThemeManager.h"
 #include "shell/RuntimeProfile.h"
 #include "shell/ModelsLibraryPaths.h"
+#include "shell/OptimizationEvidence.h"
 #include "style/SvKit.h"
 
 #include <QAbstractItemView>
@@ -370,6 +371,51 @@ ManagerPage::ManagerPage(QWidget *parent)
     pathActions->addStretch(1);
     outer->addLayout(pathActions);
 
+    // --- optimization evidence ------------------------------------------------------------------
+    //
+    // Until this panel there was no way to tell, from inside the app, which optimizations a render
+    // had actually run on. That is not hypothetical: ComfyUI was running WITH SageAttention one
+    // morning, died, was relaunched WITHOUT it, and nothing said so -- renders on either side were
+    // indistinguishable afterwards. `sageattention` is installed in ComfyUI's venv either way, so
+    // "installed" answers a different question from "active", and only the second one is about the
+    // render that just happened.
+    //
+    // Every column is read, never assumed: installed from the venv probe, active from the LIVE
+    // argv, measured from the ledger, and a lever with no verified row says "not timed" rather than
+    // showing a blank that reads as zero.
+    auto *optimizationHeaderRow = new QHBoxLayout();
+    optimizationHeaderRow->setContentsMargins(0, 0, 0, 0);
+    optimizationHeaderRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
+    optimizationHeaderRow->addWidget(makeLabel(QStringLiteral("ManagerStatusLabel"),
+                                               QStringLiteral("Optimizations")));
+    refreshOptimizationButton_ = makeButton(QStringLiteral("Re-read evidence"));
+    refreshOptimizationButton_->setToolTip(QStringLiteral(
+        "Re-reads the running ComfyUI's command line and the measurement ledger.\n\n"
+        "Active is read from the process that is running right now, not from what the launcher "
+        "asked for. Those have diverged on this machine before."));
+    optimizationHeaderRow->addWidget(refreshOptimizationButton_);
+    optimizationHeaderRow->addStretch(1);
+    outer->addLayout(optimizationHeaderRow);
+
+    optimizationSummaryLabel_ = makeLabel(QStringLiteral("ManagerStatusLabel"),
+                                          QStringLiteral("Optimizations: not read yet."));
+    outer->addWidget(optimizationSummaryLabel_);
+
+    optimizationTable_ = new QTableWidget(this);
+    optimizationTable_->setObjectName(QStringLiteral("ManagerNodeTable"));
+    optimizationTable_->setColumnCount(
+        static_cast<int>(spellvision::shell::OptimizationEvidence::columnHeadings().size()));
+    optimizationTable_->setHorizontalHeaderLabels(
+        spellvision::shell::OptimizationEvidence::columnHeadings());
+    optimizationTable_->horizontalHeader()->setStretchLastSection(true);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    optimizationTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    optimizationTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    optimizationTable_->setAlternatingRowColors(true);
+    optimizationTable_->setMaximumHeight(240);
+    outer->addWidget(optimizationTable_);
+
     auto *familyRow = new QHBoxLayout();
     familyRow->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     familyInstallCombo_ = new QComboBox(this);
@@ -484,6 +530,7 @@ ManagerPage::ManagerPage(QWidget *parent)
     connect(openCustomNodesButton_, &QPushButton::clicked, this, &ManagerPage::openCustomNodesRoot);
     connect(updateComfyButton_, &QPushButton::clicked, this, &ManagerPage::onUpdateComfyClicked);
     connect(buildNodeIndexButton_, &QPushButton::clicked, this, &ManagerPage::onBuildNodeIndexClicked);
+    connect(refreshOptimizationButton_, &QPushButton::clicked, this, &ManagerPage::refreshOptimizationEvidence);
     connect(dualPcConsentCheck_, &QCheckBox::toggled, this, [this](bool) {
         persistDualPcSettings();
         updateDualPcEnableState();
@@ -853,6 +900,10 @@ void ManagerPage::warmCache()
 void ManagerPage::refreshStatus()
 {
     probeSpellNodeWorker();
+    // Before the manager-status early returns below, not after: a fresh status cache must not mean
+    // a stale answer about what is running. The arm changes on a ComfyUI restart, which is exactly
+    // the moment the cached manager status is still perfectly valid.
+    refreshOptimizationEvidence();
     tryLoadManagerStatusCacheFromDisk();
 
     if (hasManagerStatusCache())
@@ -893,6 +944,75 @@ void ManagerPage::refreshStatus()
                 applyManagerStatus(livePayload);
             }
         });
+}
+
+void ManagerPage::refreshOptimizationEvidence()
+{
+    if (optimizationRequestInFlight_)
+        return;
+
+    // Its own socket call rather than sendWorkerRequestAsync: that path is gated on
+    // managerRequestInFlight_ and sets the page busy, and this is a cheap read that has to be able
+    // to run while a 15-minute node install is in flight.
+    optimizationRequestInFlight_ = true;
+
+    const QJsonObject request{{QStringLiteral("command"), QStringLiteral("optimization_results")}};
+    spellvision::workers::WorkerSocketClient::send(
+        this, request, 20000,
+        [this](const QJsonObject &response, const QString &diagnostics, bool)
+        {
+            optimizationRequestInFlight_ = false;
+            if (response.isEmpty())
+            {
+                applyOptimizationEvidence(QJsonObject{
+                    {QStringLiteral("ok"), false},
+                    {QStringLiteral("error"), diagnostics.trimmed().isEmpty()
+                                                  ? QStringLiteral("the worker did not answer")
+                                                  : diagnostics.trimmed()},
+                });
+                return;
+            }
+            applyOptimizationEvidence(response);
+        });
+}
+
+void ManagerPage::applyOptimizationEvidence(const QJsonObject &payload)
+{
+    if (!optimizationTable_ || !optimizationSummaryLabel_)
+        return;
+
+    if (!payload.value(QStringLiteral("ok")).toBool(false))
+    {
+        // Nothing is shown rather than a table of defaults. A panel whose whole subject is "do not
+        // assume the arm" cannot open by assuming one.
+        optimizationTable_->setRowCount(0);
+        const QString error = payload.value(QStringLiteral("error")).toString();
+        optimizationSummaryLabel_->setText(
+            QStringLiteral("Optimizations: could not be read (%1). Nothing below is claimed.")
+                .arg(error.isEmpty() ? QStringLiteral("no reason given") : error));
+        return;
+    }
+
+    const QList<spellvision::shell::OptimizationEvidenceRow> rows =
+        spellvision::shell::OptimizationEvidence::rows(payload);
+
+    optimizationSummaryLabel_->setText(spellvision::shell::OptimizationEvidence::summaryText(payload));
+    optimizationSummaryLabel_->setToolTip(payload.value(QStringLiteral("path")).toString());
+
+    optimizationTable_->setRowCount(static_cast<int>(rows.size()));
+    for (int index = 0; index < static_cast<int>(rows.size()); ++index)
+    {
+        const spellvision::shell::OptimizationEvidenceRow &row = rows.at(index);
+        const QStringList cells{row.label, row.installed, row.active, row.measured, row.verdict};
+        for (int column = 0; column < static_cast<int>(cells.size()); ++column)
+        {
+            auto *item = new QTableWidgetItem(cells.at(column));
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            if (!row.toolTip.isEmpty())
+                item->setToolTip(row.toolTip);
+            optimizationTable_->setItem(index, column, item);
+        }
+    }
 }
 
 void ManagerPage::installManager()
