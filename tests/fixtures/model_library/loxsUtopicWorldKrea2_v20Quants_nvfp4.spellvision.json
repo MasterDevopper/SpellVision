@@ -1,0 +1,193 @@
+{
+ "schema": "spellvision.model-sidecar/1",
+ "identity": {
+  "file_name": "loxsUtopicWorldKrea2_v20Quants_nvfp4.safetensors",
+  "size": 7673658624,
+  "hashes": {
+   "sha256": "6308a93b6a022590f39235aa086f717288a4aec449662ce8594a70428a91fdd8",
+   "autov2": "6308a93b6a"
+  },
+  "kind": "diffusion_model",
+  "family": "krea2",
+  "base_model": "Krea 2",
+  "quantisation": "nvfp4",
+  "sources": [
+   {
+    "site": "civitai",
+    "model_id": 2823011,
+    "version_id": 3262504,
+    "url": "https://civitai.com/models/2823011?modelVersionId=3262504",
+    "fetched_at": "2026-09-16T16:22:32.441109+00:00"
+   }
+  ]
+ },
+ "display": {
+  "name": {
+   "value": "Lox's Utopic World 🫧 | Krea 2",
+   "user_override": false
+  },
+  "description_html": {
+   "value": "<p>Check BF16 Changelog</p>",
+   "user_override": false
+  },
+  "creator": null,
+  "license": {
+   "name": null,
+   "allowCommercialUse": null,
+   "allowDerivatives": null,
+   "allowNoCredit": null
+  },
+  "nsfw_level": 60,
+  "trigger_words": {
+   "value": [],
+   "user_override": false
+  },
+  "images": [
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/c0dc05b1-95ca-4e0e-9c8e-5da4de2c3567/original=true/140816989.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\6308a93b6a022590f39235aa086f717288a4aec449662ce8594a70428a91fdd8\\0.jpg",
+    "width": 1216,
+    "height": 1664,
+    "nsfw_level": 2,
+    "is_cover": true,
+    "user_override": false,
+    "meta": {
+     "VAE": "qwen_image_vae.safetensors",
+     "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+     "steps": 10,
+     "hashes": {
+      "vae": "a70580f021",
+      "model": "b8e894bda9"
+     },
+     "prompt": "A highly detailed photorealistic close-up portrait of a young woman with smooth fair skin and a playful expressive face, her jet-black hair is parted in the middle with thick blunt bangs resting straight across her forehead while the rest is gathered into two high messy space buns positioned symmetrically on top of her head with loose wispy strands falling around her temples and ears, she wears round gold metal-rimmed sunglasses with bright yellow-tinted lenses that sit low on her nose the thin gold frames catching soft highlights as both of her hands are raised to the sides of the glasses with fingers gently holding the temples as if adjusting them her fingernails painted a deep glossy burgundy red, her large dark brown eyes are visible above the yellow lenses looking slightly upward and to the side with heavy precise black winged eyeliner extending outward and full dark brows arched above, her full lips are coated in soft pink lipstick and parted with her tongue extended playfully outward in a cheeky expression, a small delicate black line tattoo resembling a simple floral or abstract mark is visible on the upper right side of her chest near the collarbone, she is wearing a fitted black-and-white horizontally striped halter-neck top with a high mock neckline and open shoulders the thin even stripes of black and white fabric stretching smoothly across her torso, her head is tilted slightly to one side while her shoulders remain relaxed the overall pose intimate and direct toward the camera, soft diffused indoor lighting illuminates her face from the front and slightly above creating gentle highlights on the gold frames of the sunglasses the glossy surface of her nails and the individual strands of her black hair while casting subtle soft shadows under her chin and along the curves of her neck, the background is a softly blurred interior with muted patterned wall elements and indistinct shapes that recede into creamy neutral tones, the composition is a tight head-and-shoulders close-up framed from the upper chest to the top of the space buns shot at eye level using a 50 mm lens at f/1.8 aperture producing a shallow depth of field that keeps every fine detail of her skin texture the precise winged eyeliner the reflective yellow lenses the gold metal frames the texture of the striped fabric and the individual hairs of the bangs and buns in sharp focus while the background melts into a smooth bokeh the color palette centers on the high contrast of jet black hair and stripes against fair skin warm gold metal and vivid yellow lenses under even soft lighting that enhances the three-dimensional form of her face hands and shoulders without harsh contrast resulting in a high-resolution realistic photographic style that captures the playful attitude the precise styling of the double space buns the delicate tattoo the glossy nail polish and the casual striped top in an intimate indoor setting with meticulous attention to material surfaces including the thin metal of the glasses the matte fabric of the top and the natural softness of her skin under the gentle illumination.",
+     "sampler": "er_sde_simple",
+     "cfgScale": 1,
+     "clipSkip": 1,
+     "resources": [
+      {
+       "hash": "b8e894bda9",
+       "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+       "type": "model"
+      }
+     ],
+     "Model hash": "b8e894bda9"
+    }
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/6c37edf7-cb3e-4af5-a101-91ed93b6ba5e/original=true/140816951.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\6308a93b6a022590f39235aa086f717288a4aec449662ce8594a70428a91fdd8\\1.jpg",
+    "width": 1216,
+    "height": 1664,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {
+     "VAE": "qwen_image_vae.safetensors",
+     "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+     "steps": 10,
+     "hashes": {
+      "vae": "a70580f021",
+      "model": "b8e894bda9"
+     },
+     "prompt": "A photorealistic close-up vertical portrait of a young woman with warm golden-tan skin bathed in intense pink neon light her long straight bubblegum-pink hair is styled into two high rounded space buns sitting atop her head with the remaining length falling in smooth glossy sheets past her shoulders and over her chest she looks slightly downward toward the wooden chopsticks held in her right hand as she brings a small piece of pink-topped sushi to her slightly open glossy lips her eyes framed by dramatic long lashes dusted with sparkling pink glitter and sharply arched brows both of her hands are partially visible the right hand gripping the chopsticks with long pointed hot-pink acrylic nails while the left hand supports a black plate filled with several sushi rolls at the bottom of the frame she wears a form-fitting hot-pink sequined bustier top with thin sparkling straps the entire surface covered in dense reflective sequins that catch and scatter the neon light creating countless tiny bright points a matching wide high choker of the same sequined material wraps tightly around her neck large dangling crystal earrings encrusted with clear and pink stones hang from both ears a fluffy bright-pink faux-fur stole is draped over her shoulders and upper arms the soft dense fur adding volume and texture around her collarbones the background is a vividly lit pink interior space with glowing neon tube lights forming geometric diamond outlines on the walls and a soft pink ceiling the overall illumination is dominated by saturated magenta and hot-pink neon glow that casts even pink reflections across her skin hair sequins and fur while soft shadows define the underside of her chin the hollows of her collarbones and the folds of the fur the camera captures the scene from a slightly low eye-level angle in a tight vertical close-up composition framing her from the upper chest to the top of her space buns with the subject centered the neon background filling the space behind her photographed with an 85 mm portrait lens at f 1.8 aperture producing an extremely shallow depth of field that keeps every individual sequin the fine texture of her skin the soft individual strands of the pink fur the precise shape of her long nails and the detailed surface of the sushi piece in crisp sharp focus while the distant neon walls and blurred background figure dissolve into smooth glowing bokeh the overall color palette is an intense monochromatic pink spectrum ranging from deep magenta to bright bubblegum and soft pastel pink accents on the sequins and fur all rendered with high dynamic range and vibrant saturation the visual medium is ultra-detailed high-fashion editorial photography with precise attention to the reflective sparkle of the sequined fabric the plush density of the faux fur the smooth straight flow of her pink hair the glossy finish of her lips the delicate wooden texture of the chopsticks and the immersive neon-pink lighting atmosphere no text watermarks or distractions present the entire image executed in high resolution with fine grain free clarity and cinematic color intensity.",
+     "sampler": "er_sde_simple",
+     "cfgScale": 1,
+     "clipSkip": 1,
+     "resources": [
+      {
+       "hash": "b8e894bda9",
+       "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+       "type": "model"
+      }
+     ],
+     "Model hash": "b8e894bda9"
+    }
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/de1658ed-d63f-4884-8139-d4bf46ee55cb/original=true/140816934.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\6308a93b6a022590f39235aa086f717288a4aec449662ce8594a70428a91fdd8\\2.jpg",
+    "width": 1216,
+    "height": 1664,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {
+     "VAE": "qwen_image_vae.safetensors",
+     "Model": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+     "steps": 10,
+     "hashes": {
+      "vae": "a70580f021",
+      "model": "b8e894bda9"
+     },
+     "prompt": "A highly detailed realistic photograph of a curvaceous Black woman with rich deep brown skin standing indoors in a confident pose, her long wavy jet-black hair cascading in soft voluminous waves over her shoulders and down her back with a sleek middle part, large thin gold hoop earrings dangling from her ears, her face featuring full dark matte burgundy lips, defined arched eyebrows, warm brown eyes gazing directly at the camera with a calm self-assured expression, and smooth even complexion under soft indoor lighting. She wears an extremely tight-fitting sparkly metallic rose-gold bodycon mini dress made of stretchy glitter-infused fabric that catches the light in countless tiny sparkling points across its entire surface, the dress featuring a halter neckline with thin sparkling straps tied behind her neck and a deep square scoop neckline that plunges to reveal substantial cleavage between her large full rounded breasts which strain against the clinging material, the bodice hugging tightly over her torso and emphasizing her narrow waist before flaring over her wide hips, with dramatic side cut-outs and high slits along both hips that expose generous amounts of smooth skin on her outer thighs and the curve of her hips, the short hemline ending high on her upper thighs in a split design that further accentuates her thick powerful thighs and the full rounded shape of her buttocks. Her left hand rests casually on the edge of a light beige wooden counter while her right arm hangs slightly away from her body with fingers relaxed, her weight shifted onto her left leg creating a gentle hip tilt, and her feet planted in black strappy high-heeled sandals with thin ankle straps and open toes on a speckled terrazzo floor. Behind her a large arrangement of deep red roses mixed with delicate white baby's breath fills a red vase on the counter, additional red heart-shaped balloons float against the plain light gray wall, and the overall indoor setting features clean modern surfaces with soft diffused lighting that creates subtle highlights on the metallic dress fabric and gentle shadows under her curves. The scene is captured as professional fashion photography using an 85mm portrait lens at f/2.8 aperture for sharp focus on the subject with creamy background separation, high-resolution digital capture rendering the intricate sparkling texture of the dress material in precise detail, the individual waves of her hair, the smooth skin of her exposed thighs and cleavage, the metallic sheen of her earrings, and the soft petals of the roses, the color palette centered on warm metallic rose-gold tones of the dress contrasting against her deep skin, vibrant red floral accents, neutral beige and gray surroundings, and the sparkling light reflections, the composition a full-body centered shot from head to toe with the subject dominating the frame against the simple indoor backdrop, every curve of her hourglass figure from the heavy swell of her breasts to the thick thighs and pronounced hips described with complete fidelity to the original proportions and pose without any reduction or alteration.",
+     "sampler": "er_sde_simple",
+     "cfgScale": 1,
+     "clipSkip": 1,
+     "resources": [
+      {
+       "hash": "b8e894bda9",
+       "name": "Lox's Utopic World Krea V2.8 fp8.safetensors",
+       "type": "model"
+      }
+     ],
+     "Model hash": "b8e894bda9"
+    }
+   }
+  ]
+ },
+ "recommended": {
+  "cfg": {
+   "value": 1.0,
+   "provenance": "site:image-meta-mode",
+   "confidence": 1.0,
+   "n": 10,
+   "total": 10
+  },
+  "clip_skip": {
+   "value": 1,
+   "provenance": "site:image-meta-mode",
+   "confidence": 1.0,
+   "n": 10,
+   "total": 10
+  },
+  "sampler": {
+   "value": "er_sde",
+   "provenance": "site:image-meta-mode",
+   "confidence": 1.0,
+   "n": 10,
+   "total": 10
+  },
+  "scheduler": {
+   "value": "simple",
+   "provenance": "site:image-meta-mode",
+   "confidence": 1.0,
+   "n": 10,
+   "total": 10
+  },
+  "steps": {
+   "value": 10,
+   "provenance": "site:image-meta-mode",
+   "confidence": 1.0,
+   "n": 10,
+   "total": 10
+  },
+  "width": {
+   "value": 1024,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  },
+  "height": {
+   "value": 1024,
+   "provenance": "table:family-default",
+   "confidence": 1.0,
+   "n": null,
+   "total": null
+  }
+ },
+ "user": {
+  "notes": "",
+  "favorite": false
+ }
+}

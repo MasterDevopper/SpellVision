@@ -7,6 +7,8 @@
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
+#include "assets/ModelIntelSidecar.h"
+#include "assets/ModelKindTabs.h"
 #include "assets/CatalogPickerDialog.h"
 #include "style/SvKit.h"
 #include "shell/ModelsLibraryPaths.h"
@@ -198,6 +200,7 @@ QJsonObject ModelManagerPage::entryToJson(const ModelEntry &entry)
         {QStringLiteral("name"), entry.name},
         {QStringLiteral("displayName"), entry.displayName},
         {QStringLiteral("type"), entry.type},
+        {QStringLiteral("kind"), entry.kind},
         {QStringLiteral("family"), entry.family},
         {QStringLiteral("sizeText"), entry.sizeText},
         {QStringLiteral("status"), entry.status},
@@ -216,6 +219,12 @@ ModelManagerPage::ModelEntry ModelManagerPage::entryFromJson(const QJsonObject &
     entry.name = object.value(QStringLiteral("name")).toString();
     entry.displayName = object.value(QStringLiteral("displayName")).toString();
     entry.type = object.value(QStringLiteral("type")).toString();
+    // A cache written before W5 carries no kind. Deriving it from the path here rather than
+    // leaving it empty is what keeps a warm start from parking the whole library in Other until
+    // the background rescan lands.
+    entry.kind = object.value(QStringLiteral("kind")).toString().trimmed();
+    if (entry.kind.isEmpty())
+        entry.kind = spellvision::assets::ModelKindTabs::kindFromPath(object.value(QStringLiteral("path")).toString());
     entry.family = object.value(QStringLiteral("family")).toString();
     entry.sizeText = object.value(QStringLiteral("sizeText")).toString();
     entry.status = object.value(QStringLiteral("status")).toString();
@@ -256,20 +265,17 @@ QString ModelManagerPage::detectFamily(const QString &path)
     return QStringLiteral("unknown");
 }
 
-QString ModelManagerPage::detectType(const QString &path)
+QString ModelManagerPage::kindForWeight(const QString &path)
 {
-    const QString normalized = path.toLower();
-    if (normalized.contains(QStringLiteral("loras")))
-        return QStringLiteral("LoRA");
-    if (normalized.contains(QStringLiteral("vae")))
-        return QStringLiteral("VAE");
-    if (normalized.contains(QStringLiteral("clip_vision")) || normalized.contains(QStringLiteral("text_encoders")))
-        return QStringLiteral("Encoder");
-    if (normalized.contains(QStringLiteral("upscale")) || normalized.contains(QStringLiteral("upscaler")))
-        return QStringLiteral("Upscaler");
-    if (normalized.contains(QStringLiteral("controlnet")))
-        return QStringLiteral("ControlNet");
-    return QStringLiteral("Model");
+    // The classifier's answer first. `detectType` used to decide this from six path substrings,
+    // which put `clip_vision` and `text_encoders` in one "Encoder" bucket and had no name at all
+    // for an embedding or a style model -- so those sat under "Model" next to the checkpoints.
+    const spellvision::assets::ModelIntel intel = spellvision::assets::readModelIntel(path);
+    if (intel.present && !intel.kind.isEmpty())
+        return intel.kind;
+    // No sidecar: the folder a ComfyUI library files a kind under. It answers in the same
+    // vocabulary and ends at "other" rather than guessing "checkpoint".
+    return spellvision::assets::ModelKindTabs::kindFromPath(path);
 }
 
 bool ModelManagerPage::loadCache()
@@ -380,7 +386,8 @@ ModelManagerPage::RefreshResult ModelManagerPage::scanModelInventory(
 
         ModelEntry entry;
         entry.name = info.fileName();
-        entry.type = detectType(path);
+        entry.kind = kindForWeight(path);
+        entry.type = spellvision::assets::ModelKindTabs::kindLabel(entry.kind);
         entry.family = detectFamily(path);
         entry.sizeText = humanSize(info.size());
         entry.status = QStringLiteral("Installed");
@@ -594,6 +601,7 @@ void ModelManagerPage::populateGridFromEntries()
         }
         c.strippedName = stripped;
         c.type = e.type;
+        c.kind = e.kind;
         c.family = e.family;
         c.previewPath = e.imagePreviewPath; // image sidecar; mp4 hover-play is S4
         c.nativePath = e.path;
@@ -608,42 +616,22 @@ void ModelManagerPage::populateGridFromEntries()
 
 void ModelManagerPage::rebuildFilterCombos()
 {
-    if (!typeFilterCombo_ || !familyFilterCombo_)
+    if (!familyFilterCombo_)
         return;
 
-    QStringList types;
     QStringList families;
-    types.reserve(entries_.size());
     families.reserve(entries_.size());
     for (const ModelEntry &e : entries_) {
-        if (!e.type.trimmed().isEmpty())
-            types.push_back(e.type.trimmed());
         if (!e.family.trimmed().isEmpty())
             families.push_back(e.family.trimmed());
     }
-    types.removeDuplicates();
     families.removeDuplicates();
-    std::sort(types.begin(), types.end(), [](const QString &a, const QString &b) {
-        return a.compare(b, Qt::CaseInsensitive) < 0;
-    });
     std::sort(families.begin(), families.end(), [](const QString &a, const QString &b) {
         return a.compare(b, Qt::CaseInsensitive) < 0;
     });
 
-    const QString prevType = typeFilterCombo_->currentData().toString();
     const QString prevFamily = familyFilterCombo_->currentData().toString();
 
-    {
-        QSignalBlocker blockType(typeFilterCombo_);
-        typeFilterCombo_->clear();
-        typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
-        for (const QString &t : types)
-            typeFilterCombo_->addItem(t, t);
-        int idx = typeFilterCombo_->findData(prevType);
-        if (idx < 0)
-            idx = 0;
-        typeFilterCombo_->setCurrentIndex(idx);
-    }
     {
         QSignalBlocker blockFamily(familyFilterCombo_);
         familyFilterCombo_->clear();
@@ -656,11 +644,23 @@ void ModelManagerPage::rebuildFilterCombos()
         familyFilterCombo_->setCurrentIndex(idx);
     }
 
-    if (cardProxy_) {
-        cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
+    if (cardProxy_)
         cardProxy_->setFamilyFilter(familyFilterCombo_->currentData().toString());
-    }
+    rebuildKindTabs();
     applyTreeFilters();
+}
+
+void ModelManagerPage::rebuildKindTabs()
+{
+    if (!kindTabBar_)
+        return;
+    QStringList kinds;
+    kinds.reserve(entries_.size());
+    for (const ModelEntry &e : entries_)
+        kinds.push_back(e.kind);
+    kindTabBar_->setCounts(spellvision::assets::ModelKindTabs::counts(kinds));
+    if (cardProxy_)
+        cardProxy_->setKindTab(kindTabBar_->currentTabId());
 }
 
 void ModelManagerPage::applyTreeFilters()
@@ -669,24 +669,27 @@ void ModelManagerPage::applyTreeFilters()
         return;
 
     const QString needle = searchModelEdit_ ? searchModelEdit_->text().trimmed().toLower() : QString();
-    const QString typeFilter = typeFilterCombo_ ? typeFilterCombo_->currentData().toString() : QStringLiteral("All");
+    const QString kindTab = kindTabBar_ ? kindTabBar_->currentTabId()
+                                        : spellvision::assets::ModelKindTabs::allTabId();
     const QString familyFilter = familyFilterCombo_ ? familyFilterCombo_->currentData().toString() : QStringLiteral("All");
-    const bool typeAll = typeFilter.isEmpty() || typeFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
     const bool familyAll = familyFilter.isEmpty() || familyFilter.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0;
 
+    // The tree row index is the entry index (applyEntries builds them in lockstep), so the list
+    // view filters on the same `kind` the grid does rather than on the label in its Type column.
     for (int row = 0; row < modelsTree_->topLevelItemCount(); ++row) {
         QTreeWidgetItem *item = modelsTree_->topLevelItem(row);
         if (!item)
             continue;
         const QString type = item->text(1);
         const QString family = item->text(2);
+        const QString kind = (row < entries_.size()) ? entries_.at(row).kind : QString();
         const QString haystack = QStringLiteral("%1 %2 %3 %4")
                                      .arg(item->text(0), type, family, item->data(0, Qt::UserRole).toString())
                                      .toLower();
         bool hide = false;
         if (!needle.isEmpty() && !haystack.contains(needle))
             hide = true;
-        if (!typeAll && type.compare(typeFilter, Qt::CaseInsensitive) != 0)
+        if (!spellvision::assets::ModelKindTabs::tabAccepts(kindTab, kind))
             hide = true;
         if (!familyAll && family.compare(familyFilter, Qt::CaseInsensitive) != 0)
             hide = true;
@@ -1138,12 +1141,16 @@ void ModelManagerPage::buildUi()
     searchModelEdit_->setPlaceholderText(QStringLiteral("Search models..."));
     searchModelEdit_->setClearButtonEnabled(true);
 
-    typeFilterCombo_ = new QComboBox(this);
-    typeFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
-    typeFilterCombo_->setMinimumContentsLength(10);
-    typeFilterCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    typeFilterCombo_->addItem(QStringLiteral("All types"), QStringLiteral("All"));
-    typeFilterCombo_->setToolTip(QStringLiteral("Filter by asset type (Checkpoint, LoRA, …)"));
+    // The Type combo is gone: the TAB is the type now (W5 Task 1). A combo whose vocabulary came
+    // from a path substring could not name an embedding, and a filter you have to open to read
+    // cannot show you that the library holds 23 LoRAs and one VAE.
+    kindTabBar_ = new spellvision::assets::ModelKindTabBar(this);
+    connect(kindTabBar_, &spellvision::assets::ModelKindTabBar::tabChanged, this,
+            [this](const QString &tabId) {
+                if (cardProxy_)
+                    cardProxy_->setKindTab(tabId);
+                applyTreeFilters();
+            });
 
     familyFilterCombo_ = new QComboBox(this);
     familyFilterCombo_->setObjectName(QStringLiteral("ModelsFilterCombo"));
@@ -1193,7 +1200,6 @@ void ModelManagerPage::buildUi()
     auto *toolbarRow = new QHBoxLayout();
     toolbarRow->setSpacing(tight);
     toolbarRow->addWidget(searchModelEdit_, 1);
-    toolbarRow->addWidget(typeFilterCombo_);
     toolbarRow->addWidget(familyFilterCombo_);
     toolbarRow->addWidget(favoritesToggleButton_);
     toolbarRow->addWidget(gridToggleButton_);
@@ -1386,6 +1392,7 @@ void ModelManagerPage::buildUi()
     mainLayout->addLayout(headerCol);
     mainLayout->addWidget(summaryCard);
     mainLayout->addLayout(toolbarRow);
+    mainLayout->addWidget(kindTabBar_);
     mainLayout->addWidget(viewStack_, 1);
     mainLayout->addWidget(detailsCard, 0);
 
@@ -1425,11 +1432,6 @@ void ModelManagerPage::buildUi()
     {
         if (cardProxy_)
             cardProxy_->setNeedle(text); // filter the grid (primary view)
-        applyTreeFilters();
-    });
-    connect(typeFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (cardProxy_ && typeFilterCombo_)
-            cardProxy_->setTypeFilter(typeFilterCombo_->currentData().toString());
         applyTreeFilters();
     });
     connect(familyFilterCombo_, &QComboBox::currentIndexChanged, this, [this](int) {

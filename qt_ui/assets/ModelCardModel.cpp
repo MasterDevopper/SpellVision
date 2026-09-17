@@ -1,6 +1,7 @@
 #include "ModelCardModel.h"
 
 #include "FamilyLicense.h"
+#include "ModelKindTabs.h"
 
 namespace spellvision::assets
 {
@@ -63,6 +64,8 @@ QVariant ModelCardModel::data(const QModelIndex &index, int role) const
         return card.fullName;
     case TypeRole:
         return card.type;
+    case KindRole:
+        return card.kind;
     case FamilyRole:
         return card.family;
     case PreviewPathRole:
@@ -123,14 +126,14 @@ void ModelCardFilterProxy::setFavoritesOnly(bool favoritesOnly)
     invalidateFilter();
 }
 
-void ModelCardFilterProxy::setTypeFilter(const QString &type)
+void ModelCardFilterProxy::setKindTab(const QString &tabId)
 {
-    QString next = type.trimmed();
-    if (next.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0)
+    QString next = tabId.trimmed().toLower();
+    if (next == ModelKindTabs::allTabId())
         next.clear();
-    if (next == typeFilter_)
+    if (next == kindTabId_)
         return;
-    typeFilter_ = next;
+    kindTabId_ = next;
     invalidateFilter();
 }
 
@@ -155,10 +158,10 @@ bool ModelCardFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &so
     if (favoritesOnly_ && !idx.data(ModelCardModel::FavoriteRole).toBool())
         return false;
 
-    if (!typeFilter_.isEmpty()) {
-        const QString type = idx.data(ModelCardModel::TypeRole).toString();
-        if (type.compare(typeFilter_, Qt::CaseInsensitive) != 0)
-            return false;
+    if (!kindTabId_.isEmpty()
+        && !ModelKindTabs::tabAccepts(kindTabId_, idx.data(ModelCardModel::KindRole).toString()))
+    {
+        return false;
     }
 
     if (!familyFilter_.isEmpty()) {

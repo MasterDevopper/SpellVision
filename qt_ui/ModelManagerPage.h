@@ -26,6 +26,7 @@ class ModelCardFilterProxy;
 class ModelCardDelegate;
 class ModelCardView;
 class ModelOverlayStore;
+class ModelKindTabBar;
 }
 
 class ModelManagerPage : public QWidget
@@ -115,7 +116,11 @@ private:
     {
         QString name;         // filename on disk — never rewritten
         QString displayName;  // metadata model_name for the page only; empty = show filename
-        QString type;
+        QString type;         // display label for `kind` (Checkpoint / LoRA / …)
+        // W5 Task 1: the classifier's own answer, read from `<stem>.spellvision.json`, falling
+        // back to the folder a ComfyUI library files a kind under. One of the ten values plus
+        // "other"; never empty, so every model reaches a visible tab.
+        QString kind;
         QString family;
         QString sizeText;
         QString status;
@@ -161,7 +166,10 @@ private:
     static QJsonObject entryToJson(const ModelEntry &entry);
     static ModelEntry entryFromJson(const QJsonObject &object);
     static QString detectFamily(const QString &path);
-    static QString detectType(const QString &path);
+    // W5 Task 1: the kind for one weight -- the sidecar's classifier answer when there is one,
+    // the folder fallback when there is not. `detectType`'s six path substrings are gone.
+    static QString kindForWeight(const QString &path);
+    void rebuildKindTabs();
 
     QString projectRoot_;
     QString explicitModelsRoot_;
@@ -172,8 +180,8 @@ private:
     QLabel *lastCheckedLabel_ = nullptr;
     QLabel *cachePathLabel_ = nullptr;
     QLineEdit *searchModelEdit_ = nullptr;
-    QComboBox *typeFilterCombo_ = nullptr;
     QComboBox *familyFilterCombo_ = nullptr;
+    spellvision::assets::ModelKindTabBar *kindTabBar_ = nullptr;
     QPushButton *refreshButton_ = nullptr;
     QPushButton *rebuildCacheButton_ = nullptr;
     QPushButton *openRootButton_ = nullptr;

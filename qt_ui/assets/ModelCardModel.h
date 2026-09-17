@@ -21,7 +21,8 @@ public:
     {
         StrippedNameRole = Qt::UserRole + 1, // name, extension stripped
         FullNameRole,                        // original filename (tooltip)
-        TypeRole,                            // Checkpoint / LoRA / VAE / ...
+        TypeRole,                            // Checkpoint / LoRA / VAE / ... (display label)
+        KindRole,                            // W5: the classifier's own kind -- what the tabs filter on
         FamilyRole,                          // wan / sdxl / ...
         PreviewPathRole,                     // image sidecar ("" -> fallback tile)
         NativePathRole,                      // the model file path
@@ -35,6 +36,10 @@ public:
         QString strippedName;
         QString fullName;
         QString type;
+        // W5: the ten-value kind from `<stem>.spellvision.json`, or the folder fallback. `type`
+        // above is its DISPLAY label; the tabs filter on this, so a relabelling never moves a
+        // model between tabs.
+        QString kind;
         QString family;
         QString previewPath;
         QString nativePath;
@@ -73,15 +78,19 @@ public:
     explicit ModelCardFilterProxy(QObject *parent = nullptr);
     void setNeedle(const QString &needle);
     void setFavoritesOnly(bool favoritesOnly);
-    void setTypeFilter(const QString &type);     // empty or "All" = no type filter
     void setFamilyFilter(const QString &family); // empty or "All" = no family filter
+    // W5: the kind TAB. "all" (or empty) shows everything; every other id shows exactly its own
+    // kind, and a kind nothing recognises normalises to "other" -- so no card can fall between
+    // two tabs and vanish. This replaced setTypeFilter, whose vocabulary came from a path
+    // substring and had no value for an embedding at all.
+    void setKindTab(const QString &tabId);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 
 private:
     QString needle_;
-    QString typeFilter_;
+    QString kindTabId_;
     QString familyFilter_;
     bool favoritesOnly_ = false;
 };

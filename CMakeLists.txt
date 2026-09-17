@@ -161,6 +161,10 @@ qt_add_library(SpellVisionCore STATIC
 
     qt_ui/assets/ModelSidecar.cpp
     qt_ui/assets/ModelSidecar.h
+    qt_ui/assets/ModelIntelSidecar.cpp
+    qt_ui/assets/ModelIntelSidecar.h
+    qt_ui/assets/ModelKindTabs.cpp
+    qt_ui/assets/ModelKindTabs.h
     qt_ui/assets/ModelOverlayStore.cpp
     qt_ui/assets/ModelOverlayStore.h
     qt_ui/assets/ModelThumbnailCache.cpp
@@ -681,6 +685,17 @@ qt_add_executable(test_workflow_drop_coordinator tests/cpp/test_workflow_drop_co
 target_link_libraries(test_workflow_drop_coordinator PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME workflow_drop_coordinator COMMAND test_workflow_drop_coordinator)
 
+# W5 Task 1: the Models page's tabs come from the classifier, not from a path substring. The old
+# detectType answered with six names matched against the path, so clip_vision and text_encoders
+# shared one "Encoder" bucket and an embedding had no kind at all -- it sat under "Model" beside
+# the checkpoints. The case that matters most is the one nobody can see going wrong: a weight whose
+# kind nothing determined must land in Other, and Other must stay on screen, because a model that
+# appears under no tab is indistinguishable from a model that is not installed. Driven by a fixture
+# inventory covering all ten kinds plus the REAL sidecars this library's intelligence pass wrote.
+qt_add_executable(test_model_kind_tabs tests/cpp/test_model_kind_tabs.cpp)
+target_link_libraries(test_model_kind_tabs PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_kind_tabs COMMAND test_model_kind_tabs)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -701,6 +716,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       test_workflow_draft_builder test_workflow_drop_coordinator
+                      test_model_kind_tabs
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

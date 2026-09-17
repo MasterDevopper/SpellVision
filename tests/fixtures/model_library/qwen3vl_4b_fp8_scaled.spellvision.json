@@ -1,0 +1,113 @@
+{
+ "schema": "spellvision.model-sidecar/1",
+ "identity": {
+  "file_name": "qwen3vl_4b_fp8_scaled.safetensors",
+  "size": 5242467968,
+  "hashes": {
+   "sha256": "54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094",
+   "autov2": "54bd5144df"
+  },
+  "kind": "text_encoder",
+  "family": "unknown",
+  "base_model": "Krea 2",
+  "quantisation": "fp8",
+  "sources": [
+   {
+    "site": "civitai",
+    "model_id": 2753756,
+    "version_id": 3098281,
+    "url": "https://civitai.com/models/2753756?modelVersionId=3098281",
+    "fetched_at": "2026-09-16T16:22:32.441109+00:00"
+   }
+  ]
+ },
+ "display": {
+  "name": {
+   "value": "Sam_Krea2",
+   "user_override": false
+  },
+  "description_html": {
+   "value": "",
+   "user_override": false
+  },
+  "creator": null,
+  "license": {
+   "name": null,
+   "allowCommercialUse": null,
+   "allowDerivatives": null,
+   "allowNoCredit": null
+  },
+  "nsfw_level": 7,
+  "trigger_words": {
+   "value": [],
+   "user_override": false
+  },
+  "images": [
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/a65bbac4-91ee-4c06-80d8-656b09c7f268/original=true/135730428.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\0.jpg",
+    "width": 1008,
+    "height": 1352,
+    "nsfw_level": 2,
+    "is_cover": true,
+    "user_override": false,
+    "meta": {}
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/f5ea8b2a-21c7-4af8-98c8-a253a2f84c2a/original=true/135730430.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\1.jpg",
+    "width": 1352,
+    "height": 1008,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {}
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/7b3752ec-e234-443d-920b-9f060a606cf1/original=true/135730434.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\2.jpg",
+    "width": 1352,
+    "height": 1008,
+    "nsfw_level": 1,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {}
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/3c85b965-e4f9-47e7-91ad-cd0dbe024d1c/original=true/135730474.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\3.jpg",
+    "width": 1352,
+    "height": 1008,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {}
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/9ce33368-b5df-4e69-ac09-733157e5e2a5/original=true/135730521.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\4.jpg",
+    "width": 1352,
+    "height": 1008,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {}
+   },
+   {
+    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/f5fd838a-4676-4d6d-b56e-24b417695ffc/original=true/135730522.jpeg",
+    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094\\5.jpg",
+    "width": 1008,
+    "height": 1352,
+    "nsfw_level": 2,
+    "is_cover": false,
+    "user_override": false,
+    "meta": {}
+   }
+  ]
+ },
+ "recommended": {},
+ "user": {
+  "notes": "",
+  "favorite": false
+ }
+}
