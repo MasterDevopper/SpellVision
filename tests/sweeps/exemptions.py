@@ -603,6 +603,33 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/workers/WorkerProcessController.cpp": 4,
     },
 
+    # W6 Task 1. The endpoint literals that are LEFT after the registry landed, and what they are.
+    #
+    # The two that mattered are gone: ManagerPage no longer spells 192.168.1.127 at all, and its two
+    # live-root lookups now take their host and port from RuntimeProfile. Nothing anywhere in qt_ui/
+    # names a private-range address any more, which is the half of this rule that had a product
+    # consequence -- SpellVision could reach exactly one other computer, the one whose IP a
+    # developer had typed.
+    #
+    # These seven are the local port, written into probes and captions that predate the registry:
+    #
+    #   Gen3DPage          a raw /system_stats probe, plus the caption that names the port back
+    #   HistoryPage        the Comfy-reachability check and its "not reachable at ..." dialog
+    #   MainWindow         the Backend health dots' port and their tooltip
+    #   WorkflowLibraryPage the default comfyEndpoint_ member
+    #
+    # They are wrong in the same direction -- each is a page that cannot be pointed at another
+    # machine -- but they are wrong about the MASTER, which every one of them is genuinely asking
+    # about, so none of them can send a job to the wrong place today. Fixing them is a sweep through
+    # four unrelated surfaces, and W6 deliberately kept its blast radius at the routing path. The
+    # count is here so the next one is a regression rather than company.
+    "no-hardcoded-endpoint-literal": {
+        "qt_ui/Gen3DPage.cpp": 2,
+        "qt_ui/HistoryPage.cpp": 2,
+        "qt_ui/MainWindow.cpp": 2,
+        "qt_ui/WorkflowLibraryPage.h": 1,
+    },
+
     # Wave 3 task 10. The invented 3/7/12 floor. Stays until Task 12 gives Comfy real step/total.
     "progress-is-not-invented": {
         "qt_ui/shell/TelemetryPresenter.cpp": 2,

@@ -2894,6 +2894,72 @@ R_ONE_WORKFLOW_MODE_RESOLVER = Rule(
 )
 
 
+
+# --- R36: the second machine is data, not a literal ----------------------------------------------
+
+# Two spellings of "a ComfyUI endpoint written into the program". The port catches a local one, the
+# private-range prefix catches the second machine -- which is how it got in: 192.168.1.127 appeared
+# in ManagerPage.cpp twice, once as label text and once as the URL of a QNetworkAccessManager GET.
+_ENDPOINT_LITERAL = re.compile(r"192\.168\.\d{1,3}\.\d{1,3}|(?<![\w.])8188(?![\w.])")
+# The resolver is allowed to name what it resolves between, identified by DEFINING the profile --
+# the same way the output-locality rule identifies its resolver by defining its predicate, so
+# renaming or moving the file cannot silently switch the rule off.
+_ENDPOINT_RESOLVER = re.compile(r"struct RuntimeProfile$|RuntimeProfile RuntimeProfile::load\s*\(", re.MULTILINE)
+
+
+def _check_hardcoded_endpoint_literal(path: Path, text: str) -> list[Violation]:
+    """A ComfyUI host or port written into the C++ instead of resolved.
+
+    The second machine used to be a string literal in ``ManagerPage.cpp``: line 291 printed
+    "192.168.1.127:8188 SpellNode" into a QLabel and line 675 issued a GET at the same host spelled
+    again, so the app could not be pointed at a different machine without a rebuild, and nothing
+    outside that page could ask what endpoints existed at all. Its health was then read back out of
+    ANOTHER label's text.
+
+    Endpoints are ``runtime/endpoints`` in QSettings now, resolved through ``EndpointRegistry``, and
+    the local one comes from ``RuntimeProfile`` -- which is the single site allowed to name a host or
+    a port, because a resolver has to name the things it resolves between.
+
+    WHAT IT CANNOT SEE: a host assembled from parts, a port read from a variable, and the Python
+    side (``comfy_endpoint.py`` names 127.0.0.1:8188 deliberately, as ITS resolver).
+    """
+    if _ENDPOINT_RESOLVER.search(text):
+        return []
+    out: list[Violation] = []
+    for index, line in enumerate(text.split(chr(10)), start=1):
+        stripped = line.strip()
+        if stripped.startswith(("//", "*", "/*")):
+            continue
+        match = _ENDPOINT_LITERAL.search(line)
+        if not match:
+            continue
+        out.append(Violation(
+            path=path,
+            line=index,
+            key=f"endpoint:{match.group(0)}",
+            detail=(f"names a ComfyUI endpoint ({match.group(0)}) in the C++ -- ask "
+                    "EndpointRegistry, whose local entry comes from RuntimeProfile"),
+        ))
+    return out
+
+
+R_HARDCODED_ENDPOINT = Rule(
+    name="no-hardcoded-endpoint-literal",
+    citation=(
+        "The second machine was a string literal. ManagerPage.cpp printed "
+        "\"192.168.1.127:8188 SpellNode\" into a QLabel and, three hundred lines later, issued a "
+        "QNetworkAccessManager GET at the same host spelled a second time -- so SpellVision could "
+        "only ever talk to ONE other computer, the one whose IP a developer had typed, and pointing "
+        "it at another needed a rebuild. The reply handler then decided whether the LOCAL master was "
+        "healthy by reading another QLabel's text for \"healthy=yes\", which is a fact stored in a "
+        "widget. Endpoints are QSettings data now; the only site allowed to name a host or a port is "
+        "the resolver that owns the local one."
+    ),
+    select=sources.cpp_sources,
+    check=_check_hardcoded_endpoint_literal,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2930,6 +2996,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_RESOLVED_FIELDS_ARE_WATCHED,
     R_ARGV_NAMED,
     R_ONE_WORKFLOW_MODE_RESOLVER,
+    R_HARDCODED_ENDPOINT,
 )
 
 

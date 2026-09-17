@@ -221,6 +221,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/ProjectRoot.h
     qt_ui/shell/RuntimeProfile.cpp
     qt_ui/shell/RuntimeProfile.h
+    qt_ui/shell/EndpointRegistry.cpp
+    qt_ui/shell/EndpointRegistry.h
     qt_ui/shell/ModelsLibraryPaths.cpp
     qt_ui/shell/ModelsLibraryPaths.h
     qt_ui/shell/SecureCredentialStore.cpp
@@ -522,6 +524,15 @@ qt_add_executable(test_comfy_endpoint_profile tests/cpp/test_comfy_endpoint_prof
 target_link_libraries(test_comfy_endpoint_profile PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME comfy_endpoint_profile COMMAND test_comfy_endpoint_profile)
 
+# The second machine was a string literal: ManagerPage printed it, probed it with the host spelled
+# again, and then read the MASTER's health back out of a QLabel's text. Endpoints are data now, and
+# these are the three properties that make the data trustworthy -- a round trip, a local entry that
+# cannot be removed, and a corrupt stored value falling back to the default registry rather than to
+# an empty one (an empty one has no local master, so the app could not render on its own machine).
+qt_add_executable(test_endpoint_registry tests/cpp/test_endpoint_registry.cpp)
+target_link_libraries(test_endpoint_registry PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME endpoint_registry COMMAND test_endpoint_registry)
+
 # The socket client presents the worker's per-launch session secret, read from a user-only file.
 # Python proves the worker enforces it and that worker_client.py presents it; this proves the
 # transport that carries every one-shot UI command does too. A reader that silently returned ""
@@ -758,6 +769,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_workflow_draft_builder test_workflow_drop_coordinator
                       test_model_kind_tabs test_model_card_sidecar test_model_inspector
                       test_model_refresh_action
+                      test_endpoint_registry
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

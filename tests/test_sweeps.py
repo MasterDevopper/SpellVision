@@ -220,6 +220,47 @@ def test_the_layout_switch_rule_reads_a_noexcept_definition():
     assert caught == [1, 2, 3, 4], caught
 
 
+def test_the_endpoint_rule_catches_both_spellings_and_spares_the_resolver():
+    """`no-hardcoded-endpoint-literal` ships carrying seven, and a number is only worth what the
+    rule can see.
+
+    Written as a self-test rather than trusted, because the wave that added it had two rules running
+    at once and a rule whose self-test was skipped was caught by a final review with a regex that
+    matched nothing. This one nearly went the same way: the resolver exemption was first written
+    with a ``\b`` that the generator ate, so the rule reported RuntimeProfile.h -- the one file it
+    must not report -- and the count still looked plausible.
+
+    Lines 1-4 must fire: the private-range address that WAS the second machine, the same address as
+    label text, the port in a URL, and the port as a bare argument. Lines 5-7 are the counterweight:
+    a comment (the fix's own citation names the literal, and a rule that read comments would report
+    itself forever), a year-like number that merely contains no boundary, and a version string that
+    happens to hold the digits.
+    """
+    probe = chr(10).join([
+        'QNetworkRequest r(QUrl(QStringLiteral("http://192.168.1.127:8188/system_stats")));',  # 1
+        'label->setText(QStringLiteral("192.168.1.127 SpellNode"));',                          # 2
+        'QUrl url(QStringLiteral("http://127.0.0.1:8188/queue"));',                            # 3
+        'resolveLiveComfyRoot(root, QStringLiteral("127.0.0.1"), 8188);',                      # 4
+        '// it used to GET http://192.168.1.127:8188/system_stats here',                       # 5
+        'const int wide = 81880;',                                                             # 6
+        'const QString v = QStringLiteral("v8188.2");',                                        # 7
+    ])
+    caught = [v.line for v in
+              rules._check_hardcoded_endpoint_literal(Path("qt_ui/Probe.cpp"), probe)]
+    assert caught == [1, 2, 3, 4], caught
+
+    # And the resolver may name what it resolves between, or it stops being one. Identified by
+    # DEFINING the profile, not by its filename -- a rule may not name a file.
+    resolver = chr(10).join([
+        "struct RuntimeProfile",
+        "{",
+        '    QString comfyHost = QStringLiteral("127.0.0.1");',
+        "    quint16 comfyPort = 8188;",
+        "};",
+    ])
+    assert rules._check_hardcoded_endpoint_literal(Path("qt_ui/shell/Probe.h"), resolver) == []
+
+
 def test_the_qss_rule_sees_the_frame_the_style_draws():
     """`qss-draws-a-control` reported zero while five stylesheets painted QFrames.
 
