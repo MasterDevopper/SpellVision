@@ -27,6 +27,7 @@ class ModelCardDelegate;
 class ModelCardView;
 class ModelOverlayStore;
 class ModelKindTabBar;
+class ModelInspectorPanel;
 }
 
 class ModelManagerPage : public QWidget
@@ -85,9 +86,16 @@ signals:
     // and until 2026-09-16 nothing ever dropped one, so a sidecar written between two picks of the
     // same checkpoint could not reach the cockpit without restarting the app.
     void inventoryRefreshStarted();
+    // W5 Task 3: one request the inspector built (model_intel_set_user / model_intel_refresh).
+    // The page owns no socket; MainWindow sends it and hands the answer back through
+    // applyModelIntelReply.
+    void modelIntelRequested(const QJsonObject &request);
+    // "Apply to this mode" -- the settings this model publishes, with their provenance attached.
+    void applyModelSettingsRequested(const QString &weightPath, const QJsonObject &settings);
 
 public slots:
     void refreshInventory();
+    void applyModelIntelReply(const QJsonObject &reply);
     void rebuildThumbnailCache();
 
 protected:
@@ -200,11 +208,10 @@ private:
     QStackedWidget *viewStack_ = nullptr;
     QTreeWidget *modelsTree_ = nullptr;
     QLabel *modelDetailsLabel_ = nullptr;
-    QLabel *exampleImageLabel_ = nullptr;
-    QLabel *modelTriggersLabel_ = nullptr;
-    QPushButton *copyTriggersButton_ = nullptr;
-    QLabel *modelDescriptionLabel_ = nullptr;
-    QStringList currentTriggerWords_;
+    // W5 Task 3: the gallery, description, trigger words, licence, recommended settings and the
+    // three actions all live in one unit now. The page used to hold four loose widgets and rebuild
+    // them inline in updateDetailsForRow.
+    spellvision::assets::ModelInspectorPanel *inspectorPanel_ = nullptr;
     QFutureWatcher<RefreshResult> *refreshWatcher_ = nullptr;
     bool refreshBusy_ = false;
 

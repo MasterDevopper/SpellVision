@@ -1777,6 +1777,35 @@ void MainWindow::buildPages()
     // create that sidecar.
     connect(modelsPage_, &ModelManagerPage::inventoryRefreshStarted, this,
             [this]() { clearModelDefaultsCache(); });
+    // W5 Task 3: the Models inspector builds a request and consumes a reply; MainWindow owns the
+    // socket. A refresh can take minutes on a large root, so it gets a long budget -- and the reply
+    // goes straight back to the page whether it succeeded or not, because the containment refusal
+    // (a picture outside the model roots) is the answer the user most needs to SEE.
+    connect(modelsPage_, &ModelManagerPage::modelIntelRequested, this, [this](const QJsonObject &request) {
+        const QString command = request.value(QStringLiteral("command")).toString();
+        const int budgetMs = command == QStringLiteral("model_intel_refresh") ? 600000 : 20000;
+        sendWorkerRequestAsync(
+            request,
+            [this, command, request](const QJsonObject &response, const QString &error, bool startedOk) {
+                if (!modelsPage_)
+                    return;
+                if (!startedOk)
+                {
+                    modelsPage_->applyModelIntelReply(QJsonObject{
+                        {QStringLiteral("type"), command},
+                        {QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), error.isEmpty()
+                             ? QStringLiteral("the worker did not answer") : error}});
+                    return;
+                }
+                // A sidecar written between two picks of the same checkpoint has to be able to
+                // reach the cockpit; the cached per-model answer is now stale.
+                clearModelDefaultsCache(request.value(QStringLiteral("path")).toString());
+                modelsPage_->applyModelIntelReply(response);
+            },
+            budgetMs);
+    });
+
     // Models page: the existing download lane, and the new delete.
     connect(modelsPage_, &ModelManagerPage::downloadModelRequested, this, [this](const QString &reference) {
         startModelDownload(reference, QString(), QJsonObject{{QStringLiteral("origin"), QStringLiteral("models_page")}});

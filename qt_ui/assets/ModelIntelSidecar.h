@@ -53,6 +53,24 @@ struct ModelIntelImage
     bool userOverride = false;
 };
 
+// One entry of the `recommended` block: a value, where it came from, and how much of the evidence
+// agreed. The provenance is the whole point -- "10 steps, from 10 of this model's own example
+// images" and "10 steps, because the family table says so" are different claims, and a number
+// shown without which one it is invites the user to trust both equally.
+struct ModelIntelRecommendation
+{
+    QString field;
+    QString value;      // as text; the inspector prints it, the cockpit parses it
+    QString provenance; // user | site:image-meta-mode | site:trainedWords | card:* | table:family-default
+    double confidence = 1.0;
+    int agreeing = 0;   // `n`   -- 0 when the source is not a vote
+    int total = 0;      // `total`
+
+    // The caption under the value, in the user's words rather than the schema's.
+    QString caption() const;
+    bool isFromThisModel() const;  // the site's own examples, or the user -- not a family floor
+};
+
 // The three states the page has to keep apart. Collapsing the last two is what would stop a user
 // telling "we asked the site and it does not know this file" from "nothing has ever looked".
 enum class ModelIdentification
@@ -89,6 +107,10 @@ struct ModelIntel
     bool triggerWordsAreUserOverride = false;
     QVector<ModelIntelImage> images;
 
+    // --- recommended: what this model asks to be run at ---
+    QVector<ModelIntelRecommendation> recommended;
+    ModelIntelRecommendation recommendationFor(const QString &field) const;
+
     // True when a lookup actually matched something on a site. An identified model with no
     // pictures and no description is still identified, and must not render like one nobody asked
     // about.
@@ -110,6 +132,10 @@ QString identificationCaption(ModelIdentification state);
 // (`models/nsfwPreviewLevel`), defaulting to 2 -- the same ceiling
 // `model_intelligence.previews.download_previews` fetches at, so the default setting never blurs
 // a picture the refresh was willing to download.
+// `description_html` with its tags removed and its whitespace collapsed. The sidecar carries the
+// site's HTML verbatim; a QLabel would render a subset of it and swallow the rest.
+QString plainTextFromHtml(const QString &html);
+
 int nsfwPreviewCeiling();
 bool previewShouldBlur(int imageNsfwLevel, int ceiling);
 

@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QSettings>
 
 namespace spellvision::assets
@@ -41,6 +42,66 @@ QString ModelIntelSource::siteLabel() const
 ModelIntelSource ModelIntel::primarySource() const
 {
     return sources.isEmpty() ? ModelIntelSource{} : sources.first();
+}
+
+QString ModelIntelRecommendation::caption() const
+{
+    if (provenance == QStringLiteral("user"))
+        return QStringLiteral("you set this");
+    if (provenance == QStringLiteral("site:image-meta-mode") && total > 0)
+    {
+        return QStringLiteral("from %1 of %2 example images on the site")
+            .arg(agreeing)
+            .arg(total);
+    }
+    if (provenance == QStringLiteral("site:image-meta-weak") && total > 0)
+    {
+        // Below the quorum. It is still evidence from this model's author, and saying how thin it
+        // is beats either hiding it or presenting it as agreement.
+        return QStringLiteral("from only %1 of %2 example images").arg(agreeing).arg(total);
+    }
+    if (provenance == QStringLiteral("site:trainedWords"))
+        return QStringLiteral("the trigger words the site lists");
+    if (provenance.startsWith(QStringLiteral("card:")))
+        return QStringLiteral("read out of the model card");
+    if (provenance == QStringLiteral("table:family-default"))
+        return QStringLiteral("a family default, not this model");
+    return provenance;
+}
+
+bool ModelIntelRecommendation::isFromThisModel() const
+{
+    return provenance == QStringLiteral("user") || provenance.startsWith(QStringLiteral("site:"))
+        || provenance.startsWith(QStringLiteral("card:"));
+}
+
+ModelIntelRecommendation ModelIntel::recommendationFor(const QString &field) const
+{
+    for (const ModelIntelRecommendation &entry : recommended)
+    {
+        if (entry.field == field)
+            return entry;
+    }
+    return {};
+}
+
+QString plainTextFromHtml(const QString &html)
+{
+    QString text = html;
+    text.replace(QRegularExpression(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral(" "));
+    text.replace(QRegularExpression(QStringLiteral("</p>"), QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral(" "));
+    text.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
+    // The site's descriptions carry entities, and a user reading "&amp;" in an inspector learns
+    // that the app cannot read its own data.
+    text.replace(QStringLiteral("&nbsp;"), QStringLiteral(" "));
+    text.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+    text.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    text.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    text.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+    text.replace(QStringLiteral("&#39;"), QStringLiteral("'"));
+    return text.simplified();
 }
 
 ModelIdentification ModelIntel::identification() const
@@ -193,6 +254,39 @@ ModelIntel parseModelIntelDocument(const QByteArray &json, const QString &sideca
         if (image.localPath.isEmpty() && image.originUrl.isEmpty())
             continue;
         intel.images.push_back(image);
+    }
+
+    const QJsonObject recommended = root.value(QStringLiteral("recommended")).toObject();
+    for (auto it = recommended.constBegin(); it != recommended.constEnd(); ++it)
+    {
+        const QJsonObject entry = it.value().toObject();
+        if (entry.isEmpty())
+            continue;
+        ModelIntelRecommendation recommendation;
+        recommendation.field = it.key();
+        const QJsonValue value = entry.value(QStringLiteral("value"));
+        if (value.isDouble())
+        {
+            const double number = value.toDouble();
+            recommendation.value = (number == static_cast<double>(static_cast<qint64>(number)))
+                ? QString::number(static_cast<qint64>(number))
+                : QString::number(number, 'g', 4);
+        }
+        else if (value.isBool())
+        {
+            recommendation.value = value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+        }
+        else
+        {
+            recommendation.value = value.toString();
+        }
+        recommendation.provenance = entry.value(QStringLiteral("provenance")).toString();
+        recommendation.confidence = entry.value(QStringLiteral("confidence")).toDouble(1.0);
+        recommendation.agreeing = entry.value(QStringLiteral("n")).toInt();
+        recommendation.total = entry.value(QStringLiteral("total")).toInt();
+        if (recommendation.value.isEmpty())
+            continue;
+        intel.recommended.push_back(recommendation);
     }
 
     for (const QJsonValue &value : identity.value(QStringLiteral("sources")).toArray())

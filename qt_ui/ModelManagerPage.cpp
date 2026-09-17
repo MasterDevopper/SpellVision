@@ -7,6 +7,7 @@
 #include "assets/ModelCardModel.h"
 #include "assets/ModelCardDelegate.h"
 #include "assets/ModelCardView.h"
+#include "assets/ModelInspectorPanel.h"
 #include "assets/ModelIntelSidecar.h"
 #include "assets/ModelKindTabs.h"
 #include "assets/CatalogPickerDialog.h"
@@ -765,17 +766,20 @@ void ModelManagerPage::onCardFavoriteToggled(const QModelIndex &index)
     cardModel_->setFavorite(row, next);
 }
 
+void ModelManagerPage::applyModelIntelReply(const QJsonObject &reply)
+{
+    if (inspectorPanel_)
+        inspectorPanel_->applyWorkerReply(reply);
+}
+
 void ModelManagerPage::updateDetailsForRow(int row)
 {
     if (!modelDetailsLabel_)
         return;
 
-    currentTriggerWords_.clear();
     auto hideExtras = [this]() {
-        if (modelTriggersLabel_) modelTriggersLabel_->hide();
-        if (copyTriggersButton_) copyTriggersButton_->hide();
-        if (modelDescriptionLabel_) modelDescriptionLabel_->hide();
-        if (exampleImageLabel_) exampleImageLabel_->hide();
+        if (inspectorPanel_)
+            inspectorPanel_->clear();
     };
 
     if (row < 0 || row >= entries_.size())
@@ -813,53 +817,17 @@ void ModelManagerPage::updateDetailsForRow(int row)
         lines << QStringLiteral("No metadata — local file only.");
     modelDetailsLabel_->setText(lines.join(QLatin1Char('\n')));
 
-    if (exampleImageLabel_)
-    {
-        QPixmap pix;
-        if (!e.imagePreviewPath.isEmpty())
-            pix.load(e.imagePreviewPath);
-        if (pix.isNull())
-        {
-            exampleImageLabel_->clear();
-            exampleImageLabel_->hide();
-        }
-        else
-        {
-            exampleImageLabel_->setPixmap(pix.scaledToHeight(160, Qt::SmoothTransformation));
-            exampleImageLabel_->show();
-        }
-    }
-
-    // Trigger words (civitai.trainedWords) + copy button.
-    currentTriggerWords_ = meta.triggerWords;
     if (deleteModelButton_)
         deleteModelButton_->setVisible(!e.path.trimmed().isEmpty());
-    if (!currentTriggerWords_.isEmpty())
-    {
-        modelTriggersLabel_->setText(QStringLiteral("Triggers: %1").arg(currentTriggerWords_.join(QStringLiteral(", "))));
-        modelTriggersLabel_->show();
-        copyTriggersButton_->show();
-    }
-    else
-    {
-        modelTriggersLabel_->hide();
-        copyTriggersButton_->hide();
-    }
 
-    // Description (strip HTML, collapse whitespace, truncate — the card stays compact).
-    QString desc = meta.description;
-    if (!desc.isEmpty())
+    // Everything the sidecar knows -- the gallery, the description, the trigger words, the licence
+    // and the settings this model publishes with their provenance -- is one unit, and it reads the
+    // document itself rather than being handed four already-flattened strings.
+    if (inspectorPanel_)
     {
-        desc.remove(QRegularExpression(QStringLiteral("<[^>]*>")));
-        desc = desc.simplified();
-        if (desc.size() > 600)
-            desc = desc.left(600) + QStringLiteral("…");
-        modelDescriptionLabel_->setText(desc);
-        modelDescriptionLabel_->show();
-    }
-    else
-    {
-        modelDescriptionLabel_->hide();
+        inspectorPanel_->setModelRoots(spellvision::shell::scannableModelsRoots(
+            resolveModelsRoot(), spellvision::shell::extraModelsRootsFromSettings()));
+        inspectorPanel_->showModel(e.path, e.name);
     }
 
     updateWorkflowSectionForRow(row);
@@ -1339,33 +1307,11 @@ void ModelManagerPage::buildUi()
     modelDetailsLabel_->setWordWrap(true);
     modelDetailsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
-    // Trigger words (civitai.trainedWords, doc 22 §0 correction #1) + copy-to-clipboard.
-    modelTriggersLabel_ = new QLabel(this);
-    modelTriggersLabel_->setObjectName(QStringLiteral("ModelsDetailsText"));
-    modelTriggersLabel_->setWordWrap(true);
-    modelTriggersLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    modelTriggersLabel_->hide();
-    copyTriggersButton_ = new QPushButton(QStringLiteral("Copy trigger words"), this);
-    copyTriggersButton_->setObjectName(QStringLiteral("ModelsActionButton"));
-    copyTriggersButton_->setCursor(Qt::PointingHandCursor);
-    setRole(copyTriggersButton_, svstyle::Role::Secondary);
-    copyTriggersButton_->hide();
-    connect(copyTriggersButton_, &QPushButton::clicked, this, [this]() {
-        if (!currentTriggerWords_.isEmpty())
-            QGuiApplication::clipboard()->setText(currentTriggerWords_.join(QStringLiteral(", ")));
-    });
-    auto *triggersRow = new QHBoxLayout();
-    triggersRow->setContentsMargins(0, 0, 0, 0);
-    triggersRow->setSpacing(tight);
-    triggersRow->addWidget(modelTriggersLabel_, 1);
-    triggersRow->addWidget(copyTriggersButton_, 0, Qt::AlignTop);
-
-    modelDescriptionLabel_ = new QLabel(this);
-    modelDescriptionLabel_->setObjectName(QStringLiteral("ModelsMeta"));
-    modelDescriptionLabel_->setWordWrap(true);
-    modelDescriptionLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    modelDescriptionLabel_->setMaximumHeight(64); // keep the card compact; long descriptions truncate
-    modelDescriptionLabel_->hide();
+    inspectorPanel_ = new spellvision::assets::ModelInspectorPanel(this);
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::workerRequested,
+            this, &ModelManagerPage::modelIntelRequested);
+    connect(inspectorPanel_, &spellvision::assets::ModelInspectorPanel::applyRecommendedRequested,
+            this, &ModelManagerPage::applyModelSettingsRequested);
 
     // --- S3 bound-workflow row: name / task / readiness + Bind / Use / Resolve actions ---
     workflowBindingLabel_ = new QLabel(this);
@@ -1433,13 +1379,7 @@ void ModelManagerPage::buildUi()
     detailsCol->setContentsMargins(snug, snug, snug, snug);
     detailsCol->setSpacing(hair);
     detailsCol->addWidget(modelDetailsLabel_);
-    exampleImageLabel_ = new QLabel(this);
-    exampleImageLabel_->setObjectName(QStringLiteral("ModelsExampleImage"));
-    exampleImageLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    exampleImageLabel_->hide();
-    detailsCol->addWidget(exampleImageLabel_);
-    detailsCol->addLayout(triggersRow);
-    detailsCol->addWidget(modelDescriptionLabel_);
+    detailsCol->addWidget(inspectorPanel_);
     detailsCol->addWidget(workflowBindingLabel_);
     detailsCol->addWidget(workflowNoteLabel_);
     detailsCol->addLayout(workflowRow);

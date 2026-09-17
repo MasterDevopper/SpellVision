@@ -164,7 +164,12 @@ class RefreshJob:
                 if version:
                     try:
                         images = previews.download_previews(
-                            version, models_root=self.models_root, sha256=digest, weight=path
+                            version, models_root=self.models_root, sha256=digest, weight=path,
+                            # Do not touch `<stem>.preview.jpg` when the user chose it. The
+                            # sidecar merge keeps their ENTRY; without this the FILE it points at
+                            # was overwritten anyway, so the promise held in the JSON and broke on
+                            # disk.
+                            preserve_cover=bool(sidecar.user_images(existing)),
                         )
                     except Exception as exc:  # noqa: BLE001 -- pictures never cost an identity
                         errors.append({"path": str(path), "error": f"previews: {exc}"})

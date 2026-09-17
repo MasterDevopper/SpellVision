@@ -49,6 +49,19 @@ def write(weight: str | Path, payload: dict[str, Any]) -> Path:
     return target
 
 
+def user_images(existing: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The pictures the USER chose.
+
+    `display.images` is a LIST, and `merge` protected a display field by asking whether it was a
+    dict carrying `user_override`. A list is not a dict, and `images` is always present in the
+    fresh payload, so neither branch ever fired: every refresh replaced the gallery wholesale and
+    the flag marking the user's own cover went with it. The promise "a picture you choose survives
+    a later refresh" was written in three docstrings and held by nothing.
+    """
+    images = ((existing or {}).get("display") or {}).get("images") or []
+    return [image for image in images if isinstance(image, dict) and image.get("user_override")]
+
+
 def user_values(existing: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     """The recommended entries the user set, for feeding back into `recommended.build`."""
     out: dict[str, dict[str, Any]] = {}
@@ -71,6 +84,19 @@ def merge(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> dict[str, A
             display[field] = entry
         elif field not in display:
             display[field] = entry
+
+    # The gallery is a list, so the loop above cannot protect it -- see `user_images`. The user's
+    # pictures come first and the first of them is the cover; the site's images follow, minus any
+    # the user already claimed, with their own cover flag cleared so exactly one image is cover.
+    kept = user_images(existing)
+    if kept:
+        claimed = {str(image.get("local_path") or "") for image in kept}
+        kept = [{**kept[0], "is_cover": True}] + [{**image, "is_cover": False} for image in kept[1:]]
+        display["images"] = kept + [
+            {**image, "is_cover": False}
+            for image in (display.get("images") or [])
+            if str(image.get("local_path") or "") not in claimed
+        ]
     merged["display"] = display
 
     wanted = dict(fresh.get("recommended") or {})

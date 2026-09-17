@@ -165,6 +165,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/assets/ModelIntelSidecar.h
     qt_ui/assets/ModelKindTabs.cpp
     qt_ui/assets/ModelKindTabs.h
+    qt_ui/assets/ModelInspectorPanel.cpp
+    qt_ui/assets/ModelInspectorPanel.h
     qt_ui/assets/ModelOverlayStore.cpp
     qt_ui/assets/ModelOverlayStore.h
     qt_ui/assets/ModelThumbnailCache.cpp
@@ -707,6 +709,19 @@ qt_add_executable(test_model_card_sidecar tests/cpp/test_model_card_sidecar.cpp)
 target_link_libraries(test_model_card_sidecar PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME model_card_sidecar COMMAND test_model_card_sidecar)
 
+# W5 Task 3: the inspector, and the user's own picture. The details card showed one example image
+# and a truncated description; the sidecar carried six pictures, the site's description, the licence
+# and a `recommended` block with a PROVENANCE on every value -- and the provenance is the point,
+# because "10 steps, agreed by 10 of this model's own examples" and "10 steps, because the family
+# table says so" are different claims and the app has been rendering the owner's house checkpoint at
+# the wrong one. The case most likely to be quietly broken later is the user's own picture surviving
+# a refresh, so it is asserted from the cover-selection end here and end-to-end through the real
+# RefreshJob in tests/test_model_intel_user_picture.py. No socket: the panel builds requests and
+# consumes replies, and the test plays the worker.
+qt_add_executable(test_model_inspector tests/cpp/test_model_inspector.cpp)
+target_link_libraries(test_model_inspector PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME model_inspector COMMAND test_model_inspector)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -727,7 +742,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       test_workflow_draft_builder test_workflow_drop_coordinator
-                      test_model_kind_tabs test_model_card_sidecar
+                      test_model_kind_tabs test_model_card_sidecar test_model_inspector
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

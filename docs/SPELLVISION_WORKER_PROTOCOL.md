@@ -262,9 +262,15 @@ and progress plus the final `model_intel_refresh` result are published to `subsc
 {
   "command": "model_intel_refresh",
   "roots": ["D:/AI_ASSETS/models/loras"],
+  "files": ["D:/AI_ASSETS/models/loras/Detailer-KREA2.safetensors"],
   "background": false
 }
 ```
+
+`files` is optional and narrows the pass to exactly those weights -- what the Models inspector's
+"Refresh metadata" sends, because it is about one model rather than a library. Each one must lie
+inside the named `roots`; a file outside them is refused with a reason rather than hashed. Without
+it every weight under `roots` is walked, smallest first.
 
 #### Response
 

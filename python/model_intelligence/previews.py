@@ -47,6 +47,7 @@ def download_previews(
     sha256: str,
     weight: str | Path,
     opener: Any = None,
+    preserve_cover: bool = False,
     limit: int = 6,
     max_nsfw_level: int = 2,
     timeout: float = 25.0,
@@ -94,7 +95,12 @@ def download_previews(
             "meta": image.get("meta") or {},
         })
 
-    if out and not _has_hand_placed_picture(weight_path):
+    # `_has_hand_placed_picture` does NOT cover `<stem>.preview.jpg`, and it must not: that is the
+    # file THIS function writes, so treating it as hand-placed would mean a cover is written once
+    # and then never updated again. It is also the file `set_user_picture` writes, which is why the
+    # caller has to tell us -- the user's picture was otherwise overwritten by the next refresh,
+    # silently, with a picture off the site.
+    if out and not preserve_cover and not _has_hand_placed_picture(weight_path):
         cover = weight_path.with_name(weight_path.stem + COVER_SUFFIX)
         try:
             cover.write_bytes(Path(out[0]["local_path"]).read_bytes())
@@ -105,7 +111,13 @@ def download_previews(
 
 
 def set_user_picture(weight: str | Path, image: str | Path) -> Path:
-    """The user chose this picture. It becomes the cover, whatever else is there."""
+    """The user chose this picture. It becomes the cover, whatever else is there.
+
+    The sidecar entry that MARKS it as theirs is written by the caller
+    (`model_intelligence_commands.handle_model_intel_set_user_command`); without that mark the
+    next refresh overwrites this file, because nothing on disk distinguishes a cover the user
+    chose from one the previews pass downloaded.
+    """
     weight_path = Path(str(weight))
     cover = weight_path.with_name(weight_path.stem + COVER_SUFFIX)
     cover.write_bytes(Path(str(image)).read_bytes())

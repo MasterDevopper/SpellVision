@@ -162,13 +162,27 @@ def handle_model_intel_set_user_command(req: dict[str, Any]) -> dict[str, Any]:
             return {"ok": False, "type": "model_intel_set_user",
                     "error": "picture is outside the model roots named by this request"}
         try:
-            previews.set_user_picture(path, picture)
+            cover = previews.set_user_picture(path, picture)
         except OSError as exc:
             return {"ok": False, "type": "model_intel_set_user", "error": str(exc)}
-        images = list(display.get("images") or [])
-        if images:
-            images[0] = {**images[0], "user_override": True}
-        display["images"] = images
+        # Record the picture the user chose, pointing at the file that was actually written.
+        # Marking `images[0]` only worked when the site had already supplied a gallery -- so for
+        # an UNIDENTIFIED weight, the one case where a user is most likely to want their own
+        # picture, nothing recorded the choice at all and the next refresh overwrote the file.
+        previous = [
+            image for image in (display.get("images") or [])
+            if isinstance(image, dict) and not image.get("user_override")
+        ]
+        display["images"] = [{
+            "origin_url": "",
+            "local_path": str(cover),
+            "width": None,
+            "height": None,
+            "nsfw_level": 0,
+            "is_cover": True,
+            "user_override": True,
+            "meta": {},
+        }] + [{**image, "is_cover": False} for image in previous]
         changed.append("picture")
 
     notes = req.get("notes")
@@ -244,8 +258,23 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
             "percent": int(100 * done / total) if total else 0,
         })
 
+    # `files` is the narrow entry point RefreshJob already supports and nothing reached. The Models
+    # inspector's "Refresh metadata" is about ONE weight; without this it walked every root, which
+    # on the owner's library is 759 files and 2.09 TB of hashing for a button that names one file.
+    # Contained by the same roots the rest of this module is.
+    wanted = [str(f) for f in (req.get("files") or []) if str(f).strip()]
+    files: list[str] | None = None
+    if wanted:
+        bounded = [Path(f) for f in wanted]
+        outside = [str(f) for f in bounded if not _within(f, [Path(r) for r in roots])]
+        if outside:
+            return {"ok": False, "type": "model_intel_refresh",
+                    "error": f"files outside the named roots: {', '.join(outside)}"}
+        files = [str(f) for f in bounded]
+
     job = RefreshJob(
         roots,
+        files=files,
         client=client,
         models_root=req.get("models_root") or roots[0],
         progress=progress,
