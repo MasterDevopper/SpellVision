@@ -138,6 +138,10 @@ DIAGNOSTIC: frozenset[str] = frozenset({
     # this list in W2, when the cockpit started asking it what a model wants.
     "model_intel_get", "model_intel_refresh", "model_intel_cancel", "model_intel_set_user",
     "model_roots_status",
+    # W6 Task 2: "can this job run on that endpoint". DIAGNOSTIC until Task 4 gives the endpoint
+    # picker a route in qt_ui/ -- the ratchet requires a literal there for anything called
+    # user-facing, and claiming the route before it exists is the one direction it cannot catch.
+    "endpoint_capability",
 })
 
 # Never addressed by a person.

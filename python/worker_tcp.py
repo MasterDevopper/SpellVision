@@ -811,6 +811,11 @@ class WorkerTCPHandler(socketserver.StreamRequestHandler):
 
             emitter.emit(optimization_commands.handle_optimization_results_command(req))
             return
+        if command == "endpoint_capability":
+            import endpoint_commands
+
+            emitter.emit(endpoint_commands.handle_endpoint_capability_command(req))
+            return
         if command == "resolve_missing_models":
             import model_resolution_commands
 

@@ -842,8 +842,15 @@ def _comfy_object_info(api_url: str, *, force_refresh: bool = False,
     return payload
 
 
-def _http_get_json(api_url: str, path: str, *, timeout: float = 90.0) -> Any:
-    """GET a JSON body without urllib's forced ``Connection: close`` (see _fetch_comfy_object_info).
+def http_get_json_status(api_url: str, path: str, *, timeout: float = 90.0) -> tuple[int, Any]:
+    """GET a JSON body and return ``(status, parsed)`` without urllib's forced ``Connection: close``.
+
+    One implementation, two entry points. ``_http_get_json`` is the raise-on-error form every
+    existing caller uses; this is the form a caller needs when the STATUS is the answer -- ComfyUI
+    answers ``GET /models/{folder}`` for a folder it does not know with a 404, and "that endpoint
+    does not publish this category" is a different fact from "that endpoint is unreachable". A
+    second http.client getter written next door would have drifted off the Connection: close lesson
+    the moment one of them was edited, so there is only this one.
 
     gzip is requested because ComfyUI's larger bodies compress roughly tenfold, which is worth the
     few lines on a response this size.
@@ -865,16 +872,27 @@ def _http_get_json(api_url: str, path: str, *, timeout: float = 90.0) -> Any:
         })
         resp = conn.getresponse()
         body = resp.read()
-        if resp.status >= 400:
-            raise RuntimeError(f"HTTP {resp.status} from {api_url}{path}")
+        status = int(resp.status)
+        if status >= 400:
+            # The body of an error response is ComfyUI's HTML/text, not JSON. Parsing it would
+            # raise a decode error over the top of the status the caller asked for.
+            return status, None
         if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
             body = gzip.decompress(body)
-        return json.loads(body.decode("utf-8"))
+        return status, json.loads(body.decode("utf-8"))
     finally:
         try:
             conn.close()
         except Exception:
             pass
+
+
+def _http_get_json(api_url: str, path: str, *, timeout: float = 90.0) -> Any:
+    """GET a JSON body, raising on a non-2xx. See ``http_get_json_status`` for the transport."""
+    status, payload = http_get_json_status(api_url, path, timeout=timeout)
+    if status >= 400:
+        raise RuntimeError(f"HTTP {status} from {api_url}{path}")
+    return payload
 
 
 def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -> dict[str, Any]:

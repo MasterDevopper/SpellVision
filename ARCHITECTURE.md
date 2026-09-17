@@ -52,7 +52,7 @@ seam between two of these steps rather than inside any one of them.
 2. **The submission policy decides whether to send it.** `qt_ui/workers/WorkerSubmissionPolicy`.
 3. **It goes over the socket.** `qt_ui/workers/WorkerSocketClient` carries every one-shot command.
    (It replaced spawning `python worker_client.py` per RPC: ~79 ms → ~1.4 ms, on a 1.8 s poll.)
-4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 134
+4. **The worker dispatches it.** `python/worker_tcp.py::handle` — one entry point for all 135
    commands. `python/worker_command_audience.py` classifies every one of them as user-facing,
    diagnostic or internal, and `tests/test_protocol_doc.py` holds the protocol document to that set.
 5. **The job enters the state machine.** `python/worker_service_state.py` owns `JobState` and
@@ -83,7 +83,7 @@ extractions; `worker_tcp.py` is 864.
 | --- | --- | --- |
 | Worker core | `worker_service.py`, `worker_tcp.py`, `worker_runtime.py`, `worker_service_state.py`, `worker_queue.py`, `worker_durable_state.py`, `worker_auth.py`, `worker_metadata.py` | Entry point, TCP dispatch, pipeline runtime, job state, queue, persistence, per-launch session secret |
 | Protocol surface | `worker_client.py`, `worker_command_audience.py`, `request_payload.py` | The CLI mirror of the wire protocol, who each command is for, request coercion |
-| ComfyUI lifecycle | `comfy_root.py`, `comfy_bootstrap.py`, `comfy_runtime_manager.py`, `comfy_launch_policy.py`, `comfy_endpoint.py`, `comfy_version_check.py`, `comfy_manager_bridge.py` | Where it is, how it starts, how it is reached, what version answered |
+| ComfyUI lifecycle | `comfy_root.py`, `comfy_bootstrap.py`, `comfy_runtime_manager.py`, `comfy_launch_policy.py`, `comfy_endpoint.py`, `comfy_version_check.py`, `comfy_manager_bridge.py`, `endpoint_capability.py`, `endpoint_commands.py` | Where it is, how it starts, how it is reached, what version answered, and whether a given endpoint can run a given graph |
 | ComfyUI graphs | `comfy_prompt_client.py`, `comfy_cancel.py`, `comfy_graph_helpers.py`, `comfy_graph_converter.py`, `comfy_slot_mapper.py`, `comfy_node_contract.py`, `comfy_node_aliases.py`, `comfy_subgraph_expander.py` | Submit, cancel, shared graph primitives, UI→API conversion, node contract diffing |
 | Generation | `image_runners.py`, `native_runners.py`, `native_image_graphs.py`, `native_video_graphs.py`, `krea2_graph.py`, `krea2_regional_inpaint.py`, `qwen_image_edit_graph.py`, `upscale_engine.py`, `flux3_video.py` | The routes that actually render |
 | Families | `family_capability.py`, `family_operating_points.py`, `family_install_plan.py`, `video_family_contracts.py`, `video_family_readiness.py`, `video_adapters/` | What a family can do, what it costs, whether it is ready, per-family video adapters |

@@ -362,6 +362,30 @@ def _comfy_input_choices(object_info: dict[str, Any], class_name: str, input_nam
 # deliberate and inert; adding a THIRD name is what this comment exists to prevent.
 _sv_comfy_input_choices = _comfy_input_choices
 
+
+def _comfy_input_declares_combo(object_info: dict[str, Any], class_name: str, input_name: str) -> bool:
+    """Does this class declare this input as a CATALOGUE at all, whatever is in it?
+
+    Lives here, beside the choices reader, because it parses the same two shapes and a second
+    module parsing them is exactly what this file exists to prevent.
+
+    It is a different question from "what are the choices", and it has to be asked separately,
+    because ``_comfy_input_choices`` answers ``[]`` for both "there is no such input" and "there is
+    a catalogue and it is empty". Those are opposite answers to a caller deciding whether a model
+    is missing: the first means the input is not a model file and the graph is fine, the second
+    means the machine holds none of that category and the job cannot run there. Collapsing them is
+    the unsayable-zero shape -- an endpoint with an empty `checkpoints` folder would be cleared to
+    run a checkpoint.
+    """
+    for bucket in ("required", "optional"):
+        spec = _comfy_input_bucket(object_info, class_name, bucket).get(input_name)
+        if not isinstance(spec, (list, tuple)) or not spec:
+            continue
+        head = spec[0]
+        if isinstance(head, (list, tuple)) or str(head).upper() == "COMBO":
+            return True
+    return False
+
 def _sv_choose_comfy_choice(object_info: dict[str, Any], class_name: str, input_name: str, requested: str) -> str:
     requested = str(requested or "").strip()
     requested_name = Path(requested).name
