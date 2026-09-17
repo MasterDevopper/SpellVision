@@ -249,6 +249,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workflows/ModelResolutionDialog.h
     qt_ui/workflows/WorkflowDownloadDialog.cpp
     qt_ui/workflows/WorkflowDownloadDialog.h
+    qt_ui/workflows/WorkflowDraftBuilder.cpp
+    qt_ui/workflows/WorkflowDraftBuilder.h
     qt_ui/workflows/WorkflowLaunchController.cpp
     qt_ui/workflows/WorkflowLaunchController.h
     qt_ui/preview/MediaPreviewController.cpp
@@ -657,6 +659,16 @@ qt_add_executable(test_window_drop_target tests/cpp/test_window_drop_target.cpp)
 target_link_libraries(test_window_drop_target PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME window_drop_target COMMAND test_window_drop_target)
 
+# W4 Task 4: the draft carries the cockpit's VALUES, not four paths. The extraction moved out of
+# WorkflowLibraryPage so the drop path and Flows share one answer to "what does this graph say the
+# checkpoint is" -- a second extractor would have started disagreeing on the first graph whose loader
+# is not a plain CheckpointLoaderSimple. Driven by real owner workflows under
+# runtime/imported_workflows: a synthetic prompt written to match the extractor proves only that the
+# extractor matches itself, and classification's whole job is graphs nobody here wrote.
+qt_add_executable(test_workflow_draft_builder tests/cpp/test_workflow_draft_builder.cpp)
+target_link_libraries(test_workflow_draft_builder PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_draft_builder COMMAND test_workflow_draft_builder)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -676,6 +688,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
+                      test_workflow_draft_builder
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
