@@ -2,6 +2,7 @@
 #include "shell/ProjectRoot.h"
 
 #include "HomeDashboardPage.h"
+#include "workflows/WorkflowLaunchController.h"
 #include "HomeDashboardSettings.h"
 #include "ThemeManager.h"
 
@@ -125,56 +126,26 @@ QJsonObject readJsonObjectFromFile(const QString &path)
     return doc.object();
 }
 
-QString inferModeFromWorkflowProfile(const QJsonObject &profile)
-{
-    const QString directTask = normalizedModeId(firstNonEmpty(profile.value(QStringLiteral("task_command")).toString(),
-                                                              profile.value(QStringLiteral("workflow_task_command")).toString(),
-                                                              profile.value(QStringLiteral("task_type")).toString()));
-    if (!directTask.isEmpty())
-        return directTask;
-
-    const QString mediaType = profile.value(QStringLiteral("media_type")).toString().trimmed().toLower();
-    if (mediaType == QStringLiteral("video"))
-        return QStringLiteral("t2v");
-    if (mediaType == QStringLiteral("image"))
-        return QStringLiteral("t2i");
-
-    const QString workflowPath = firstNonEmpty(profile.value(QStringLiteral("workflow_path")).toString(),
-                                               profile.value(QStringLiteral("workflow_source")).toString(),
-                                               profile.value(QStringLiteral("name")).toString(),
-                                               profile.value(QStringLiteral("profile_name")).toString()).toLower();
-
-    for (const QString &candidate : {QStringLiteral("i2v"), QStringLiteral("t2v"), QStringLiteral("i2i"), QStringLiteral("t2i")})
-    {
-        if (workflowPath.contains(candidate))
-            return candidate;
-    }
-
-    return QStringLiteral("t2i");
-}
-
 QString inferModeFromOutput(const QString &path, const QJsonObject &metadata)
 {
-    const QString metaTask = normalizedModeId(firstNonEmpty(metadata.value(QStringLiteral("task_type")).toString(),
-                                                            metadata.value(QStringLiteral("task_command")).toString(),
-                                                            metadata.value(QStringLiteral("workflow_task_command")).toString()));
-    if (!metaTask.isEmpty())
-        return metaTask;
+    // An OUTPUT, not a workflow: this answers "which mode produced this file", and the sidecar the
+    // render wrote is the record of that. It asks the one resolver rather than re-reading the
+    // classification keys itself -- the sidecar of a workflow render carries exactly the keys a
+    // profile does, and a second reading of them is how the three resolvers happened in the first
+    // place. What it does NOT do is fall back to a `workflow_media_type` guess: an output under
+    // output/workflows/ whose sidecar never said what it was is not a t2v because it is a video.
+    const QString recorded = spellvision::workflows::WorkflowLaunchController::resolveModeId(metadata);
+    if (!recorded.isEmpty())
+        return recorded;
 
+    // Our own output tree is written one directory per mode, so this reads a fact we wrote, not a
+    // name somebody happened to choose. It is the reason this function is not the filename guess the
+    // workflow resolver had -- and it still only ever applies to files sitting in that tree.
     const QString lowerPath = QDir::fromNativeSeparators(path).toLower();
     for (const QString &candidate : {QStringLiteral("i2v"), QStringLiteral("t2v"), QStringLiteral("i2i"), QStringLiteral("t2i")})
     {
         if (lowerPath.contains(QStringLiteral("/%1/").arg(candidate)))
             return candidate;
-    }
-
-    if (lowerPath.contains(QStringLiteral("/workflows/")))
-    {
-        const QString mediaType = metadata.value(QStringLiteral("workflow_media_type")).toString().trimmed().toLower();
-        if (mediaType == QStringLiteral("video"))
-            return QStringLiteral("t2v");
-        if (mediaType == QStringLiteral("image"))
-            return QStringLiteral("t2i");
     }
 
     return QStringLiteral("t2i");
@@ -285,7 +256,15 @@ QVector<HomeWorkflowCard> loadWorkflowCardsFromDisk(const QString &projectRoot)
             continue;
 
         HomeWorkflowCard card;
-        const QString modeId = inferModeFromWorkflowProfile(profile);
+        // ONE resolver, and it refuses rather than guesses. This used to be
+        // inferModeFromWorkflowProfile, which ended in a loop over the FILE PATH looking for
+        // "i2v"/"t2v"/"i2i"/"t2i" and then returned t2i regardless -- so an unclassified workflow got
+        // a card that opened a cockpit chosen by its filename, and four v2v workflows in this tree
+        // showed as T2V because media_type said "video". An unroutable workflow now keeps its card
+        // (it is still a workflow you imported) with an empty modeId, so clicking it navigates
+        // nowhere, and the card says why instead of pretending.
+        const auto resolution = spellvision::workflows::WorkflowLaunchController::modeResolution(profile);
+        const QString modeId = resolution.modeId;
         const QString name = firstNonEmpty(profile.value(QStringLiteral("profile_name")).toString(),
                                            profile.value(QStringLiteral("name")).toString(),
                                            QFileInfo(profilePath).dir().dirName(),
@@ -306,7 +285,10 @@ QVector<HomeWorkflowCard> loadWorkflowCardsFromDisk(const QString &projectRoot)
         const int missingNodes = missingNodesArr.size();
 
         QStringList bodyParts;
-        bodyParts << QStringLiteral("%1 • %2").arg(displayModeName(modeId), task);
+        if (resolution.routable)
+            bodyParts << QStringLiteral("%1 • %2").arg(displayModeName(modeId), task);
+        else
+            bodyParts << resolution.reason;
         if (!mediaType.isEmpty())
             bodyParts << QStringLiteral("media: %1").arg(mediaType);
         if (!backend.isEmpty())

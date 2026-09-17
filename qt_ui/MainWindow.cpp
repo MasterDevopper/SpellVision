@@ -2619,17 +2619,23 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
     // Route by a PURE predicate (isGenerationMode), not generationPageForMode()!=nullptr:
     // with lazy construction an unbuilt-but-valid target reads as null and would be
     // wrongly rejected. Build the resolved page on demand before accessing it.
-    const QString modeId = spellvision::workflows::WorkflowLaunchController::resolveDraftModeId(
+    const auto resolution = spellvision::workflows::WorkflowLaunchController::modeResolution(
         draft,
         [this](const QString &candidate) { return isGenerationMode(candidate); });
+    const QString modeId = resolution.modeId;
 
     ensureGenerationPageBuilt(modeId);
     ImageGenerationPage *page = generationPageForMode(modeId);
     if (!page)
     {
+        // The resolver's reason, not a generic sentence: "cannot be opened in the current build" is
+        // the same message whether the graph is video-to-video, unclassified, or bound for a mode
+        // this build hides, and those need different things done about them.
         QMessageBox::warning(this,
                              QStringLiteral("Workflow Draft"),
-                             QStringLiteral("This workflow cannot be opened as an editable draft in the current build."));
+                             resolution.reason.isEmpty()
+                                 ? QStringLiteral("This workflow cannot be opened as an editable draft in the current build.")
+                                 : resolution.reason);
         return;
     }
 

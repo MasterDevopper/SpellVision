@@ -838,6 +838,10 @@ private:
             emit starterPreviewRequested(card.title, card.body, card.modeId, card.sourceLabel);
         });
         connect(launchButton, &QPushButton::clicked, this, [this, card]() {
+            // A card whose workflow did not classify has no mode, and the card body already says so.
+            // Emitting "" here would bounce the user to Home, which reads as the click not landing.
+            if (card.modeId.trimmed().isEmpty())
+                return;
             emit modeRequested(card.modeId);
         });
 

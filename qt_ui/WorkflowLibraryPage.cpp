@@ -3,6 +3,7 @@
 
 #include "ThemeManager.h"
 #include "workflows/ModelResolutionDialog.h"
+#include "workflows/WorkflowLaunchController.h"
 #include "style/SvKit.h"
 
 #include <QComboBox>
@@ -2038,12 +2039,19 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     if (record.displayName.isEmpty())
         record.displayName = QFileInfo(record.importRoot).fileName();
 
-    record.modeId = normalizedModeId(safeObjectString(object, {
-        QStringLiteral("mode_id"),
-        QStringLiteral("task"),
-        QStringLiteral("mode"),
-        QStringLiteral("task_command")
-    }));
+    // ONE resolver. This page used to derive the mode in three passes -- here from the profile's own
+    // keys, again from capability_report.primary_task in applyCapabilityReport, and a third time from
+    // user_task_override below -- each overwriting the last, which is a precedence order nobody had
+    // written down. It is written down now, in WorkflowLaunchController::modeResolution, and both of
+    // those later passes read the answer from here.
+    //
+    // `verdict` rather than `modeId`: this field is what the workflow IS (it becomes task_command on
+    // the launch profile and the task in the list row), and a v2v workflow is still a v2v workflow
+    // even though there is no page to open it on. Whether it can be OPENED is modeRoutable.
+    const auto modeVerdict = spellvision::workflows::WorkflowLaunchController::modeResolution(object);
+    record.modeId = modeVerdict.verdict;
+    record.modeRoutable = modeVerdict.routable;
+    record.modeReason = modeVerdict.reason;
     record.mediaType = safeObjectString(object, {
         QStringLiteral("media_type"),
         QStringLiteral("media"),
@@ -2090,12 +2098,9 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
         }
     }
 
-    const QString taskOverride = normalizedModeId(safeObjectString(object, {
-        QStringLiteral("user_task_override"),
-        QStringLiteral("task_override")
-    }));
-    if (!taskOverride.isEmpty())
-        record.modeId = taskOverride;
+    // The user_task_override pass that used to live here is gone: modeResolution() applies it, at the
+    // top of its precedence, so the override survives the consolidation without being a second site
+    // that can disagree about when it wins.
 
     const QString mediaOverride = safeObjectString(object, {
         QStringLiteral("user_media_override"),
@@ -2170,7 +2175,19 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
             const QJsonObject scanObj = scanDoc.object();
 
             if (!record.capabilityFromGraph)
+            {
                 applyCapabilityReport(record, capabilityObjectFromProfile(scanObj));
+                // The scan report can classify a profile that carried no verdict of its own. Asked of
+                // the one resolver, so a mode learned from a scan is decided exactly as a mode read
+                // from a profile is.
+                const auto scanned = spellvision::workflows::WorkflowLaunchController::modeResolution(scanObj);
+                if (!scanned.verdict.isEmpty() && record.modeId.isEmpty())
+                {
+                    record.modeId = scanned.verdict;
+                    record.modeRoutable = scanned.routable;
+                    record.modeReason = scanned.reason;
+                }
+            }
 
             QStringList scanMissing = safeObjectStringList(scanObj, {
                 QStringLiteral("missing_custom_nodes"),
@@ -2577,8 +2594,11 @@ void WorkflowLibraryPage::applyCapabilityReport(WorkflowRecord &record, const QJ
     if (!primaryTask.isEmpty() && primaryTask != QStringLiteral("unknown"))
     {
         record.primaryTask = primaryTask;
-        record.modeId = primaryTask;
         record.capabilityFromGraph = true;
+        // It does NOT assign record.modeId. This report is one of the inputs modeResolution() already
+        // weighed -- below an override, above the stored task -- and re-applying it here is how the
+        // page ended up with a precedence order that existed only as the order three functions ran in.
+        // The separate-scan path (:2172) re-asks the resolver on the scan object for the same reason.
     }
 
     if (!mediaType.isEmpty() && mediaType != QStringLiteral("unknown"))
@@ -3338,7 +3358,9 @@ QString WorkflowLibraryPage::workflowSummaryText(const WorkflowRecord &record) c
 QString WorkflowLibraryPage::workflowDetailsText(const WorkflowRecord &record) const
 {
     QStringList lines;
-    lines << tr("Mode: %1").arg(record.modeId.toUpper());
+    lines << tr("Mode: %1").arg(record.modeId.isEmpty() ? tr("UNCLASSIFIED") : record.modeId.toUpper());
+    if (!record.modeRoutable && !record.modeReason.isEmpty())
+        lines << tr("Cannot open: %1").arg(record.modeReason);
     lines << tr("Media: %1").arg(record.mediaType);
     lines << tr("Backend: %1").arg(record.backend);
     lines << tr("Capability classifier: %1").arg(record.capabilityVersion.isEmpty() ? tr("legacy / unavailable") : record.capabilityVersion);
@@ -3883,6 +3905,8 @@ QJsonObject WorkflowLibraryPage::workflowRecordToJson(const WorkflowRecord &reco
     QJsonObject object{
         {QStringLiteral("displayName"), record.displayName},
         {QStringLiteral("modeId"), record.modeId},
+        {QStringLiteral("modeRoutable"), record.modeRoutable},
+        {QStringLiteral("modeReason"), record.modeReason},
         {QStringLiteral("mediaType"), record.mediaType},
         {QStringLiteral("backend"), record.backend},
         {QStringLiteral("tags"), QJsonArray::fromStringList(record.tags)},
@@ -3949,6 +3973,8 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::workflowRecordFromJson(
     WorkflowRecord record;
     record.displayName = object.value(QStringLiteral("displayName")).toString();
     record.modeId = object.value(QStringLiteral("modeId")).toString();
+    record.modeRoutable = object.value(QStringLiteral("modeRoutable")).toBool(false);
+    record.modeReason = object.value(QStringLiteral("modeReason")).toString();
     record.mediaType = object.value(QStringLiteral("mediaType")).toString();
     record.backend = object.value(QStringLiteral("backend")).toString();
     record.tags = safeObjectStringList(object, {QStringLiteral("tags")});

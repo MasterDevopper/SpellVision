@@ -110,7 +110,13 @@ private:
     struct WorkflowRecord
     {
         QString displayName;
+        // What the workflow IS -- the resolver's verdict, which can be a task with no page (v2v).
         QString modeId;
+        // Whether that verdict has a page to open on, and the sentence that explains it when it does
+        // not. Two questions, kept apart: collapsing them is how "media_type says video" became
+        // "therefore t2v" and a v2v graph opened a text-to-video cockpit.
+        bool modeRoutable = false;
+        QString modeReason;
         QString mediaType;
         QString backend;
         QStringList tags;

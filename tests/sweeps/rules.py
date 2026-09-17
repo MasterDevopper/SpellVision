@@ -2752,6 +2752,148 @@ R_ARGV_NAMED = Rule(
 )
 
 
+# --- R35: one answer to "what kind of generation is this workflow" --------------------------------
+
+# Three C++ functions derived it independently -- the launch controller's, HomePage's and
+# WorkflowLibraryPage's -- and the Home one ended in a loop over the FILE PATH looking for "i2v",
+# "t2v", "i2i", "t2i" as substrings, then returned t2i regardless. A workflow whose classification
+# failed was therefore routed by its filename onto a page whose graph it does not belong to, and
+# nothing said so: the cockpit just looked wrong. The worker already answers this properly, from what
+# the graph OUTPUTS, and that answer reaches the UI as inferred_task_command and
+# capability_report.primary_task.
+#
+# WHAT IT SEES: a function that both names a workflow-classification key AND produces a mode id as a
+# LITERAL -- returned, or assigned. That pair is what "deriving a mode from a profile" looks like in
+# C++, and it is what all three of the merged resolvers did.
+#
+# WHAT IT CANNOT SEE: a derivation that goes through a variable or a table the function does not
+# spell, and a derivation written in Python. The narrowness is deliberate in both directions. A rule
+# that fired on any mode literal anywhere would flag every mode COMPARISON in the tree -- isImageMode,
+# the rail specs, the page switch -- and would then be widened by exemption until it measured
+# nothing. A rule that fired on any classification-key read would flag the two pages that
+# legitimately DISPLAY a workflow's task.
+_CLASSIFICATION_KEYS = (
+    "inferred_task_command",
+    "primary_task",
+    "user_task_override",
+    "task_override",
+    "workflow_task_command",
+    "task_command",
+    "task_type",
+)
+_MODE_LITERALS = ("t2i", "i2i", "t2v", "i2v", "v2v")
+# PRODUCED, not merely mentioned: `return QStringLiteral("t2i");` and `modeId = QStringLiteral("i2v");`
+# are derivations. `normalizedModeId(x) != QStringLiteral("v2v")` and a rail spec listing them are not.
+_MODE_PRODUCED = re.compile(
+    r"(?:\breturn\s+|=\s*)"
+    r"(?:QStringLiteral|QLatin1String|QString::fromLatin1)?\s*\(?\s*"
+    r"\"(" + "|".join(_MODE_LITERALS) + r")\"\s*\)?\s*;"
+)
+# The other half of the same defect, and the one Shape A could not see: no mode literal at all, the
+# classification keys read straight into something named for a mode. `record.modeId =
+# normalizedModeId(safeObjectString(object, {"mode_id", "task", "mode", "task_command"}))`.
+# An ASSIGNMENT specifically -- `profile.insert(QStringLiteral("task_command"), record.modeId)` writes
+# the answer out rather than deriving it, and flagging that would make the rule lie about every site
+# that merely carries a mode somewhere.
+_MODE_ASSIGNED = re.compile(
+    r"([A-Za-z_][\w.:>-]*(?:[Mm]odeId|[Tt]askCommand|[Pp]rimaryTask))\s*=[^=]"
+)
+_CPP_SIGNATURE = re.compile(
+    r"^[A-Za-z_][\w:<>,&*~\s]*?([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?$"
+)
+
+
+def _cpp_functions(text: str) -> list[tuple[str, int, str]]:
+    """(name, 1-based start line, body) for every brace-balanced definition in a C++ file.
+
+    Crude on purpose -- there is no C++ AST here. Anything it mis-parses is simply not reported,
+    which is the safe direction for a ratchet: it may miss a site, it cannot invent one.
+    """
+    out: list[tuple[str, int, str]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].rstrip()
+        candidate = stripped[:-1].rstrip() if stripped.endswith("{") else stripped
+        match = _CPP_SIGNATURE.match(candidate)
+        opens = stripped.endswith("{") or (index + 1 < len(lines) and lines[index + 1].strip() == "{")
+        if not match or not opens:
+            index += 1
+            continue
+        start = index
+        depth = 0
+        seen_open = False
+        body: list[str] = []
+        while index < len(lines):
+            depth += lines[index].count("{") - lines[index].count("}")
+            seen_open = seen_open or "{" in lines[index]
+            body.append(lines[index])
+            index += 1
+            if seen_open and depth <= 0:
+                break
+        out.append((match.group(1), start + 1, "\n".join(body)))
+    return out
+
+
+def _check_one_workflow_mode_resolver(path: Path, text: str) -> list[Violation]:
+    if sources.WORKFLOW_MODE_RESOLVER in path.name:
+        return []
+
+    out: list[Violation] = []
+    for name, line, body in _cpp_functions(text):
+        if not any(key in body for key in _CLASSIFICATION_KEYS):
+            continue
+
+        # Shape A -- HomePage's: the function spells the mode out itself. `return QStringLiteral("t2i");`
+        produced = sorted(set(_MODE_PRODUCED.findall(body)))
+
+        # Shape B -- WorkflowLibraryPage's: no literal anywhere, the classification keys are read
+        # straight into something called a mode. Shape A alone scored ZERO on that file, which is
+        # why this half exists: two of the three merged resolvers did not look alike.
+        assigned = sorted({
+            match.group(1)
+            for statement in body.split(";")
+            if any(key in statement for key in _CLASSIFICATION_KEYS)
+            for match in [_MODE_ASSIGNED.search(statement)]
+            if match
+        })
+
+        if not produced and not assigned:
+            continue
+
+        did = []
+        if produced:
+            did.append("produces " + ", ".join(produced))
+        if assigned:
+            did.append("reads them into " + ", ".join(assigned))
+        out.append(Violation(
+            path=path, line=line, key=name,
+            detail=(f"{name}() derives a workflow's mode itself ({'; '.join(did)}) -- ask "
+                    f"{sources.WORKFLOW_MODE_RESOLVER}::modeResolution() instead, which refuses "
+                    "with a reason where this will guess"),
+        ))
+    return out
+
+
+R_ONE_WORKFLOW_MODE_RESOLVER = Rule(
+    name="one-workflow-mode-resolver",
+    citation=(
+        'Three C++ sites answered "what kind of generation is this workflow" independently, and '
+        "HomePage::inferModeFromWorkflowProfile answered it by matching t2i/i2i/t2v/i2v as "
+        "SUBSTRINGS OF THE FILE PATH and then returning t2i regardless -- so a workflow whose "
+        "classification failed opened a cockpit chosen by its filename, holding a graph that does "
+        "not belong there, silently. Four of the 88 imported profiles in this tree are v2v and every "
+        'one of them displayed as T2V, because media_type said "video". The worker already decides '
+        "this by what the graph OUTPUTS rather than by node family; the UI consumes that verdict and "
+        "refuses with a reason when there is none, because landing someone on a plausible wrong page "
+        "is worse than refusing. WHAT IT CANNOT SEE: a derivation through a variable or a table the "
+        "function does not spell, and the Python side."
+    ),
+    select=sources.cpp_sources,
+    check=_check_one_workflow_mode_resolver,
+)
+
+
 ALL_RULES: tuple[Rule, ...] = (
     R_SEED,
     R_NUMERIC_DEFAULT,
@@ -2787,6 +2929,7 @@ ALL_RULES: tuple[Rule, ...] = (
     R_SAMPLING_DEFAULTS_ARE_DATA,
     R_RESOLVED_FIELDS_ARE_WATCHED,
     R_ARGV_NAMED,
+    R_ONE_WORKFLOW_MODE_RESOLVER,
 )
 
 

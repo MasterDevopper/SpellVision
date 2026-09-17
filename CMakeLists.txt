@@ -636,6 +636,15 @@ qt_add_executable(test_optimization_panel tests/cpp/test_optimization_panel.cpp)
 target_link_libraries(test_optimization_panel PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME optimization_panel COMMAND test_optimization_panel)
 
+# W4 Task 1: "what kind of generation is this workflow" had three independent answers, and the Home
+# one ended in a loop over the FILE PATH -- so a workflow whose classification failed was routed by
+# its filename onto a page its graph does not belong to, silently. The resolver consumes the worker's
+# own vocabulary (inferred_task_command / capability_report.primary_task / classification_confidence,
+# python/workflow_scanner.py:955-1033) and refuses with a reason where it used to guess.
+qt_add_executable(test_workflow_mode_resolver tests/cpp/test_workflow_mode_resolver.cpp)
+target_link_libraries(test_workflow_mode_resolver PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_mode_resolver COMMAND test_workflow_mode_resolver)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -654,7 +663,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
-                      test_optimization_panel
+                      test_optimization_panel test_workflow_mode_resolver
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)

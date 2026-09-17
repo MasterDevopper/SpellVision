@@ -553,3 +553,124 @@ def test_the_argv_rule_says_nothing_about_a_dict_with_no_seconds():
     """A rule that fired on every dict literal would be noise, not a ratchet."""
     probe = "def other():\n    return {\"ok\": True, \"cache_hit\": False}\n"
     assert rules._check_argv_named(Path("python/probe.py"), probe) == []
+
+
+def test_the_one_resolver_rule_fires_on_the_filename_guess_it_was_written_from():
+    """W4 Task 1's self-test -- required, not optional: W2 shipped a ratchet whose self-test was
+    never written and the final review caught it.
+
+    This is `HomePage::inferModeFromWorkflowProfile`, restored verbatim. It read the workflow's own
+    task keys, then -- when they said nothing -- looked for "i2v"/"t2v"/"i2i"/"t2i" as SUBSTRINGS OF
+    THE FILE PATH, and then returned t2i regardless. A workflow whose classification failed therefore
+    opened a cockpit chosen by its filename, holding a graph that does not belong there, and nothing
+    told the user: the page just looked wrong.
+
+    Checked against the real deleted function too, not only this probe -- run over `git show
+    HEAD~1:qt_ui/HomePage.cpp` it reports lines 128 and 156, which are the two it was written for.
+    """
+    probe = "\n".join([
+        "QString inferModeFromWorkflowProfile(const QJsonObject &profile)",
+        "{",
+        '    const QString directTask = normalizedModeId(profile.value(QStringLiteral("task_command")).toString());',
+        "    if (!directTask.isEmpty())",
+        "        return directTask;",
+        '    const QString mediaType = profile.value(QStringLiteral("media_type")).toString();',
+        '    if (mediaType == QStringLiteral("video"))',
+        '        return QStringLiteral("t2v");',
+        '    const QString workflowPath = profile.value(QStringLiteral("workflow_path")).toString().toLower();',
+        '    for (const QString &candidate : {QStringLiteral("i2v"), QStringLiteral("t2i")})',
+        "    {",
+        "        if (workflowPath.contains(candidate))",
+        "            return candidate;",
+        "    }",
+        '    return QStringLiteral("t2i");',
+        "}",
+    ])
+    found = rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+    assert [v.line for v in found] == [1], [(v.line, v.key) for v in found]
+    assert found[0].key == "inferModeFromWorkflowProfile"
+    assert "t2i" in found[0].detail and "t2v" in found[0].detail, found[0].detail
+
+
+def test_the_one_resolver_rule_fires_on_a_derivation_that_spells_no_mode_at_all():
+    """The second of the three merged resolvers looked nothing like the first.
+
+    `WorkflowLibraryPage::loadWorkflowRecord` named no mode anywhere -- it read the classification
+    keys straight into `record.modeId` through a normaliser. The literal-only half of this rule
+    scored ZERO on that file, which is exactly the "a plant of the defect's own shape scores zero"
+    result the sampling rule was widened for. So the rule has two halves, and this is the second.
+    """
+    probe = "\n".join([
+        "WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(const QString &profilePath)",
+        "{",
+        "    WorkflowRecord record;",
+        "    record.modeId = normalizedModeId(safeObjectString(object, {",
+        '        QStringLiteral("mode_id"),',
+        '        QStringLiteral("task_command")',
+        "    }));",
+        "    return record;",
+        "}",
+    ])
+    found = rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+    assert [v.line for v in found] == [1], [(v.line, v.key) for v in found]
+    assert "record.modeId" in found[0].detail, found[0].detail
+
+
+def test_the_one_resolver_rule_is_silent_on_carrying_a_mode_it_did_not_decide():
+    """The false-positive counterweight, and the reason the rule is written this narrowly.
+
+    Writing a mode OUT under a classification key, and COMPARING against one, are things dozens of
+    sites in qt_ui legitimately do -- the launch request builder, isImageMode, the rail specs. A rule
+    that flagged them would be exempted until it measured nothing, which is the shape of a ratchet
+    nobody reads.
+    """
+    probe = "\n".join([
+        "QJsonObject buildLaunchRequest(const WorkflowRecord &record)",
+        "{",
+        "    QJsonObject request;",
+        '    request.insert(QStringLiteral("workflow_task_command"), record.modeId);',
+        '    request.insert(QStringLiteral("task_command"), record.modeId);',
+        '    if (normalizedModeId(record.modeId) != QStringLiteral("v2v"))',
+        '        request.insert(QStringLiteral("draftable"), true);',
+        "    return request;",
+        "}",
+    ])
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe) == []
+
+
+def test_the_one_resolver_rule_says_nothing_about_a_function_that_never_asks():
+    """Most of qt_ui names no classification key at all. A rule that reported every function holding
+    a mode string would be noise with a baseline."""
+    probe = "\n".join([
+        "void MainWindow::switchToMode(const QString &modeId)",
+        "{",
+        '    if (modeId == QStringLiteral("t2i"))',
+        '        currentModeId_ = QStringLiteral("t2i");',
+        "}",
+    ])
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe) == []
+
+
+def test_the_one_resolver_rule_exempts_only_the_resolver_itself():
+    """The owner is allowed to derive a mode -- that is what it is for -- and nothing else is. The
+    owner is named in sources.py, not here, for the same reason no rule may name a file."""
+    probe = "\n".join([
+        "QString derive(const QJsonObject &source)",
+        "{",
+        '    if (!source.value(QStringLiteral("inferred_task_command")).toString().isEmpty())',
+        '        return QStringLiteral("i2v");',
+        '    return QStringLiteral("t2i");',
+        "}",
+    ])
+    owner = sources.ROOT / "qt_ui" / "workflows" / (sources.WORKFLOW_MODE_RESOLVER + ".cpp")
+    assert rules._check_one_workflow_mode_resolver(owner, probe) == []
+    assert rules._check_one_workflow_mode_resolver(sources.ROOT / "qt_ui" / "Probe.cpp", probe)
+
+
+def test_the_one_resolver_rule_is_at_zero_and_stays_there(findings):
+    """No baseline, and it did not need one: all four live sites were routed through the resolver
+    rather than exempted. Three were the resolvers the wave set out to merge; the fourth --
+    OutputCardModel::buildOutput, which labelled a gallery card by "it is a video file, therefore
+    t2v" -- the rule found, and nothing else had."""
+    assert findings["one-workflow-mode-resolver"] == [], "\n".join(
+        str(v) for v in findings["one-workflow-mode-resolver"])
