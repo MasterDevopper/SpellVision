@@ -61,32 +61,37 @@ The fix follows the sampler's `model` input upstream — through LoRA loaders, `
 
 **Two follow-ups it left deliberately:** nothing consumes the new `stack_kind`/`high_noise_path`/`low_noise_path` draft keys yet (the cockpit reads those off the catalog stack, not off a draft), and `applyWorkflowDraft` treats an empty checkpoint as "matched" but an unresolvable non-empty one as blocking — so ten Wan graphs that used to open with no model now name one, and open **blocked** if that file is not on disk. Honest, and visible on the drop path.
 
-**3n. The converter turns an uninstalled node pack into a silently unrunnable prompt. Highest-priority defect in the drop path.**
+**3n. The converter silently dropped what it could not resolve — FIXED 2026-09-17** (`cd6d5ba`).
 
-**The mechanism, measured 2026-09-17.** When `convert_ui_graph` meets a node whose class it cannot resolve, it **omits the node, keeps every reference to it, and returns `errors == []`.** The result is a prompt with dangling links that ComfyUI rejects with an opaque `KeyError`, and nothing anywhere says a pack was missing.
+**The mechanism.** When `convert_ui_graph` met a node whose class it could not resolve, it **omitted the node, kept every reference to it, and returned `errors == []`.** ComfyUI rejects the result with `HTTP 400 prompt_outputs_failed_validation` and a `KeyError` on the missing id inside `validate_inputs` (`execution.py:1184`) — verified against the live server with a synthetic graph that cannot execute, queue confirmed empty afterwards. The dropped classes were Comfyroll, LoraManager, Image Saver, MagCache and a few display-name aliases; all were `mode: 0`, active, not bypassed.
 
-Verified against the live server with a synthetic single-node probe rather than assumed: a dangling reference returns `HTTP 400`, `error.type = "prompt_outputs_failed_validation"`, a `KeyError` on the missing id raised inside `validate_inputs` at `execution.py:1184`. The queue was confirmed empty afterwards; nothing was rendered to establish this.
+**The fix refuses and names the pack.** Packs are read **offline** from the workflow's own `properties.cnr_id`/`aux_id`/`ver` through `workflow_pack_resolver.declared_packs`. Two new modules carry it: `python/comfy_graph_links.py` (the post-condition) and `python/comfy_missing_packs.py` (the naming).
 
-**The dropped classes are simply not installed here** — `CR Text Concatenate`, `CR Prompt Text`, `CR Seed`, `CR Apply LoRA Stack` (Comfyroll), `Lora Loader (LoraManager)`, `TriggerWord Toggle (LoraManager)`, `Scheduler Selector (Comfy) (Image Saver)`, plus display-name aliases like `Latent Upscale` and `CLIP Text Encode (Positive Prompt)` that resolve to nothing on this box. `display_name_aliases()` builds 2348 entries and none of these appear in any of them, nor as a `display_name` in `/object_info`'s 3607 classes. **Every dropped node is `mode: 0` — active, not bypassed.** The converter is right that it cannot resolve them; it is wrong to continue as if it had.
+**Measured over 92 import roots against the live `/object_info`:**
 
-**Scope, re-converting every UI graph in the library against the live `/object_info`:** 69 clean both ways, **10 with a live conversion defect**, 4 whose *stored* prompt is broken while a fresh conversion is clean, 1 with no UI graph to recompile.
-
-| workflow | stored missing ids | fresh missing ids |
+| | before | after |
 |---|---|---|
-| `krea2-pro-grade-v17` | 24 | 24 |
-| `dasiwa-wan-2-2-i2v-fastfidelity-c-aio-13` | 3 | 16 |
-| `trying-t2v` | 0 | 11 |
-| `wangpt-optimized` | 0 | 3 |
-| `t2i-v23` | 0 | 2 |
-| `endercomic-v1-5`, `i2v`, `mmaudio`, `multi-detailer` | 0 | 1 each |
-| `wangpt-optimizedv3` | 2 | 1 |
-| `img-to-video-base`, `-base-speed`, `-gguf`, `-gguf-speed` | 12 each | **0** |
+| clean, no dangling ids | 76 | 70 |
+| **emitted a prompt WITH dangling ids** | **14** | **0** |
+| refused with a named cause | 0 | **20** |
 
-**Do not read the "stored 0 / fresh N" rows as a converter regression** — that was my first reading and it is wrong. Stored and fresh disagree in *both* directions because the set of unresolvable classes is a property of **what is installed at the moment of conversion**, not of the converter's code. The four `img-to-video-*` rows are the same effect running the other way: their stored prompts were compiled when something was missing that is present now.
+Independently re-measured: 90 UI graphs, 70 emitted, 20 refused, **zero emitting a dangling id.** The 70 clean conversions are **byte-identical** — of 90 hashes, exactly the 20 refusals changed.
 
-**Two consequences worth separating.** The prompts on disk are compiled artefacts that nothing re-validates or re-compiles, so a stale one keeps being served to the drop path indefinitely — that is its own item. And the repo already owns the machinery for the real fix: `workflow_pack_resolver.py` exists to say *which pack* a class needs, and the node-pack blocker inventory already records 37 of 82 workflows blocked on packs. The converter should refuse, naming the unresolvable classes and the packs that supply them, rather than emitting a graph that fails later with a `KeyError`.
+**All 20 refusals name something actionable.** 14 name at least one installable pack with a repo URL (Comfyroll, ComfyUI-Image-Saver, efficiency-nodes, KJNodes, lora-manager, mmaudio, multigpu, dynamicprompts, tinyterranodes, krea2edit, LC123, QwenVL-Mod, EsesImageCompare, MagCache); 6 name bare classes because those graphs declare no pack — correct, since name-similarity ranking measures 0 of 16 in this repo.
 
-Separately the same converter assigns widget values to the wrong slots: `EmptyHunyuanLatentVideo` with `batch_size: 480`, `WanImageToVideo` with `batch_size: 960, length: 640` — plainly a width and a height landing in the wrong fields. Possibly the same root cause, not yet traced. `python/comfy_graph_converter.py`.
+**Six went clean → refused, and that is not a regression.** The "clean" baseline was the **non-strict** path; the **strict launch path has always raised** on an unresolvable class. Verified by running the pre-change converter out of `git show` against all six: every one raised `ValueError: object_info has no schema for node class…`. Nothing lost the ability to run — the compile path stopped disagreeing with the launch path. (Four are the `img-to-video-*` family on MagCache, which CLAUDE.md §9.2 records as removed and a dead end against v0.34.0, so their only real action is "delete the dead node".)
+
+**The three plants bit, on disjoint failure sets** — silent drop restored: 11 failures across 3 files; the post-condition blinded with the refusal left intact: 5 failures, a *disjoint* set, proving the post-condition does not ride on the refusal; the old widget cursor restored: 3 failures including `assert 480 == 1 : a width must never land in batch_size`, the artifact's exact number.
+
+**The widget/slot bug had no shared root cause** (3n's second half). The bad values exist **only in stored `prompt_api.json` artefacts**; every fresh conversion is already correct — `i2v` node 305 is `batch_size: 1` fresh against `480` stored. The cause was an already-fixed cursor bug: `WanImageToVideo`'s live input order is `positive, negative, vae, width, height, length, batch_size` with widgets `[832, 480, 81, 1]`, and with width and height promoted to links the old cursor did not advance, so `length` read slot 0 and `batch_size` slot 1.
+
+What the two halves *do* share is a delivery channel: **a stale `prompt_api.json` that nothing invalidated.** Now closed on the write side (a refused compile writes nothing and sets `compiled_prompt_path: null`) and on the read side (readiness and `_load_graph` reject a stored prompt carrying dangling ids — 7 of 83 on this box).
+
+**3o. The C++ drop path still falls back to a stale compiled prompt on disk.** `WorkflowDropCoordinator::compiledPromptPathFor` falls back to an on-disk `prompt_api.json` when the compile reply carries no path. Now that a refused compile returns `null`, a stale-but-well-formed file — exactly the `batch_size: 480` shape — can still reach the draft builder. **Highest-value follow-up**: it is the last way a known-bad artefact reaches a render.
+
+**3p. A refusal over a core node's *title* is worded wrong.** `wangpt-optimized` refuses over `Latent Upscale` and `CLIP Text Encode (Positive Prompt)` — titles of core nodes, not custom packs. The refusal is correct; "install the missing custom nodes" is not what is wrong. A near-miss *suggester* would fix the wording, and it must never auto-rewrite a class name — the repo already measured name-similarity ranking at 0 of 16.
+
+Two consequences accepted: readiness for the 20 refusing workflows now answers `undetermined` rather than a verdict read off a broken prompt (honest; those rows go grey), and the 7 stale `prompt_api.json` files are ignored by every reader but neither deleted nor recompiled.
 
 **3b. A first-ever import of a workflow with missing node packs times out at 120 s.** cm-cli cold is ~128 s; the cache is why the *second* drop works. Either raise the budget for a cold import or make the first call warm the cache without holding the request. `python/node_dependency_resolver.py`.
 
