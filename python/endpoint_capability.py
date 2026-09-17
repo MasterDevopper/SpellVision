@@ -37,11 +37,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from comfy_graph_helpers import _comfy_input_declares_combo, _sv_comfy_input_choices
 from comfy_prompt_client import _comfy_object_info, _normalized_model_name, http_get_json_status
+from endpoint_capability_report import CapabilityReport, Refusal, and_list
 
 log = logging.getLogger(__name__)
 
@@ -79,58 +79,6 @@ def forget_endpoint(api_url: str) -> None:
     with _MODELS_LOCK:
         for key in [k for k in _MODELS_CACHE if k[0] == root]:
             _MODELS_CACHE.pop(key, None)
-
-
-# --- results ------------------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Refusal:
-    """A named reason. ``missing`` is what a user has to go and put on the machine."""
-
-    check: str            # health | models | nodes
-    code: str             # machine-readable
-    detail: str           # one sentence, names the endpoint and the thing
-    missing: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class CapabilityReport:
-    endpoint: str
-    label: str = ""
-    ok: bool = False
-    checks_run: tuple[str, ...] = ()
-    refusals: tuple[Refusal, ...] = ()
-    health: dict[str, Any] = field(default_factory=dict)
-
-    def missing_models(self) -> tuple[str, ...]:
-        return tuple(m for r in self.refusals if r.check == "models" for m in r.missing)
-
-    def missing_classes(self) -> tuple[str, ...]:
-        return tuple(m for r in self.refusals if r.check == "nodes" for m in r.missing)
-
-    def where(self) -> str:
-        return self.label or self.endpoint
-
-    def explain(self) -> str:
-        if self.ok:
-            return f"{self.where()} can run this job."
-        if not self.refusals:
-            return f"{self.where()} was not checked."
-        return " ".join(r.detail for r in self.refusals)
-
-    def payload(self) -> dict[str, Any]:
-        return {
-            "endpoint": self.endpoint,
-            "label": self.label,
-            "ok": self.ok,
-            "checks_run": list(self.checks_run),
-            "message": self.explain(),
-            "health": dict(self.health),
-            "refusals": [
-                {"check": r.check, "code": r.code, "detail": r.detail, "missing": list(r.missing)}
-                for r in self.refusals
-            ],
-        }
 
 
 # --- check 1: health ----------------------------------------------------------------------------
@@ -322,13 +270,13 @@ def check_endpoint(
     if missing:
         refusals.append(Refusal(
             "models", "models_absent",
-            f"{where} does not have {_and_list(missing)}.",
+            f"{where} does not have {and_list(missing)}.",
             tuple(missing),
         ))
     if unverifiable:
         refusals.append(Refusal(
             "models", "models_unverifiable",
-            f"{where} could not be asked whether it has {_and_list(unverifiable)}; refusing rather than guessing.",
+            f"{where} could not be asked whether it has {and_list(unverifiable)}; refusing rather than guessing.",
             tuple(unverifiable),
         ))
     if refusals:
@@ -343,7 +291,7 @@ def check_endpoint(
                                 f"{where} would not return its node schema: {error}."))
     if absent:
         refusals.append(Refusal("nodes", "classes_absent",
-                                f"{where} has no node class {_and_list(absent)}.", tuple(absent)))
+                                f"{where} has no node class {and_list(absent)}.", tuple(absent)))
     if findings:
         refusals.append(Refusal("nodes", "contract_drift",
                                 f"{where} answers a different node API: {'; '.join(findings)}.",
@@ -353,10 +301,3 @@ def check_endpoint(
         endpoint=root, label=label, ok=not refusals,
         checks_run=("health", "models", "nodes"), health=health, refusals=tuple(refusals),
     )
-
-
-def _and_list(values: Iterable[str]) -> str:
-    items = [str(v) for v in values]
-    if len(items) <= 1:
-        return items[0] if items else ""
-    return ", ".join(items[:-1]) + " and " + items[-1]
