@@ -43,7 +43,15 @@ LIVE = {
         "python_version": "3.12.7",
         "argv": ["C:/sv/ComfyUI/main.py", "--listen", "127.0.0.1", "--port", "8188",
                  "--use-sage-attention"],
-        "comfy_package_versions": {"comfy-aimdo": "0.4.15", "comfy-kitchen": "0.2.31"},
+        # This is the REAL shape /system_stats sends -- a LIST of {name, installed, required}
+        # dicts -- not a dict keyed by name. The old dict-shaped fixture here validated a parser
+        # that silently dropped every entry; see test_probe_reads_the_live_stats below and the
+        # commit that fixed this.
+        "comfy_package_versions": [
+            {"name": "comfyui-frontend-package", "installed": "1.49.6", "required": "1.49.6"},
+            {"name": "comfy-kitchen", "installed": "0.2.31", "required": "0.2.31"},
+            {"name": "comfy-aimdo", "installed": "0.4.15", "required": "0.4.15"},
+        ],
     }
 }
 
@@ -86,7 +94,11 @@ def test_reserve_vram_is_recorded_when_given():
     assert op.reserve_vram_from_argv(["main.py"]) is None
 
 
-def test_probe_reads_the_live_stats():
+def test_probe_reads_the_live_stats(monkeypatch):
+    # Isolate this test from whatever's actually installed in whatever interpreter
+    # _venv_package_availability would otherwise resolve to -- that mechanism has its own
+    # dedicated tests below.
+    monkeypatch.setattr(op, "_venv_package_availability", lambda exe: (True, False))
     block = op.probe("http://127.0.0.1:8188", opener=FakeOpener(LIVE))
     assert block["attention_backend"] == "sage"
     assert block["comfy_version"] == "0.34.0"
@@ -94,7 +106,39 @@ def test_probe_reads_the_live_stats():
     assert block["cuda"] == "12.8"
     assert block["dynamic_vram"] is True
     assert block["packages"]["comfy_aimdo"] == "0.4.15"
+    assert block["packages"]["comfy_kitchen"] == "0.2.31"
     assert "--use-sage-attention" in block["comfy_argv"]
+
+
+def test_probe_parses_the_list_shape_not_a_dict_shape():
+    """The defect: comfy_package_versions is a list of dicts, not a dict keyed by name. A parser
+    written against the wrong shape returns None for everything and no test catches it unless the
+    fixture matches what the server actually sends.
+    """
+    assert op._package_versions_from_system_stats(LIVE["system"]["comfy_package_versions"]) == {
+        "comfyui-frontend-package": "1.49.6",
+        "comfy-kitchen": "0.2.31",
+        "comfy-aimdo": "0.4.15",
+    }
+    # The old (wrong) fixture shape must not silently "work" -- a dict input is not a list.
+    assert op._package_versions_from_system_stats({"comfy-aimdo": "0.4.15"}) == {}
+
+
+def test_venv_package_availability_distinguishes_not_probed_from_absent(monkeypatch):
+    """None ("not probed") must never collapse into False ("probed, not found") -- that collapse is
+    what made two knowable packages read as unknowable.
+    """
+    import comfy_launch_policy
+
+    monkeypatch.setattr(comfy_launch_policy, "sageattention_available", lambda exe: True)
+    monkeypatch.setattr(comfy_launch_policy, "triton_available", lambda exe: False)
+    assert op._venv_package_availability("some/python") == (True, False)
+
+    def _explode(exe):
+        raise RuntimeError("could not resolve comfy's interpreter")
+
+    monkeypatch.setattr(comfy_launch_policy, "sageattention_available", _explode)
+    assert op._venv_package_availability("some/python") == (None, None)
 
 
 def test_probe_failure_is_a_block_that_says_it_does_not_know():
@@ -110,7 +154,8 @@ def test_probe_failure_is_a_block_that_says_it_does_not_know():
     assert block.get("probe_error")
 
 
-def test_the_block_never_claims_a_default_it_did_not_read():
+def test_the_block_never_claims_a_default_it_did_not_read(monkeypatch):
+    monkeypatch.setattr(op, "_venv_package_availability", lambda exe: (None, None))
     block = op.probe("http://127.0.0.1:8188", opener=FakeOpener({"system": {}}))
     assert block["attention_backend"] == "unknown"
     assert block["comfy_argv"] == []

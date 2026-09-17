@@ -123,7 +123,9 @@ def _unknown_block(probed_at: str, error: str | None = None) -> dict[str, Any]:
     """The block a render still needs when the probe itself failed.
 
     A render must remain recordable when ComfyUI is unreachable (the diffusers-only routes never
-    launch it at all) -- but it must not claim SDPA, or any other default it did not read.
+    launch it at all) -- but it must not claim SDPA, or any other default it did not read. Every
+    ``packages`` value is ``None`` ("not probed" -- see ``_venv_package_availability``), because the
+    whole call failed, so nothing was.
     """
     return {
         "comfy_version": None,
@@ -139,6 +141,45 @@ def _unknown_block(probed_at: str, error: str | None = None) -> dict[str, Any]:
         "probed_at": probed_at,
         "probe_error": error,
     }
+
+
+def _package_versions_from_system_stats(raw: Any) -> dict[str, str]:
+    """``comfy_package_versions`` is a LIST of ``{name, installed, required}`` dicts, not a dict
+    keyed by name -- that dict shape was this module's own test fixture, not what the server sends,
+    and it validated a parser that dropped every entry. Names are hyphenated; the version key is
+    ``installed``, not ``version``."""
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, str] = {}
+    for entry in raw:
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str) and entry.get("installed") is not None:
+            out[entry["name"]] = str(entry["installed"])
+    return out
+
+
+def _venv_package_availability(python_executable: str | None) -> tuple[bool | None, bool | None]:
+    """``(sageattention, triton)`` presence in ComfyUI's OWN venv -- never a ``comfy_package_versions``
+    entry, since both live alongside ComfyUI rather than being declared by it, so ``/system_stats``
+    can never answer this; a subprocess probe is the only way. ``None`` means "not probed", kept
+    visibly different from a real ``False`` ("probed, absent") -- collapsing both into one ``null``
+    is exactly what let this module report two knowable packages as unknowable. Reuses
+    comfy_launch_policy's per-interpreter-cached probes, so the subprocess cost is paid at most once
+    per interpreter for this process's life, not once per render."""
+    try:
+        import comfy_launch_policy
+        from comfy_bootstrap import resolve_managed_comfy_python
+        from comfy_root import comfy_root
+        # A bare resolve_managed_comfy_python() defaults to the stale `runtime/comfy/ComfyUI`
+        # layout (CLAUDE.md 9.2: unused drift); comfy_root() is the resolver that actually walks
+        # SPELLVISION_COMFY / LIVE_COMFY / the superseded-tree chain, so it must supply the root.
+        exe = python_executable or resolve_managed_comfy_python(root=comfy_root())
+        return (
+            comfy_launch_policy.sageattention_available(exe),
+            comfy_launch_policy.triton_available(exe),
+        )
+    except Exception as exc:  # noqa: BLE001 -- a provenance probe must never crash a render
+        log.warning("optimization provenance could not probe comfy's venv packages: %s", exc)
+        return None, None
 
 
 class _UrllibOpener:
@@ -190,7 +231,7 @@ def _fetch_system_stats(url: str, opener: Any, timeout: float) -> dict[str, Any]
     return json.loads(body.decode("utf-8"))
 
 
-def _probe_uncached(url: str, opener: Any, timeout: float) -> dict[str, Any]:
+def _probe_uncached(url: str, opener: Any, timeout: float, comfy_python: str | None = None) -> dict[str, Any]:
     probed_at = datetime.now().isoformat()
     try:
         payload = _fetch_system_stats(url, opener, timeout)
@@ -202,8 +243,8 @@ def _probe_uncached(url: str, opener: Any, timeout: float) -> dict[str, Any]:
     system = system if isinstance(system, dict) else {}
     raw_argv = system.get("argv")
     argv = [str(item) for item in raw_argv] if isinstance(raw_argv, list) else []
-    raw_packages = system.get("comfy_package_versions")
-    packages = raw_packages if isinstance(raw_packages, dict) else {}
+    package_versions = _package_versions_from_system_stats(system.get("comfy_package_versions"))
+    sage_available, triton_available = _venv_package_availability(comfy_python)
     torch_version = system.get("pytorch_version")
 
     return {
@@ -217,10 +258,10 @@ def _probe_uncached(url: str, opener: Any, timeout: float) -> dict[str, Any]:
         "cuda": _cuda_from_torch_version(torch_version),
         "python": system.get("python_version"),
         "packages": {
-            "sageattention": packages.get("sageattention"),
-            "triton": packages.get("triton") or packages.get("triton-windows"),
-            "comfy_kitchen": packages.get("comfy-kitchen"),
-            "comfy_aimdo": packages.get("comfy-aimdo"),
+            "sageattention": sage_available,
+            "triton": triton_available,
+            "comfy_kitchen": package_versions.get("comfy-kitchen"),
+            "comfy_aimdo": package_versions.get("comfy-aimdo"),
         },
         "probed_at": probed_at,
         "probe_error": None,
@@ -233,12 +274,14 @@ def probe(
     opener: Any = None,
     timeout: float = DEFAULT_TIMEOUT_SEC,
     force_refresh: bool = False,
+    comfy_python: str | None = None,
 ) -> dict[str, Any]:
     """What the running ComfyUI process was actually launched with.
 
     Cached per resolved URL with a short TTL (see ``_CACHE_TTL_SEC``); a caller passing an
     explicit ``opener`` -- always a test -- bypasses the cache so repeated probes in the same
-    process never see a stale fake response.
+    process never see a stale fake response. ``comfy_python`` is the interpreter to venv-probe for
+    sageattention/triton; unset, it resolves the same way ComfyUI's own launch does.
     """
     resolved = _resolve_url(api_url)
     use_cache = opener is None
@@ -249,7 +292,7 @@ def probe(
             return entry[1]
 
     active_opener = opener if opener is not None else _DEFAULT_OPENER
-    block = _probe_uncached(resolved, active_opener, timeout)
+    block = _probe_uncached(resolved, active_opener, timeout, comfy_python)
     if use_cache:
         with _CACHE_LOCK:
             _CACHE[resolved] = (time.monotonic(), block)

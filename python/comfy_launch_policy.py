@@ -137,7 +137,7 @@ REQUIRED_ENV: dict[str, str] = {
     "PYTHONIOENCODING": "utf-8",
 }
 
-_PROBE_CACHE: dict[str, bool] = {}
+_PROBE_CACHE: dict[tuple[str, str], bool] = {}
 
 
 def normalize_backend(value: Any) -> str | None:
@@ -160,6 +160,39 @@ def normalize_backend(value: Any) -> str | None:
     return None
 
 
+def _package_importable(python_executable: str | Path | None, package_name: str) -> bool:
+    """Whether ``import <package_name>`` succeeds in the given interpreter.
+
+    Shared by ``sageattention_available`` and ``triton_available``: both packages live in ComfyUI's
+    OWN venv (CLAUDE.md 9.2 -- isolated since the 2026-07-17 cutover), not the caller's, so asking
+    this process is the wrong question -- and neither package is ever reported by ComfyUI's
+    ``/system_stats`` (that lists ComfyUI's OWN declared packages, not everything in its venv), so a
+    subprocess probe is the only way to learn this at all.
+
+    Cached per (interpreter, package) pair. Answering costs a subprocess; a ComfyUI launch happens
+    once per session, but readiness checks -- and now also optimization-provenance probes -- ask far
+    more often than that.
+    """
+    exe = str(python_executable or sys.executable)
+    key = (exe, package_name)
+    if key in _PROBE_CACHE:
+        return _PROBE_CACHE[key]
+    available = False
+    try:
+        completed = subprocess.run(
+            [exe, "-c", f"import {package_name}"],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        available = completed.returncode == 0
+    except (OSError, subprocess.SubprocessError) as exc:
+        # Could not ask. Report unavailable rather than assume either way: the optimistic answer
+        # costs a ComfyUI that exits -1, and the answer is re-derived on the next launch anyway.
+        log.warning("Could not probe %s with %s: %s", package_name, exe, exc)
+    _PROBE_CACHE[key] = available
+    return available
+
+
 def sageattention_available(python_executable: str | Path | None = None) -> bool:
     """Whether ``import sageattention`` succeeds in the interpreter that will run ComfyUI.
 
@@ -170,23 +203,18 @@ def sageattention_available(python_executable: str | Path | None = None) -> bool
     Cached per interpreter path. Answering costs a subprocess; a ComfyUI launch happens once per
     session, but readiness checks ask far more often than that.
     """
-    exe = str(python_executable or sys.executable)
-    if exe in _PROBE_CACHE:
-        return _PROBE_CACHE[exe]
-    available = False
-    try:
-        completed = subprocess.run(
-            [exe, "-c", "import sageattention"],
-            capture_output=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        available = completed.returncode == 0
-    except (OSError, subprocess.SubprocessError) as exc:
-        # Could not ask. Report unavailable rather than assume either way: the optimistic answer
-        # costs a ComfyUI that exits -1, and the answer is re-derived on the next launch anyway.
-        log.warning("Could not probe sageattention with %s: %s", exe, exc)
-    _PROBE_CACHE[exe] = available
-    return available
+    return _package_importable(python_executable, "sageattention")
+
+
+def triton_available(python_executable: str | Path | None = None) -> bool:
+    """Whether ``import triton`` succeeds in the interpreter that will run ComfyUI.
+
+    Same rationale and caching as ``sageattention_available`` -- see ``_package_importable``. Added
+    for ``optimization_provenance.py``: triton is a venv package, never a ``comfy_package_versions``
+    entry, so ``/system_stats`` can never answer this and a probe-or-unknown distinction is the only
+    honest one available.
+    """
+    return _package_importable(python_executable, "triton")
 
 
 def resolve_attention_backend(
