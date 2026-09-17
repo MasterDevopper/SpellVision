@@ -61,17 +61,32 @@ The fix follows the sampler's `model` input upstream — through LoRA loaders, `
 
 **Two follow-ups it left deliberately:** nothing consumes the new `stack_kind`/`high_noise_path`/`low_noise_path` draft keys yet (the cockpit reads those off the catalog stack, not off a draft), and `applyWorkflowDraft` treats an empty checkpoint as "matched" but an unresolvable non-empty one as blocking — so ten Wan graphs that used to open with no model now name one, and open **blocked** if that file is not on disk. Honest, and visible on the drop path.
 
-**3n. The UI→API converter emits prompts ComfyUI cannot run. This is now the highest-priority defect in the drop path.**
+**3n. The converter turns an uninstalled node pack into a silently unrunnable prompt. Highest-priority defect in the drop path.**
 
-Converting Pro Grade v17 produces a prompt with **24 distinct missing node ids referenced by 30 inputs** — three `LCPipeOut` pipes, the `SaveImage` source and the `UltimateSDUpscale` source among them.
+**The mechanism, measured 2026-09-17.** When `convert_ui_graph` meets a node whose class it cannot resolve, it **omits the node, keeps every reference to it, and returns `errors == []`.** The result is a prompt with dangling links that ComfyUI rejects with an opaque `KeyError`, and nothing anywhere says a pack was missing.
 
-**Measured across the whole imported library: 7 of 84 compiled prompts (8%) carry dangling node references** — `krea2-pro-grade-v17` (24 missing ids), all four `img-to-video-*` graphs (12 each), `dasiwa-wan-2-2-i2v-fastfidelity-c-aio-13` (3) and `wangpt-optimizedv3` (2).
+Verified against the live server with a synthetic single-node probe rather than assumed: a dangling reference returns `HTTP 400`, `error.type = "prompt_outputs_failed_validation"`, a `KeyError` on the missing id raised inside `validate_inputs` at `execution.py:1184`. The queue was confirmed empty afterwards; nothing was rendered to establish this.
 
-**None of the seven can be submitted.** Verified against the live server with a synthetic single-node probe rather than assumed — a dangling reference returns `HTTP 400`, `error.type = "prompt_outputs_failed_validation"`, a `KeyError` on the missing id raised inside `validate_inputs` at `execution.py:1184`. The queue stayed empty; nothing was rendered to establish this.
+**The dropped classes are simply not installed here** — `CR Text Concatenate`, `CR Prompt Text`, `CR Seed`, `CR Apply LoRA Stack` (Comfyroll), `Lora Loader (LoraManager)`, `TriggerWord Toggle (LoraManager)`, `Scheduler Selector (Comfy) (Image Saver)`, plus display-name aliases like `Latent Upscale` and `CLIP Text Encode (Positive Prompt)` that resolve to nothing on this box. `display_name_aliases()` builds 2348 entries and none of these appear in any of them, nor as a `display_name` in `/object_info`'s 3607 classes. **Every dropped node is `mode: 0` — active, not bypassed.** The converter is right that it cannot resolve them; it is wrong to continue as if it had.
 
-This is also what 3m's four now-empty graphs are really hitting: `img-to-video-base` keeps all 36 of its links and two perfectly good `UNETLoader`s carrying the Wan 2.2 high and low experts — but **both are referenced by zero inputs**, because the 12 nodes between them and the sampler are gone. The model walk is correct to find nothing; the graph it was given is broken.
+**Scope, re-converting every UI graph in the library against the live `/object_info`:** 69 clean both ways, **10 with a live conversion defect**, 4 whose *stored* prompt is broken while a fresh conversion is clean, 1 with no UI graph to recompile.
 
-Separately the same converter assigns widget values to the wrong slots: `EmptyHunyuanLatentVideo` with `batch_size: 480`, `WanImageToVideo` with `batch_size: 960, length: 640` — plainly a width and a height landing in the wrong fields, so probably one root cause with the dropped nodes. `python/comfy_graph_converter.py`.
+| workflow | stored missing ids | fresh missing ids |
+|---|---|---|
+| `krea2-pro-grade-v17` | 24 | 24 |
+| `dasiwa-wan-2-2-i2v-fastfidelity-c-aio-13` | 3 | 16 |
+| `trying-t2v` | 0 | 11 |
+| `wangpt-optimized` | 0 | 3 |
+| `t2i-v23` | 0 | 2 |
+| `endercomic-v1-5`, `i2v`, `mmaudio`, `multi-detailer` | 0 | 1 each |
+| `wangpt-optimizedv3` | 2 | 1 |
+| `img-to-video-base`, `-base-speed`, `-gguf`, `-gguf-speed` | 12 each | **0** |
+
+**Do not read the "stored 0 / fresh N" rows as a converter regression** — that was my first reading and it is wrong. Stored and fresh disagree in *both* directions because the set of unresolvable classes is a property of **what is installed at the moment of conversion**, not of the converter's code. The four `img-to-video-*` rows are the same effect running the other way: their stored prompts were compiled when something was missing that is present now.
+
+**Two consequences worth separating.** The prompts on disk are compiled artefacts that nothing re-validates or re-compiles, so a stale one keeps being served to the drop path indefinitely — that is its own item. And the repo already owns the machinery for the real fix: `workflow_pack_resolver.py` exists to say *which pack* a class needs, and the node-pack blocker inventory already records 37 of 82 workflows blocked on packs. The converter should refuse, naming the unresolvable classes and the packs that supply them, rather than emitting a graph that fails later with a `KeyError`.
+
+Separately the same converter assigns widget values to the wrong slots: `EmptyHunyuanLatentVideo` with `batch_size: 480`, `WanImageToVideo` with `batch_size: 960, length: 640` — plainly a width and a height landing in the wrong fields. Possibly the same root cause, not yet traced. `python/comfy_graph_converter.py`.
 
 **3b. A first-ever import of a workflow with missing node packs times out at 120 s.** cm-cli cold is ~128 s; the cache is why the *second* drop works. Either raise the budget for a cold import or make the first call warm the cache without holding the request. `python/node_dependency_resolver.py`.
 
