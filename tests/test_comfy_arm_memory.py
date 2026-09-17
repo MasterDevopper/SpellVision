@@ -194,16 +194,16 @@ def test_get_comfy_runtime_manager_rebuilds_without_forgetting(monkeypatch, tmp_
     """The rebuild through the real worker entry point, rather than by constructing two managers."""
     (tmp_path / "main.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(ws, "default_comfy_root", lambda: str(tmp_path))
-    ws.COMFY_RUNTIME_MANAGER = None
+    ws.COMFY_RUNTIME_MANAGERS.clear()
     try:
         first = ws.get_comfy_runtime_manager({"comfy_root": str(tmp_path)})
         comfy_session_arm.remember_arm({"attention": "sdpa"})
-        ws.COMFY_RUNTIME_MANAGER = None  # what a differing host/port/python does
+        ws.COMFY_RUNTIME_MANAGERS.clear()  # what a differing host/port/python does
         second = ws.get_comfy_runtime_manager({"comfy_root": str(tmp_path)})
         assert second is not first
         assert comfy_session_arm.remembered_arm() == {"attention": "sdpa"}
     finally:
-        ws.COMFY_RUNTIME_MANAGER = None
+        ws.COMFY_RUNTIME_MANAGERS.clear()
 
 
 # --- the regression, through the handler that caused it --------------------------------------------

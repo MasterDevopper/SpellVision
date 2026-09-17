@@ -34,6 +34,7 @@ from worker_service_state import (
     unregister_active_job,
     utc_now_iso,
 )
+from comfy_endpoint import comfy_endpoint
 from worker_durable_state import atomic_write_json, worker_state_root
 from generation_failure import classify_failure
 from request_payload import expand_image_batch, studio_effective_mode
@@ -93,6 +94,17 @@ class QueueItem:
     # hits for good once the item reaches a terminal state.
     _result_copy_src: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     _result_copy: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def endpoint(self) -> str:
+        """Which ComfyUI this item runs against.
+
+        DERIVED from request_snapshot through the one resolver, not stored. A stored field would be
+        a second answer to a question ``comfy_endpoint`` already owns, and the two would disagree
+        the first time a request was rewritten -- which ``_run_queue_item`` does on every start. It
+        also survives a restart for free, because the snapshot is what the manifest persists.
+        """
+        return comfy_endpoint(self.request_snapshot)
 
     def invalidate_derived(self) -> None:
         self._derived = None
@@ -211,11 +223,40 @@ class QueueManager:
         self.pending: deque[str] = deque()
         self.items: dict[str, QueueItem] = {}
         self.order: list[str] = []
-        self.active_queue_item_id: str | None = None
+        # One lane per endpoint. This was a single `active_queue_item_id`, which is the reason the
+        # second render box could not be busy at the same time as this one: the queue had exactly
+        # one notion of "something is running" and it was not attached to a machine.
+        self.active_by_endpoint: dict[str, str] = {}
         self.paused: bool = False
         self.manifest_path = manifest_path or (worker_state_root() / "queue_manifest.json")
         self._manifest_recovered = False
         self._recovered_started = False
+
+    @property
+    def active_queue_item_id(self) -> str | None:
+        """The active item on the LOCAL endpoint, or, failing that, any active item.
+
+        Kept because the queue snapshot the UI polls carries this field and because a single-
+        endpoint install has exactly one answer. It is derived from the map rather than maintained
+        beside it -- a second copy is how the two would come to disagree.
+        """
+        local = comfy_endpoint(None)
+        if local in self.active_by_endpoint:
+            return self.active_by_endpoint[local]
+        for queue_item_id in self.active_by_endpoint.values():
+            return queue_item_id
+        return None
+
+    @active_queue_item_id.setter
+    def active_queue_item_id(self, value: str | None) -> None:
+        if value is None:
+            self.active_by_endpoint.clear()
+            return
+        item = self.items.get(value)
+        self.active_by_endpoint[item.endpoint if item else comfy_endpoint(None)] = value
+
+    def is_active(self, queue_item_id: str) -> bool:
+        return queue_item_id in self.active_by_endpoint.values()
 
     def recover_from_manifest(self) -> None:
         with self.lock:
@@ -250,6 +291,7 @@ class QueueManager:
                 "updated_at": utc_now_iso(),
                 "paused": self.paused,
                 "active_queue_item_id": self.active_queue_item_id,
+                "active_by_endpoint": dict(self.active_by_endpoint),
                 "order": list(self.order),
                 "items": [
                     self._item_manifest_payload(self.items[queue_item_id])
@@ -362,8 +404,9 @@ class QueueManager:
     def snapshot_payload(self) -> dict[str, Any]:
         with self.lock:
             ordered_ids: list[str] = []
-            if self.active_queue_item_id and self.active_queue_item_id in self.items:
-                ordered_ids.append(self.active_queue_item_id)
+            for active_id in self.active_by_endpoint.values():
+                if active_id in self.items and active_id not in ordered_ids:
+                    ordered_ids.append(active_id)
             ordered_ids.extend([qid for qid in self.pending if qid in self.items and qid not in ordered_ids])
             ordered_ids.extend([qid for qid in reversed(self.order) if qid in self.items and qid not in ordered_ids])
 
@@ -386,9 +429,9 @@ class QueueManager:
                 items_payload.append(payload)
 
             def active_queue_affinity_for(command: str) -> str | None:
-                if self.active_queue_item_id and self.active_queue_item_id in self.items:
-                    active_item = self.items[self.active_queue_item_id]
-                    if active_item.command == command:
+                for active_id in self.active_by_endpoint.values():
+                    active_item = self.items.get(active_id)
+                    if active_item is not None and active_item.command == command:
                         return _ws().affinity_signature_for_request(active_item.request_snapshot)
                 return _ws().active_affinity_signature_for_command(command)
 
@@ -396,6 +439,7 @@ class QueueManager:
                 "type": "queue_snapshot",
                 "ok": True,
                 "active_queue_item_id": self.active_queue_item_id,
+                "active_queue_item_ids": dict(self.active_by_endpoint),
                 "queue_paused": self.paused,
                 "pending_count": sum(1 for qid in self.pending if qid in self.items),
                 "total_count": len(self.items),
@@ -581,28 +625,46 @@ class QueueManager:
             item.timestamps.updated_at = utc_now_iso()
 
     def _start_next_locked(self) -> None:
+        """Start the head of every endpoint lane that is free. One job per endpoint, never two.
+
+        This used to popleft until it found something runnable and then return. Two changes: the
+        busy test is now per endpoint, and an item whose endpoint is busy is PUT BACK rather than
+        consumed -- with one global active id there was never a reason to put anything back, and
+        keeping popleft would have silently dropped the queued job for a busy second box.
+
+        Order within a lane is unchanged, so a single-endpoint install behaves exactly as before:
+        strictly serial, first in first out.
+        """
         if self.paused:
             return
-        if self.active_queue_item_id is not None:
-            return
+        remaining: deque[str] = deque()
+        started: list[str] = []
         while self.pending:
             queue_item_id = self.pending.popleft()
             item = self.items.get(queue_item_id)
             if item is None or item.state != QueueItemState.QUEUED:
                 continue
-            self.active_queue_item_id = queue_item_id
+            endpoint = item.endpoint
+            if endpoint in self.active_by_endpoint:
+                remaining.append(queue_item_id)
+                continue
+            self.active_by_endpoint[endpoint] = queue_item_id
             item.state = QueueItemState.PREPARING
             item.timestamps.started_at = item.timestamps.started_at or utc_now_iso()
             self._timestamp_touch(item)
-            self._persist_locked()
-            thread = threading.Thread(target=self._run_queue_item, args=(queue_item_id,), daemon=True)
-            thread.start()
+            started.append(queue_item_id)
+        self.pending = remaining
+        if not started:
             return
+        self._persist_locked()
+        for queue_item_id in started:
+            threading.Thread(target=self._run_queue_item, args=(queue_item_id,), daemon=True).start()
 
     def _finalize_queue_item(self, queue_item_id: str) -> None:
         with self.lock:
-            if self.active_queue_item_id == queue_item_id:
-                self.active_queue_item_id = None
+            for endpoint, active_id in list(self.active_by_endpoint.items()):
+                if active_id == queue_item_id:
+                    self.active_by_endpoint.pop(endpoint, None)
             self._start_next_locked()
             self._persist_locked()
 
@@ -798,13 +860,21 @@ class QueueManager:
                     item.timestamps.finished_at = utc_now_iso()
                     self._timestamp_touch(item)
                     removed += 1
-            active_id = self.active_queue_item_id
-            active_item = self.items.get(active_id) if active_id else None
+            active_items = [
+                self.items[active_id]
+                for active_id in self.active_by_endpoint.values()
+                if active_id in self.items
+            ]
             self._persist_locked()
+        # Every lane, not the first one. A "cancel all" that stopped one of two running endpoints
+        # and reported success is the shape this whole task exists to avoid.
         active_cancelled = False
-        if active_item and active_item.worker_job_id:
+        for active_item in active_items:
+            if not active_item.worker_job_id:
+                continue
             handle = get_active_job(active_item.worker_job_id)
-            active_cancelled, _job = request_job_cancel(active_item.worker_job_id)
+            cancelled, _job = request_job_cancel(active_item.worker_job_id)
+            active_cancelled = active_cancelled or cancelled
             for failure in _failed_backend_cancels(handle):
                 log.warning("cancel_all: backend cancel failed: %s", failure)
         return removed, active_cancelled
@@ -886,7 +956,7 @@ class QueueManager:
             item = self.items.get(queue_item_id)
             if item is None:
                 return False, "queue item not found"
-            if self.active_queue_item_id == queue_item_id:
+            if self.is_active(queue_item_id):
                 return False, "cannot remove active queue item"
             if item.state != QueueItemState.QUEUED:
                 return False, f"queue item is not pending (state={item.state.value})"
@@ -922,7 +992,7 @@ class QueueManager:
             item = self.items.get(target_id)
             if item is None:
                 return False, "queue item not found", None
-            if self.active_queue_item_id == target_id and item.worker_job_id:
+            if self.is_active(target_id) and item.worker_job_id:
                 pass
             elif item.state == QueueItemState.QUEUED:
                 self.pending = deque(qid for qid in self.pending if qid != target_id)

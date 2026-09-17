@@ -446,6 +446,7 @@ def normalize_worker_message(payload: dict[str, Any], last_job_id: str | None) -
         | VIDEO_HISTORY_INDEX_MESSAGE_TYPES
         | MODEL_INTELLIGENCE_MESSAGE_TYPES
         | OPTIMIZATION_MESSAGE_TYPES
+        | ENDPOINT_MESSAGE_TYPES
     ):
         normalized = dict(payload)
         if last_job_id and "job_id" not in normalized:

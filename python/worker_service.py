@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import comfy_endpoint as comfy_endpoint_module
 from comfy_endpoint import comfy_endpoint, comfy_host, comfy_port
 
 import copy
@@ -243,7 +244,10 @@ def load_job_archive() -> None:
 load_job_archive()
 
 
-COMFY_RUNTIME_MANAGER: ComfyRuntimeManager | None = None
+# One manager per (install, host, port, interpreter), not one global rebuilt whenever any of them
+# differs. The old single global meant two endpoints thrashed each other: every alternation threw
+# away the manager for the endpoint it was leaving, along with everything it had detected.
+COMFY_RUNTIME_MANAGERS: dict[tuple[str, str, int, str], ComfyRuntimeManager] = {}
 COMFY_RUNTIME_MANAGER_LOCK = threading.Lock()
 
 
@@ -1529,27 +1533,79 @@ def _managed_comfy_python(req: dict[str, Any] | None = None) -> str:
 
 
 def get_comfy_runtime_manager(req: dict[str, Any] | None = None) -> ComfyRuntimeManager:
-    global COMFY_RUNTIME_MANAGER
+    """The process manager for THIS request's endpoint, remembered rather than rebuilt.
+
+    Only ever call this for a LOCAL endpoint. A ComfyRuntimeManager starts, stops and reads the
+    state file of a ComfyUI installed on this machine; against a remote endpoint every one of those
+    is meaningless, and `ensure`/`status` short-circuit to a health probe before they get here.
+    """
     req = req or {}
     comfy_root = str(req.get("comfy_root") or default_comfy_root()).strip()
     host = _managed_comfy_host(req)
     port = _managed_comfy_port(req)
     python_executable = _managed_comfy_python(req)
+    key = (comfy_root, host, port, python_executable)
     with COMFY_RUNTIME_MANAGER_LOCK:
-        if (
-            COMFY_RUNTIME_MANAGER is None
-            or COMFY_RUNTIME_MANAGER.comfy_root != comfy_root
-            or COMFY_RUNTIME_MANAGER.host != host
-            or COMFY_RUNTIME_MANAGER.port != port
-            or COMFY_RUNTIME_MANAGER.python_executable != python_executable
-        ):
-            COMFY_RUNTIME_MANAGER = ComfyRuntimeManager(
+        manager = COMFY_RUNTIME_MANAGERS.get(key)
+        if manager is None:
+            manager = ComfyRuntimeManager(
                 comfy_root,
                 python_executable=python_executable,
                 host=host,
                 port=port,
             )
-        return COMFY_RUNTIME_MANAGER
+            COMFY_RUNTIME_MANAGERS[key] = manager
+        return manager
+
+
+def remote_endpoint_health_payload(req: dict[str, Any], action: str) -> dict[str, Any]:
+    """What "ensure the runtime" can honestly mean for a machine that is not this one.
+
+    A remote endpoint has no local process to start, no state file to read and no custom_nodes/ to
+    install into, so the only true answer is whether it ANSWERS. Before this, run_comfy_workflow
+    called ensure_comfy_runtime unconditionally, which for a remote job meant starting a ComfyUI
+    process HERE and then submitting the prompt THERE -- two ComfyUIs, one of them pointless, and a
+    success report either way.
+
+    Health is /system_stats and not a model listing: ComfyUI walks its model directories to answer
+    a filename list, and a node whose models arrive over a dead CIFS share blocks on exactly that.
+    """
+    from endpoint_capability import endpoint_health
+
+    endpoint = str(comfy_endpoint(req)).rstrip("/")
+    health = endpoint_health(endpoint, timeout_sec=bounded_option(req, "health_timeout_sec", 5.0))
+    healthy = bool(health.get("ok"))
+    payload: dict[str, Any] = {
+        "ok": True,
+        "endpoint": endpoint,
+        # Deliberately NOT `endpoint_is_local`. In this protocol that key is the marker of a
+        # REFUSAL -- worker_tcp sets it on the reply that turns down a local-install command for a
+        # remote endpoint, and tests/test_remote_endpoint_guard reads it as exactly that. A status
+        # that succeeded must not carry a refusal's marker. `ownership` and `can_stop` say the same
+        # thing without the collision: nothing here owns that process and nothing here can stop it.
+        "state": "ready_external" if healthy else "unreachable",
+        # Never "managed": nothing here owns that process, and saying otherwise would offer a Stop
+        # button that cannot stop anything.
+        "ownership": "external" if healthy else "none",
+        "running": healthy,
+        "healthy": healthy,
+        "endpoint_alive": healthy,
+        "pid": None,
+        "detected_pid": None,
+        "can_stop": False,
+        "started_by_spellvision": False,
+        "installed": healthy,
+        "message": (
+            f"External ComfyUI answered at {endpoint}."
+            if healthy
+            else f"{endpoint} did not answer a health check on /system_stats: {health.get('error')}"
+        ),
+    }
+    if healthy:
+        payload["system_stats"] = health.get("system_stats")
+    else:
+        payload["error"] = health.get("error")
+    return payload
 
 
 def _runtime_message(message_type: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1576,6 +1632,10 @@ def handle_delete_model_command(req: dict[str, Any] | None = None) -> dict[str, 
 
 def handle_comfy_runtime_status_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    if not comfy_endpoint_module.is_local_endpoint(req):
+        payload = remote_endpoint_health_payload(req, "comfy_runtime_status")
+        payload["version_check"] = _comfy_version_check(payload, req)
+        return _runtime_message("comfy_runtime_status", "comfy_runtime_status", payload)
     manager = get_comfy_runtime_manager(req)
     payload = manager.status()
     payload["version_check"] = _comfy_version_check(payload, req)
@@ -1617,6 +1677,14 @@ def _sync_comfy_extra_model_paths(req: dict[str, Any] | None) -> bool:
 
 def handle_ensure_comfy_runtime_command(req: dict[str, Any] | None = None) -> dict[str, Any]:
     req = req or {}
+    if not comfy_endpoint_module.is_local_endpoint(req):
+        # No local process to start and no local extra_model_paths.yaml to write -- that file is
+        # read by a ComfyUI on this machine, and rewriting it would change what THIS install can
+        # see while claiming to have prepared the other one.
+        return _runtime_message(
+            "comfy_runtime_ack", "ensure_comfy_runtime",
+            remote_endpoint_health_payload(req, "ensure_comfy_runtime"),
+        )
     yaml_changed = _sync_comfy_extra_model_paths(req)
     manager = get_comfy_runtime_manager(req)
     timeout = bounded_option(req, "startup_timeout_sec", 60.0)
