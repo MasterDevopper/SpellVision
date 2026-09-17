@@ -31,6 +31,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QElapsedTimer>
+#include <QVariant>
 #include <QJsonObject>
 #include <QString>
 
@@ -553,6 +554,9 @@ void WorkflowDraftBuilderTest::aGraphWithNoSamplerAtAllCarriesNoSamplingFieldsAn
     QVERIFY(result.present);
     const QJsonObject draft = result.draft;
 
+    // Collected rather than asserted one at a time, so a regression names EVERY invented field at
+    // once -- stopping at the first would hide the 100x100 behind the empty prompt.
+    QStringList invented;
     for (const QString &key : {QStringLiteral("prompt"),
                                QStringLiteral("negative_prompt"),
                                QStringLiteral("sampler"),
@@ -563,9 +567,12 @@ void WorkflowDraftBuilderTest::aGraphWithNoSamplerAtAllCarriesNoSamplingFieldsAn
                                QStringLiteral("width"),
                                QStringLiteral("height")})
     {
-        QVERIFY2(!draft.contains(key),
-                 qPrintable(QStringLiteral("draft claims '%1' from a graph that says nothing about it").arg(key)));
+        if (draft.contains(key))
+            invented << QStringLiteral("%1=%2").arg(key, draft.value(key).toVariant().toString());
     }
+    QVERIFY2(invented.isEmpty(),
+             qPrintable(QStringLiteral("draft claims %1 from a graph that says nothing about any of them")
+                            .arg(invented.join(QStringLiteral(", ")))));
 
     // And each one is named, so the user is told what did not come across rather than shown a zero.
     QVERIFY(warnsAbout(draft, QStringLiteral("prompt text")));
