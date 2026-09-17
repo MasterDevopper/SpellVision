@@ -2,6 +2,7 @@
 
 #include "WorkflowLaunchController.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -16,6 +17,28 @@ namespace
 QString stringAt(const QJsonObject &object, const QString &key)
 {
     return object.value(key).toString().trimmed();
+}
+
+QStringList stringListAt(const QJsonObject &object, const QString &key)
+{
+    QStringList out;
+    for (const QJsonValue &value : object.value(key).toArray())
+    {
+        const QString text = value.toString().trimmed();
+        if (!text.isEmpty())
+            out << text;
+    }
+    return out;
+}
+
+QString firstNonEmpty(const QStringList &candidates)
+{
+    for (const QString &candidate : candidates)
+    {
+        if (!candidate.trimmed().isEmpty())
+            return candidate.trimmed();
+    }
+    return {};
 }
 
 QJsonObject artifactsOf(const QJsonObject &importReply)
@@ -242,27 +265,116 @@ WorkflowDropCoordinator::Readiness WorkflowDropCoordinator::readinessOf(const QJ
     return ready.toBool() ? Readiness::Ready : Readiness::NotReady;
 }
 
-QString WorkflowDropCoordinator::compiledPromptPathFor(const QJsonObject &compileReply,
-                                                        const QJsonObject &importReply)
+QString WorkflowDropCoordinator::compileRefusal(const QJsonObject &compileReply)
 {
-    const QString fromReply = stringAt(compileReply, QStringLiteral("compiled_prompt_path"));
-    if (!fromReply.isEmpty())
-        return fromReply;
+    const QStringList errors = stringListAt(compileReply, QStringLiteral("errors"));
+    const QStringList missingClasses = stringListAt(compileReply, QStringLiteral("missing_classes"));
+    const QStringList dangling = stringListAt(compileReply, QStringLiteral("dangling_links"));
+    const QJsonValue schemaAvailable = compileReply.value(QStringLiteral("object_info_available"));
+    const bool schemaUnavailable = schemaAvailable.isBool() && !schemaAvailable.toBool();
+    const QJsonValue ok = compileReply.value(QStringLiteral("ok"));
+    const QString said = firstNonEmpty({stringAt(compileReply, QStringLiteral("reason")),
+                                        stringAt(compileReply, QStringLiteral("error"))});
+    const bool failedWithAReason = ok.isBool() && !ok.toBool() && !said.isEmpty();
+
+    if (errors.isEmpty() && missingClasses.isEmpty() && dangling.isEmpty() && !schemaUnavailable
+        && !failedWithAReason)
+        return {};
+
+    // The worker authors this sentence; it already names the packs and their repository URLs, and
+    // one cause must produce one message. Only when it sent none is one assembled here.
+    QStringList lines = errors;
+    if (lines.isEmpty() && !said.isEmpty())
+        lines << said;
+    if (lines.isEmpty() && !missingClasses.isEmpty())
+        lines << QStringLiteral("This workflow cannot be compiled: the live ComfyUI schema has no "
+                                "node class(es): %1.")
+                     .arg(missingClasses.join(QStringLiteral(", ")));
+    if (lines.isEmpty() && !dangling.isEmpty())
+        lines << QStringLiteral("Internal error: the compiled prompt is not self-consistent (%1).")
+                     .arg(dangling.join(QStringLiteral("; ")));
+    if (lines.isEmpty())
+        lines << QStringLiteral("The workflow could not be compiled against the live ComfyUI schema.");
+
+    QString text = lines.join(QStringLiteral("\n"));
+
+    // A reply that carries the pack array but not the prose still has to reach the user with the
+    // packs attached -- that list is the whole difference between "something is missing" and
+    // "install this repository".
+    QStringList packLines;
+    for (const QJsonValue &value : compileReply.value(QStringLiteral("missing_packs")).toArray())
+    {
+        const QJsonObject entry = value.toObject();
+        const QString pack = stringAt(entry, QStringLiteral("pack"));
+        if (pack.isEmpty() || text.contains(pack))
+            continue;
+        const QString url = stringAt(entry, QStringLiteral("repo_url"));
+        QStringList classes;
+        for (const QJsonValue &className : entry.value(QStringLiteral("classes")).toArray())
+        {
+            const QString name = className.toString().trimmed();
+            if (!name.isEmpty())
+                classes << name;
+        }
+        QString line = QStringLiteral("  - ") + pack;
+        if (!url.isEmpty())
+            line += QStringLiteral(" (") + url + QStringLiteral(")");
+        if (!classes.isEmpty())
+            line += QStringLiteral(" -- supplies ") + classes.join(QStringLiteral(", "));
+        packLines << line;
+    }
+    if (!packLines.isEmpty())
+        text += QStringLiteral("\nThe workflow names the pack(s) it needs:\n")
+            + packLines.join(QStringLiteral("\n"));
+
+    return text.trimmed();
+}
+
+WorkflowDropCoordinator::CompiledPrompt
+WorkflowDropCoordinator::compiledPromptFor(const QJsonObject &compileReply,
+                                           const QJsonObject &importReply)
+{
+    CompiledPrompt compiled;
+
+    // FIRST, before the path is even looked at. A worker older than the refusal still WROTE a
+    // prompt_api.json beside its `ok: false`, so a reply can name a path and refuse in the same
+    // breath; the refusal is the answer, and the file it points at is the rotten one.
+    compiled.refusal = compileRefusal(compileReply);
+    if (!compiled.refusal.isEmpty())
+        return compiled;
+
+    compiled.path = stringAt(compileReply, QStringLiteral("compiled_prompt_path"));
+    if (!compiled.path.isEmpty())
+        return compiled;
 
     // The graph was already an API prompt, so compile_workflow_prompt wrote nothing and the source
     // workflow IS the prompt. It reports that with graph_format, and the path is the import's own.
     if (stringAt(compileReply, QStringLiteral("graph_format")) == QStringLiteral("comfy_api_prompt"))
-        return stringAt(artifactsOf(importReply), QStringLiteral("workflow_path"));
+    {
+        compiled.path = stringAt(artifactsOf(importReply), QStringLiteral("workflow_path"));
+        return compiled;
+    }
 
-    // Nothing came back. A prompt may still be on disk from an earlier import of the same workflow.
+    // Only here -- a reply that says nothing at all, which is a worker older than every field above.
+    // A prompt may still be on disk from an earlier import, and it is a GUESS: nothing in the reply
+    // vouches for its age or for the converter that wrote it. It is taken, and it is announced.
     const QString root = importRoot(importReply);
     if (!root.isEmpty())
     {
         const QString candidate = QDir(root).filePath(QStringLiteral("prompt_api.json"));
         if (QFileInfo::exists(candidate))
-            return candidate;
+        {
+            compiled.path = candidate;
+            compiled.fromStaleFallback = true;
+        }
     }
-    return {};
+    return compiled;
+}
+
+QString WorkflowDropCoordinator::compiledPromptPathFor(const QJsonObject &compileReply,
+                                                        const QJsonObject &importReply)
+{
+    return compiledPromptFor(compileReply, importReply).path;
 }
 
 WorkflowDraftBuilder::Source WorkflowDropCoordinator::draftSourceFor(const QJsonObject &importReply,
@@ -446,12 +558,32 @@ void WorkflowDropCoordinator::continueWithImport(DropContext context)
 
 void WorkflowDropCoordinator::onCompileReply(DropContext context, const QJsonObject &reply)
 {
-    context.compiledPromptPath = compiledPromptPathFor(reply, context.importReply);
+    const CompiledPrompt compiled = compiledPromptFor(reply, context.importReply);
 
-    const QJsonArray missingClasses = reply.value(QStringLiteral("missing_classes")).toArray();
-    if (!missingClasses.isEmpty())
-        log(QStringLiteral("Compiled with %1 node class(es) missing from the live schema.")
-                .arg(missingClasses.size()));
+    // "Compiled with N node class(es) missing from the live schema" used to stand here and the
+    // sequence carried on. That was the old world's sentence, from when an unresolvable class was a
+    // note: there is no such thing as compiling WITH a class missing any more. The worker refuses,
+    // and the refusal -- with the packs it names and their repository URLs -- is what the user gets.
+    if (!compiled.refusal.isEmpty())
+    {
+        if (bindings_.refreshWorkflowLibrary)
+            bindings_.refreshWorkflowLibrary();
+        refuse(compiled.refusal);
+        return;
+    }
+
+    if (compiled.fromStaleFallback)
+    {
+        // Never silent. This file was not written by the compile that just ran, and nothing in the
+        // reply vouches for the converter that produced it.
+        log(QStringLiteral("No compiled prompt came back, so a previously compiled %1 (written %2) "
+                           "is being used. Nothing vouches for its age -- recompile the workflow if "
+                           "the values look wrong.")
+                .arg(compiled.path,
+                     QFileInfo(compiled.path).lastModified().toString(Qt::ISODate)));
+    }
+
+    context.compiledPromptPath = compiled.path;
 
     // The import already answered this. Asking a second time inside one drop is not a second
     // opinion -- it is the same function run twice, and two answers to one question is the defect

@@ -34,7 +34,11 @@ from comfy_graph_links import (  # noqa: E402
     is_link,
     prompt_verdict,
 )
-from comfy_missing_packs import missing_class_message, missing_pack_entries  # noqa: E402
+from comfy_missing_packs import (  # noqa: E402
+    missing_class_message,
+    missing_pack_entries,
+    near_miss_suggestions,
+)
 
 
 # --------------------------------------------------------------------------------------------
@@ -164,6 +168,93 @@ def test_the_message_keeps_the_signature_flows_health_parses():
 def test_strict_mode_raises_the_same_refusal_for_the_submit_path():
     with pytest.raises(ValueError, match="CR Text Concatenate"):
         convert_ui_graph_to_api_prompt(_graph_with_missing_class(), SCHEMA)
+
+
+# --------------------------------------------------------------------------------------------
+# A class the live schema does not publish is not always a pack to install
+# --------------------------------------------------------------------------------------------
+#
+# wangpt-optimized refuses over `Latent Upscale` and `CLIP Text Encode (Positive Prompt)`. The
+# refusal is CORRECT -- those strings resolve to nothing on this box -- but they are TITLES of core
+# nodes, so "install the missing custom nodes" sends the user somewhere that cannot help them.
+
+_RETITLED_SCHEMA = {
+    "LatentUpscale": {"display_name": "Upscale Latent", "input": {"required": {}}},
+    "CLIPTextEncode": {"display_name": "CLIP Text Encode (Prompt)", "input": {"required": {}}},
+}
+
+
+def _retitled_graph():
+    return {
+        "nodes": [
+            {"id": 1, "type": "Latent Upscale", "widgets_values": []},
+            {"id": 2, "type": "CLIP Text Encode (Positive Prompt)", "widgets_values": []},
+        ],
+        "links": [],
+    }
+
+
+def test_a_retitled_core_node_reads_as_a_schema_miss_not_a_missing_pack():
+    names = ["Latent Upscale", "CLIP Text Encode (Positive Prompt)"]
+    message = missing_class_message(_retitled_graph(), names, _RETITLED_SCHEMA)
+
+    # Nothing here can be installed, so the refusal must not say so.
+    assert "Install the missing custom nodes" not in message
+    assert "does not publish" in message
+    # ... and it must not send them hunting for a pack by hand either.
+    assert "name no pack in the workflow file" not in message
+    # The near miss is offered as a question, in text.
+    assert "did you mean `LatentUpscale`?" in message
+    assert "did you mean `CLIPTextEncode`?" in message
+
+
+def test_the_suggestion_is_never_applied_only_offered():
+    """Name-similarity ranking measured 0 of 16 here; a rename the code makes is a different graph."""
+    result = convert_ui_graph(_retitled_graph(), _RETITLED_SCHEMA)
+
+    assert result.errors, "a class the schema does not publish is still a refusal"
+    assert result.prompt == {}
+    # The class names come back exactly as the graph spelled them -- nothing was rewritten to the
+    # suggested class, and no node was compiled under it.
+    assert result.missing_classes == ["CLIP Text Encode (Positive Prompt)", "Latent Upscale"]
+    # ... and nothing was resolved THROUGH the suggestion either: display-name aliasing is the
+    # only mechanism allowed to rename a class, and these names are titles, not display names.
+    assert result.resolved_display_names == {}
+
+
+def test_a_genuine_custom_node_still_says_install_even_beside_a_retitled_one():
+    """The two live together: only the classes nothing can account for earn the install sentence."""
+    graph = _retitled_graph()
+    graph["nodes"].append({"id": 3, "type": "BatchResizeWithLanczos", "widgets_values": []})
+    message = missing_class_message(
+        graph, ["Latent Upscale", "BatchResizeWithLanczos"], _RETITLED_SCHEMA
+    )
+
+    assert "Install the missing custom nodes first." in message
+    assert "did you mean `LatentUpscale`?" in message
+    assert "found by hand: BatchResizeWithLanczos" in message
+
+
+def test_a_suggestion_is_an_exact_match_after_normalisation_never_a_ranking():
+    # Only punctuation, case and spacing may differ, plus one trailing parenthetical.
+    assert near_miss_suggestions(_RETITLED_SCHEMA, ["latent-upscale"]) == {
+        "latent-upscale": "LatentUpscale"
+    }
+    assert near_miss_suggestions(_RETITLED_SCHEMA, ["Upscale Latent"]) == {
+        "Upscale Latent": "LatentUpscale"
+    }
+    # A name that merely LOOKS similar resolves to nothing. This is the whole difference from the
+    # similarity ranking that scored 0 of 16 on this box.
+    assert near_miss_suggestions(_RETITLED_SCHEMA, ["LatentUpscaleBy"]) == {}
+    assert near_miss_suggestions(_RETITLED_SCHEMA, ["CR Upscale Image"]) == {}
+    # Two classes sharing a normalised name is an ambiguity, and ambiguity is not a suggestion.
+    ambiguous = {
+        "Int": {"display_name": "Int", "input": {"required": {}}},
+        "INT": {"display_name": "Integer", "input": {"required": {}}},
+    }
+    assert near_miss_suggestions(ambiguous, ["i n t"]) == {}
+    # And no schema at all means no suggestions, not a guess.
+    assert near_miss_suggestions(None, ["Latent Upscale"]) == {}
 
 
 # --------------------------------------------------------------------------------------------

@@ -308,7 +308,7 @@ def convert_ui_graph_to_api_prompt(
     # exit from this function runs through `verdict`.
     from comfy_graph_links import prompt_verdict
 
-    verdict = prompt_verdict(api, workflow, unknown, unknown_nodes)
+    verdict = prompt_verdict(api, workflow, unknown, unknown_nodes, object_info)
     errors = verdict.errors
 
     if errors and strict:

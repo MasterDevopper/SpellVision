@@ -93,6 +93,7 @@ def prompt_verdict(
     workflow: Any,
     unknown_classes: Any,
     unknown_nodes: dict[str, str],
+    object_info: Any = None,
 ) -> PromptVerdict:
     """The converter's post-condition: may this prompt be handed out, and if not, what to say.
 
@@ -117,7 +118,9 @@ def prompt_verdict(
         from comfy_missing_packs import missing_class_message, missing_pack_entries
 
         packs = missing_pack_entries(workflow, unknown)
-        errors.append(missing_class_message(workflow, unknown))
+        # The live schema goes with it: a class nothing publishes may be a core node's TITLE, and
+        # "install the missing custom nodes" is the wrong sentence for that.
+        errors.append(missing_class_message(workflow, unknown, object_info))
     unexplained = [link for link in dangling if link.missing_id not in unknown_nodes]
     if unexplained:
         errors.append(

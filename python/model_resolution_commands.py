@@ -219,7 +219,7 @@ def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[
                     # a search. Falls back to the bare class list when nothing is declared.
                     from comfy_missing_packs import missing_class_message
 
-                    reason = missing_class_message(raw, missing) or (
+                    reason = missing_class_message(raw, missing, object_info) or (
                         f"the workflow needs {len(missing)} node class(es) this ComfyUI does not "
                         f"have: {', '.join(missing[:5])}"
                     )
