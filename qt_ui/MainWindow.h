@@ -53,6 +53,7 @@ class WorkerQueueController;
 namespace spellvision::shell
 {
 class SideRail;
+class WindowDropTarget;
 }
 
 class QAbstractButton;
@@ -348,6 +349,10 @@ private:
     void updateDetailsPanelForQueueSelection();
     void showWorkflowImportResult(const QJsonObject &response, const QString &stderrText);
     void openWorkflowDraft(const QJsonObject &draft);
+    // A workflow dropped anywhere in the window: imported through the worker, then opened as an
+    // editable draft. Called by the cockpit's own drop zone AND by WindowDropTarget, which is the
+    // only reason a .json dropped on the rail or the title bar is no longer discarded in silence.
+    void importDroppedWorkflow(const QString &path, const QString &preferredModeId);
 
     void configureDetailsActions(const QString &primaryId,
                                  const QString &primaryText,
@@ -517,6 +522,10 @@ private:
     QMap<QString, QString> lastSyncedGenerationErrorByMode_;
     QString currentModeId_ = QStringLiteral("home");
     spellvision::workers::WorkerQueueController *workerQueueController_ = nullptr;
+    // The window's own drop handling, as an application event filter rather than a dragEnterEvent:
+    // Qt never delivers a drag to a widget that does not accept drops, so an override on
+    // MainWindow would only have covered the pixels no page occupies.
+    spellvision::shell::WindowDropTarget *windowDropTarget_ = nullptr;
     // Latched worker reachability. Re-scan image catalogs only on the false->true
     // edge (worker became ready) so display families upgrade from the startup-race
     // fallback to the classifier verdict -- not on every 1800ms poll.

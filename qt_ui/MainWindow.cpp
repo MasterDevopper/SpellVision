@@ -42,6 +42,7 @@
 #include "shell/MainWindowTrayController.h"
 #include "shell/QueueUiPresenter.h"
 #include "shell/ShellNavigationController.h"
+#include "shell/WindowDropTarget.h"
 #include "shell/ShellGeometry.h"
 #include "shell/SideRail.h"
 #include "style/SvKit.h"
@@ -1088,6 +1089,17 @@ MainWindow::MainWindow(QWidget *parent)
             }
         });
     }
+    // A workflow dropped ANYWHERE in the window lands here. Installed on the application rather than
+    // overridden on this widget, because Qt hands a drag only to a widget whose acceptDrops() is
+    // true, walking up from the cursor and stopping at the first taker -- so a dropEvent() on
+    // MainWindow would never have seen the rail, the title bar, Flows, Home, History or Settings.
+    // Those were the surfaces where a dropped .json disappeared with no message at all.
+    windowDropTarget_ = new spellvision::shell::WindowDropTarget(this);
+    windowDropTarget_->setOverlayHost(this);
+    windowDropTarget_->installOn(qApp);
+    connect(windowDropTarget_, &spellvision::shell::WindowDropTarget::workflowDropped, this,
+            [this](const QString &path) { importDroppedWorkflow(path, currentModeId_); });
+
     ctorTrace("ctor before end");
     {
         QFile ctorLog(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
@@ -2648,16 +2660,29 @@ void MainWindow::openWorkflowDraft(const QJsonObject &draft)
         appendLogLine(spellvision::workflows::WorkflowLaunchController::draftRequiresReviewLogLine(modeId));
 }
 
-void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
+// The workflow-drop import, lifted out of a 186-line lambda inside connectGenerationPage.
+//
+// It has TWO callers now. The cockpit's own model-stack drop zone (and its Browse / Run buttons) is
+// the old one; WindowDropTarget is the new one, and it catches every workflow dropped anywhere ELSE
+// in the window -- the rail, the title bar, Flows, Home, History, Settings, a studio, the dataset
+// page. Those drops used to be discarded by Qt with no message at all, because no widget in the
+// chain accepted them and MainWindow had no drop handling of its own.
+//
+// `preferredModeId` is WHERE YOU DROPPED IT, and it is deliberately not a guess: when the drop lands
+// on a page that is not a cockpit at all, this does NOT pick one. A fallback to t2i would be the same
+// defect the Home resolver had -- a graph opened on a page it was never classified for -- so instead
+// the import is reported and the workflow stays in Flows. Asking the importer's own classification is
+// task 3, and it is the answer this is refusing to invent.
+void MainWindow::importDroppedWorkflow(const QString &path, const QString &preferredModeId)
 {
-    if (!page)
-        return;
+    const QString modeId = preferredModeId;
+    ImageGenerationPage *page = nullptr;
+    if (isGenerationMode(modeId))
+    {
+        ensureGenerationPageBuilt(modeId);
+        page = generationPageForMode(modeId);
+    }
 
-    connect(page, &ImageGenerationPage::openModelsRequested, this, [this]()
-            { switchToMode(QStringLiteral("models")); });
-    connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
-            { switchToMode(QStringLiteral("workflows")); });
-    connect(page, &ImageGenerationPage::workflowFileDropped, this, [this, page, modeId](const QString &path) {
         // Import through the worker, then open as editable draft on this cockpit.
         // If import already exists / succeeds, also offer a direct launch profile.
         QJsonObject request;
@@ -2666,14 +2691,17 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         request.insert(QStringLiteral("auto_apply_node_deps"), false);
         request.insert(QStringLiteral("auto_apply_model_deps"), false);
         const QPointer<ImageGenerationPage> pageGuard(page);
-        page->setBusy(true, QStringLiteral("Importing workflow…"));
+        const bool hadPage = page != nullptr;
+        if (page)
+            page->setBusy(true, QStringLiteral("Importing workflow…"));
         sendWorkerRequestAsync(
             request,
-            [this, pageGuard, modeId, path](
+            [this, pageGuard, hadPage, modeId, path](
                 const QJsonObject &response, const QString &stderrText, bool startedOk) {
-        if (!pageGuard)
-            return;
-        pageGuard->setBusy(false, QString());
+        if (hadPage && !pageGuard)
+            return; // the cockpit went away mid-import; there is nothing left to apply the draft to
+        if (pageGuard)
+            pageGuard->setBusy(false, QString());
         if (!stderrText.trimmed().isEmpty())
             appendLogLine(stderrText.trimmed());
         if (!startedOk || response.isEmpty() || !response.value(QStringLiteral("ok")).toBool(false)) {
@@ -2689,7 +2717,10 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
             draft.insert(QStringLiteral("safe_to_submit"), false);
             draft.insert(QStringLiteral("warnings"),
                          QJsonArray{QStringLiteral("Import incomplete — review models/nodes in Flows.")});
-            pageGuard->applyWorkflowDraft(draft);
+            if (pageGuard)
+                pageGuard->applyWorkflowDraft(draft);
+            else
+                showWorkflowImportResult(response, stderrText);
             return;
         }
 
@@ -2816,13 +2847,19 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         }
         if (draft.value(QStringLiteral("source_workflow_path")).toString().isEmpty())
             draft.insert(QStringLiteral("source_workflow_path"), path);
-        pageGuard->applyWorkflowDraft(draft);
-        appendLogLine(QStringLiteral("Workflow loaded into cockpit: %1")
+        if (pageGuard)
+            pageGuard->applyWorkflowDraft(draft);
+        else
+            // Dropped somewhere that is not a cockpit. The import is real and the user is told what
+            // it produced; what is missing is the page to open it on, and that is task 3's job.
+            showWorkflowImportResult(response, stderrText);
+        appendLogLine((pageGuard ? QStringLiteral("Workflow loaded into cockpit: %1")
+                                 : QStringLiteral("Workflow imported (no cockpit was open to load it into): %1"))
                           .arg(draft.value(QStringLiteral("source_name")).toString(QFileInfo(path).fileName())));
 
         // If ready, also queue-launch with cockpit model overrides (drop-and-run).
         // Default CLOSED: an absent or malformed readiness signal must never mean "go".
-        if (draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
+        if (pageGuard && draft.value(QStringLiteral("safe_to_submit")).toBool(false)) {
             QJsonObject profile;
             profile.insert(QStringLiteral("profile_name"),
                            draft.value(QStringLiteral("source_name")).toString());
@@ -2843,7 +2880,19 @@ void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString 
         if (workflowsPage_)
             workflowsPage_->refreshLibrary();
             });
-    });
+}
+
+void MainWindow::connectGenerationPage(ImageGenerationPage *page, const QString &modeId)
+{
+    if (!page)
+        return;
+
+    connect(page, &ImageGenerationPage::openModelsRequested, this, [this]()
+            { switchToMode(QStringLiteral("models")); });
+    connect(page, &ImageGenerationPage::openWorkflowsRequested, this, [this]()
+            { switchToMode(QStringLiteral("workflows")); });
+    connect(page, &ImageGenerationPage::workflowFileDropped, this,
+            [this, modeId](const QString &path) { importDroppedWorkflow(path, modeId); });
     connect(page, &ImageGenerationPage::prepForI2IRequested, this, [this](const QString &imagePath) {
         // Send-to-I2I from another page: the I2I page may not be built yet under lazy
         // construction. Build it on demand so the image lands instead of silently

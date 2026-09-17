@@ -235,6 +235,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/shell/TelemetryPresenter.h
     qt_ui/shell/ShellNavigationController.cpp
     qt_ui/shell/ShellNavigationController.h
+    qt_ui/shell/WindowDropTarget.cpp
+    qt_ui/shell/WindowDropTarget.h
     qt_ui/style/SvFonts.cpp
     qt_ui/style/SvFonts.h
     qt_ui/style/SvStyle.cpp
@@ -645,6 +647,16 @@ qt_add_executable(test_workflow_mode_resolver tests/cpp/test_workflow_mode_resol
 target_link_libraries(test_workflow_mode_resolver PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME workflow_mode_resolver COMMAND test_workflow_mode_resolver)
 
+# W4 Task 2: a workflow dropped ANYWHERE in the window is a workflow the window handles. Qt delivers
+# a drag only to a widget whose acceptDrops() is true, walking up from the cursor and stopping at the
+# first taker -- and MainWindow had no dragEnterEvent, no dropEvent and no setAcceptDrops, so a .json
+# dropped on the rail, the title bar, Flows, Home, History or Settings was discarded with no message.
+# The two cases a careless window-level grab breaks are both here: an image on the cockpit still
+# reaches the cockpit, and a workflow on a prompt editor reaches the window instead of becoming text.
+qt_add_executable(test_window_drop_target tests/cpp/test_window_drop_target.cpp)
+target_link_libraries(test_window_drop_target PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME window_drop_target COMMAND test_window_drop_target)
+
 # qt_add_executable makes a WIN32 (GUI subsystem) binary by default, which on Windows means the
 # process has no console and everything QtTest prints is discarded. A failing case then reports
 # nothing but an exit code -- ctest --output-on-failure shows an empty block -- which is exactly the
@@ -663,7 +675,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
                       test_sv_style test_shell_layout test_bottom_telemetry test_worker_queue_controller
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
-                      test_optimization_panel test_workflow_mode_resolver
+                      test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       PROPERTIES WIN32_EXECUTABLE FALSE)
 
 if(WIN32)
