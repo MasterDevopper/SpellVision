@@ -90,7 +90,13 @@ T2I / I2I / T2V / I2V (and studios that hand off to them): sampler, scheduler, s
 | **ComfyUI_NetDist** (city96) | Queue remote Comfy instances. Older, janky seeds. | Fallback if Distributed fails. |
 | **SwarmUI backends** | Second frontend. | Do not replace SpellVision. |
 
-**1.0 enable path:** productize **ComfyUI-Distributed** (or NetDist if Distributed fails closed): SpellVision Runtime lists workers (127.0.0.1:8188 master + `192.168.1.127:<port>` SpellNode). Generate can **queue** a job there. Fail-closed if worker offline. Do **not** claim VRAM adds (32+24 ≠ 56).
+**1.0 enable path — SUPERSEDED 2026-09-17. The pick is now SpellVision-NATIVE routing, not ComfyUI-Distributed.**
+
+The research that settled it is in `docs/superpowers/specs/2026-09-15-t2-t6-research/t6-research.md`; the operational note is Doc 61. Distributed was rejected on its own documented behaviour: with **no reachable worker it silently falls back to running the job on the master**, which is the opposite of the fail-closed requirement stated in this very row. It also requires its Collector and Seed nodes in every graph, and its semantics are parallel-batch rather than route-this-job-there. NetDist substitutes a **black image** on a failed fetch and last shipped in February 2024.
+
+Native routing needed no ComfyUI extension: the worker already resolved its endpoint per request and already fetched outputs over `/view`. What was missing was a producer in the UI, a capability gate, and per-endpoint queue/runtime state. All three landed in W6.
+
+**GATE PASSED 2026-09-17.** A real SDXL job ran on SpellNode (RTX 3090 Ti, ComfyUI 0.34.0, 130 checkpoints visible) in **80.3 s** and its dest came back over `/view`; the capability check cleared a present model through health/models/nodes and refused an absent one by name, stopping before the node check. **SDXL is gated on that machine and nothing else is** — every other family needs its own gate render there. Runtime lists workers, Generate can queue to one, it refuses before enqueue when it cannot run, and it does **not** claim VRAM adds (32+24 ≠ 56).
 
 **Not started as product:** SpellVision Runtime does not list workers yet. Pack not in Windows `custom_nodes`.
 

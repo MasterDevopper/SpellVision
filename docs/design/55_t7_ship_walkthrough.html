@@ -586,6 +586,41 @@
           euler while the C++ said 5.0 on uni_pc, so the cockpit had been showing a pair the render was
           never going to use.
         </p>
+        <h2>T6 — the second machine, gated for real (2026-09-17)</h2>
+        <p>
+          The row above records T6 as <strong>NOT GREEN</strong> with a Distributed pack that was never
+          installed. That approach was dropped. SpellVision now routes <strong>whole jobs</strong> itself,
+          with no ComfyUI extension on either machine — the reasoning is in Doc 61 §6 and the research it
+          cites, and the short version is that ComfyUI-Distributed <em>silently runs the job on the master</em>
+          when the worker is unreachable, which is the opposite of what this row asks for.
+        </p>
+        <p>
+          <strong>Capability check, live against <code>192.168.1.127:8188</code>:</strong> a real SDXL graph
+          naming a checkpoint the node reports cleared all three checks (health → models → nodes). The same
+          graph naming <code>no_such_model_xyz.safetensors</code> was <strong>refused by name</strong> —
+          “http://192.168.1.127:8188 does not have no_such_model_xyz.safetensors” — and stopped after the
+          models check, because the checks run in cost order and there was already a reason.
+        </p>
+        <figure>
+          <img src="55_t7_assets/t6_spellnode_sdxl_gate.png" alt="SDXL image rendered on the SpellNode 3090 Ti and fetched back over /view">
+          <figcaption>
+            2026-09-17 · rendered <strong>on the RTX 3090 Ti</strong> (ComfyUI 0.34.0, Linux, torch 2.13+cu130,
+            130 checkpoints visible) · <code>sdxl/LuxuriousPrisma_v30</code> · 1024×1024 · 20 steps · CFG 7.0 ·
+            <strong>80.3 s</strong> · fetched back through <code>GET /view</code>, 2,002,262 bytes. The job was
+            submitted over HTTP and the result pulled back over HTTP; no disk path crossed the machines.
+          </figcaption>
+        </figure>
+        <p class="warn">
+          <strong>SDXL is gated on SpellNode. Nothing else is.</strong> The Families checklist for an endpoint
+          starts empty and the app fills it from successes — you can untick a family, you cannot tick one that
+          has never rendered there. Krea2, Flux and every video family need their own gate render on that
+          machine. Ampere has no fp8 tensor cores, so an fp8 checkpoint loads and dequantises per layer: it
+          works, it saves VRAM, it does not save time.
+        </p>
+        <p class="warn">
+          <strong>VRAM does not pool.</strong> 32 GB and 24 GB are two machines. Nothing in this design adds
+          them, and the Runtime page says so.
+        </p>
       </section>
 
       <section id="t1">
