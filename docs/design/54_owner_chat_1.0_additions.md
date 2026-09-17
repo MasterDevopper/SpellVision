@@ -23,6 +23,12 @@ This document is the list. Do not start the walkthrough, MSI, or “1.0 complete
 
 ### T1 — Train: LoRAs and checkpoints, per family, hardware-smart
 
+> **MOVED TO 1.1.0 — owner directive, 2026-09-14.** T1 is no longer a 1.0 ship gate.
+> The requirement below stands as written; only its release does. Train stays hidden
+> from the v1 rail and the external Sohya_kk launcher remains the 1.0 answer. See
+> `CHANGELOG.md` `[1.1.0]` and Doc 56. The T1 row in Doc 55 already reads PARKED 1.1;
+> this section is what the row refers to.
+
 Wire Train as a real trainer for **LoRAs and checkpoints of each shipped family**, not only “launch Sohya if a path exists.”
 
 - Defaults **computed from this machine**: VRAM, host RAM, GPU count, whether PAIR / a second node is present.
@@ -101,7 +107,7 @@ T2I / I2I / T2V / I2V (and studios that hand off to them): sampler, scheduler, s
 
 ### T7 — Ship walkthrough (last)
 
-After **T1–T6 green** and **grade S** on the product surfaces:
+After **T2–T6 green** and **grade S** on the product surfaces (T1 moved to 1.1.0, owner 2026-09-14):
 
 - Deep peer-reviewed walkthrough **with pictures** (this document’s companion, or a new Doc 55).
 - States **1.0 requirements** (this list) — all green.
@@ -237,8 +243,7 @@ S-grade cockpit leftovers (overlay leftover AI chip, dest/SaveImage, T2V honesty
     → T2 workflow drop dialog + keys (Doc 46/52 productized)
     → T3 Models page (teachers, not a rewrite of the rail)
     → T6 dual-PC via ComfyUI-Distributed (feeds T1 defaults)
-    → T1 Train (family recipes + hardware/PAIR presets)
-    → T7 walkthrough + pictures  (requires S + T1–T6 green)
+    → T7 walkthrough + pictures  (requires S + T2–T6 green; T1 moved to 1.1.0)
 ```
 
 Installer / clean-machine (Doc 27 #11–13) still sits on the original Arc 3 path. This wave does **not** replace MSI; it **feeds** it.
