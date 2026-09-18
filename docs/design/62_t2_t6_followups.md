@@ -262,6 +262,28 @@ Gates verified independently: **ctest 44 of 45** (new `comfy_exit_guard` target,
 
 ---
 
+## 3ter. The rest of the failing suite — eleven down to four, 2026-09-18
+
+Four more fixes, each behind one of the long-standing failures. None was noise.
+
+**The first-run dialog reported a ComfyUI it never asked** (`607c4e0`). `FirstRunDialog.cpp:128` was `const bool comfyListening = false;` — hardcoded, so the first thing a new user saw was a false negative about their own install. Git explains the literal: `2b9e4bc` moved `probeComfyProtocol` off the GUI thread (it blocked first paint) and left the constant behind. Two defects, in fact, because **the Worker row had the identical shape** — NEEDS SETUP before a single ping. Both now open in a third badge state, CHECKING, distinct from starting and from not-ready, so the dialog states only what it has measured. And a **350 ms negative is no longer a verdict**: ComfyUI answers `/system_stats` off its own event loop, so a runtime importing torch or mid-render misses that budget routinely; a fast negative now buys a 2 s confirmation, and only the confirm may conclude a port is dead. The sibling test forbidding probes in the constructor is untouched and still green.
+
+**A sampler this build does not offer was forwarded** (`7ab352d`). `family_sampling_choices` injected the operating point's pinned sampler without intersecting it with the live `KSampler` list, so `sampling_for` forwarded `er_sde` to a build offering only `euler` and ComfyUI answered 400 — the request died *after* reaching the queue, which is precisely what that module's docstring says must not happen. The contract was already written; the code now matches it.
+
+**`i2v_source_image` was a live containment bypass, not a missing annotation** (`848dc0d`). It is the **sixth name for one keyframe**. `normalize_video_input_fields` reads all six as an `or`-chain and **writes the winner back into every one of them, including `input_image`** — and `worker_auth.request_violations` runs at the TCP entry (`worker_tcp.py:346`) **before** any handler normalises. So a caller who left the five gated names empty and put an arbitrary path in the ungated sixth passed containment and had that path copied into a gated field immediately after. Now in `INTEGRATION_LOCAL_INPUT_FIELDS` with the neighbours' policy, and a test states the general rule: **an alias set is only as gated as its least-gated member.**
+
+**Dataset stated a canvas nobody chose** (`adb1c97`), and removing it exposed a dead end — the spins live in `advancedBlock_`, hidden in Simple, so a Simple user was told "Choose a canvas size to generate." with no control to choose one. The 1024 had been masking that. **Owner ruling, asked directly: Simple inherits the T2I canvas and the page says so** (`1385fe2`). A read-only caption sits outside `advancedBlock_` and reads `Canvas: 1024 × 1024, from Text to Image`, or `Canvas: not set — set one on Text to Image, or turn on Advanced here.` when nothing knows one. A sentence, not a knob; Advanced still reveals the spins in place beside it. The page's payload is unchanged — it sends its own `0/0` — and the shell substitutes.
+
+### The fifth shape in the dead-code family
+
+`MainWindow::takeSizeIfUnset` already implemented that exact ruling and could not fire: `generateDataset` returned before any payload it could act on reached it. **Called, tested, and structurally unable to do anything** — a worse shape than the four "never called" functions, because `test_dataset_takes_t2i_canvas_when_dataset_size_is_zero` asserted the *call site exists*, which proves nothing about whether it runs.
+
+It is live now, and the way it was made testable is the reusable part: the merge block moved **verbatim** out of a lambda inside a lambda inside `registerDeferredPage` — reachable only by launching the GUI — into `spellvision::workers::mergeDatasetRequestFromCockpit`, the same unit and the same precedent its own header records for `buildWorkerGenerationRequest`. Ten behavioural cases now drive it, using **768×1344** throughout: a case where page and cockpit both happened to say 1024 would have proved nothing.
+
+**So the family is now five, and the rule for the sweep should widen:** four functions with no caller outside their own tests, and one with a caller that cannot be reached. A call-site assertion is not an execution assertion, and this repo has now paid for that distinction twice.
+
+---
+
 ## 4. Test-suite debt
 
 **4a. `test_godfile_split` — FIXED 2026-09-17** (`9f1f318`, `759ba55`). `ImageGenerationPage.cpp` went 3135 → **1008** lines. `buildUi()` moved whole into a new `qt_ui/ImageGenerationPage_ui.cpp` (2211 lines), which now owns widget construction: the three splitter panes, every card and control in them, the controllers created alongside the widgets they drive, and construction-time connections. The parent keeps what the page *does*. A second commit removed 65 lines the earlier preview split had left dead. The header gained nothing — it was a move, not a refactor. Fourteen Python checks had spelled `ImageGenerationPage.cpp` and asserted on lines that merely happened to live there; they were restated as properties (`cpp_source.family_text()`, `definition_body("buildUi")`) rather than repointed at the new filename, and two sweep baselines were rekeyed, not raised. **3e and 3f are unblocked.**
