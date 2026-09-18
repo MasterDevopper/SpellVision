@@ -764,9 +764,21 @@ def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None =
     live_schedulers = _object_info_choices(object_info, "scheduler")
     samplers = set(live_samplers) if live_samplers is not None else set(COMFY_KSAMPLER_CATALOG)
     schedulers = set(live_schedulers) if live_schedulers is not None else set(COMFY_SCHEDULER_CATALOG)
-    if default_sampler:
+    # The operating point's pin is a CLAIM about what this family wants, not evidence that this
+    # ComfyUI build offers it -- and adding it unconditionally made this resolver contradict its
+    # own contract ("the allow-list is intersected with what this ComfyUI build actually offers",
+    # comfy_graph_helpers.sampling_for). Measured: against an object_info offering only `euler`,
+    # family_sampling_choices("krea2") answered ['er_sde', 'euler'], so sampling_for saw er_sde in
+    # the allowed set, forwarded it, and ComfyUI answered 400 -- the request died AFTER it reached
+    # the queue, which is the one failure this resolver exists to prevent.
+    #
+    # With no live list there is nothing to intersect against: the catalog is the only evidence
+    # there is, and the pin is trusted there (that is the import-time and UI-snapshot path). When a
+    # live list IS known it is the authority, and a pin absent from it is simply not offered --
+    # sampling_for's `_pick` then warns and falls back, which is the honest outcome.
+    if default_sampler and live_samplers is None:
         samplers.add(default_sampler)
-    if default_scheduler:
+    if default_scheduler and live_schedulers is None:
         schedulers.add(default_scheduler)
 
     sampler_source = "operating_point" if table.get("sampler") else (

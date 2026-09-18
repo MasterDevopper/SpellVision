@@ -301,6 +301,25 @@ def test_sampling_choices_intersect_object_info():
     assert "normal" not in choices["schedulers"]
 
 
+def test_a_pinned_default_this_build_does_not_offer_is_not_smuggled_into_the_list():
+    """The intersection above held for everything EXCEPT the family's own pin, which was added back
+    after it -- so the one name most likely to be forwarded was the one name never checked.
+
+    krea2 pins ``er_sde``. Against a build offering only ``euler`` the resolver answered
+    ``['er_sde', 'euler']``, sampling_for read that as "allowed", forwarded it, and ComfyUI answered
+    400. The test is written against the RESOLVER rather than through sampling_for because this is
+    where the claim is made, and because the same list populates the cockpit's dropdown: offering a
+    name the build cannot run is the same defect one layer up.
+    """
+    thin = {"KSampler": {"input": {"required": {
+        "sampler_name": [["euler"], {}], "scheduler": [["simple"], {}]}}}}
+    choices = fop.family_sampling_choices("krea2", object_info=thin)
+    assert choices["samplers"] == ["euler"]
+    assert choices["schedulers"] == ["simple"]
+    # With no live list there is nothing to intersect against, so the pin is still trusted.
+    assert "er_sde" in fop.family_sampling_choices("krea2")["samplers"]
+
+
 def test_image_family_alias_resolves_allowlist():
     flux = fop.family_sampling_choices("flux")
     assert flux["default_sampler"] == "euler"
