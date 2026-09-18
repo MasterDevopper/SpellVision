@@ -309,6 +309,7 @@ private slots:
     // Doc 62 3e -- guidance had a consumer and no producer.
     void aPublishedGuidanceLandsInAControlAndSimpleGainsNoKnob();
     void aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob();
+    void simpleKeepsStepsAndCfgHiddenOnAVideoPage();
     // Doc 62 3f -- a preset and a model's defaults both write steps and CFG.
     void aPresetWinsOverALaterModelDefaultsApplication();
     void aFieldThePresetDoesNotSetStillGetsTheModelsValue();
@@ -736,6 +737,40 @@ void ModelDefaultsApplyTest::aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob()
     QVERIFY2(rowIsHidden(guidance),
              "Advanced revealed a Guidance box for a family that publishes none and whose builder "
              "never reads one");
+}
+
+void ModelDefaultsApplyTest::simpleKeepsStepsAndCfgHiddenOnAVideoPage()
+{
+    // `updateVideoStackModeUi` used to state `!isLtx && !isFlux3` alone, and it runs AFTER
+    // updateDisclosure() has hidden both rows -- so every video page showed steps and CFG in
+    // Simple for any family that is not LTX or FLUX.3. Simple is intent-level (CLAUDE.md §2).
+    //
+    // wan is the family that makes this bite: not LTX, not FLUX.3, so the old expression said
+    // "show" in both modes. Neither writer was wrong about its own half -- disclosure knew the
+    // mode and not the family, the video block knew the family and not the mode -- which is why
+    // nothing caught it.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v.safetensors");
+
+    page.updateDisclosure(false); // Simple
+    selectVideoCheckpoint(page, path, QStringLiteral("wan t2v"));
+
+    QSpinBox *steps = stepsSpinOf(page);
+    QDoubleSpinBox *cfg = cfgSpinOf(page);
+    QVERIFY2(steps && cfg, "the Steps/CFG controls were not found");
+
+    // Anchored: Simple really is hiding rows on this page, so "hidden" below means this gate
+    // fired rather than that the page showed nothing at all.
+    QVERIFY2(rowIsHidden(seedSpinOf(page)),
+             "the Seed row is showing in Simple; the anchor for this case is wrong");
+    QVERIFY2(rowIsHidden(steps), "Steps is showing in Simple on a video page");
+    QVERIFY2(rowIsHidden(cfg), "CFG is showing in Simple on a video page");
+
+    // The other direction, so this cannot be satisfied by a page that hides them always: Advanced
+    // reveals both for a family that uses them.
+    page.updateDisclosure(true);
+    QVERIFY2(!rowIsHidden(steps), "Steps stayed hidden in Advanced for wan, which uses it");
+    QVERIFY2(!rowIsHidden(cfg), "CFG stayed hidden in Advanced for wan, which uses it");
 }
 
 // --- Doc 62 3f: a preset and a model's defaults both write steps and CFG -------------------------

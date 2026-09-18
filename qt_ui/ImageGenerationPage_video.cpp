@@ -202,10 +202,19 @@ void ImageGenerationPage::updateVideoFamilyUi()
     }
 
     // Distilled LTX pins CFG 1 and ManualSigmas. FLUX.3 API ignores steps/cfg.
+    //
+    // `advanced_` is a FACTOR here and not a separate question. This block used to state
+    // `!isLtx && !isFlux3` alone, and it runs AFTER updateDisclosure() has already hidden both
+    // rows for Simple -- so every video page showed steps and CFG in Simple for any family that
+    // is not LTX or FLUX.3. Simple is intent-level by house rule (CLAUDE.md §2), and the leak was
+    // invisible because each writer is correct about its own half: disclosure knows the mode and
+    // not the family, this knows the family and not the mode. A control's visibility has ONE
+    // answer, so both halves belong in the same expression.
+    const bool samplingRowsApply = advanced_ && !isLtx && !isFlux3;
     if (stepsRow_)
-        stepsRow_->setVisible(!isLtx && !isFlux3);
+        stepsRow_->setVisible(samplingRowsApply);
     if (cfgRow_)
-        cfgRow_->setVisible(!isLtx && !isFlux3);
+        cfgRow_->setVisible(samplingRowsApply);
 
     // Hunyuan T2V is FluxGuidance + BasicGuider. Negative has nowhere to land.
     if (negativeRow_)
