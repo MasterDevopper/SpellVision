@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 from model_intelligence import (
     card_settings,
     hashing,
+    hf_lookup,
     recommended,
     refresh,
     settings_backfill,
@@ -451,3 +452,70 @@ def test_a_dry_run_reports_what_it_would_write_and_writes_nothing(tmp_path: Path
 
     assert result["updated"] == 1
     assert sidecar.read(weight)["recommended"]["steps"]["provenance"] == "table:family-default"
+
+
+# --- a card states sampling, never a canvas ------------------------------------------------------
+#
+# Measured over the live library on 2026-09-18, after the arm started reading cards at scale: every
+# canvas value the snippet route produced was wrong.
+#
+#   LTX23_video_vae_bf16   width 50             (`width` matched prose that is not a canvas)
+#   wan2.2_vae             512x512, 24 frames   (a VAE repo's demo snippet)
+#   wan2.2_*_pov_* LoRAs   854x480, 16f @ 8fps  (a LoRA pack's demo snippet)
+#
+# `num_inference_steps=28` is the author stating how to sample this weight. `height=512` beside it
+# is boilerplate from the diffusers template, copied into thousands of cards.
+
+
+def test_a_card_snippet_states_sampling_and_not_a_canvas():
+    body = """```python
+pipe(prompt, num_inference_steps=28, guidance_scale=3.5, height=512, width=512, num_frames=81, fps=24)
+```"""
+    out = hf_lookup.settings_from_readme(body)
+    assert out["steps"]["value"] == 28
+    assert out["guidance"]["value"] == 3.5
+    for canvas in ("width", "height", "frames", "fps"):
+        assert canvas not in out, f"a card snippet claimed {canvas}, which it cannot honestly state"
+
+
+def test_a_sidecar_that_already_claims_a_card_canvas_is_pruned(tmp_path: Path):
+    """The READ side of the same fact, so a file written by the version that could claim a canvas
+    stops displaying one -- no schema bump, no re-running the 58-minute refresh. Only `card:*` is
+    touched: a site-stated canvas is exactly the evidence this arc exists to surface."""
+    weight, _path = _sidecar(
+        tmp_path, "LTX23_video_vae_bf16.safetensors",
+        recommended_block={
+            "steps": {"value": 8, "provenance": "card:prose-regex",
+                      "confidence": 1.0, "n": None, "total": None},
+            "width": {"value": 50, "provenance": "card:snippet-regex",
+                      "confidence": 1.0, "n": None, "total": None},
+            "height": {"value": 512, "provenance": "site:image-meta-mode",
+                       "confidence": 1.0, "n": 5, "total": 5},
+        })
+    result = settings_backfill.SettingsBackfillJob([tmp_path], hf=RecordingHf()).run()
+
+    assert result["pruned"] == 1
+    block = sidecar.read(weight)["recommended"]
+    assert "width" not in block
+    assert block["steps"]["value"] == 8                      # a card MAY state sampling
+    assert block["height"]["provenance"] == "site:image-meta-mode"  # the site MAY state a canvas
+
+
+def test_the_prune_runs_even_on_a_sidecar_the_gate_skips(tmp_path: Path):
+    """It costs no request, so a pass cleans every file -- including the 587 the gate skips and the
+    ones a 429 stops short of. A cleanup that only reached the weights being fetched would leave
+    exactly the files nobody is going to fetch again."""
+    weight, _path = _sidecar(
+        tmp_path, "already_known.safetensors",
+        recommended_block={
+            "steps": {"value": 30, "provenance": "site:image-meta-mode",
+                      "confidence": 1.0, "n": 5, "total": 5},
+            "fps": {"value": 8, "provenance": "card:snippet-regex",
+                    "confidence": 1.0, "n": None, "total": None},
+        })
+    hf = RecordingHf()
+    result = settings_backfill.SettingsBackfillJob([tmp_path], hf=hf).run()
+
+    assert (result["pruned"], result["skipped_has_site"]) == (1, 1)
+    assert hf.searched == [] and hf.fetched == []
+    assert "fps" not in sidecar.read(weight)["recommended"]

@@ -54,6 +54,20 @@ from model_intelligence import hf_candidates, hf_lookup
 # nothing. See `CardReader._mirror_with_a_card` for the measurement that put this here.
 MAX_MIRROR_REPOS = 6
 
+# What a CARD is able to state about a weight. Sampling, never a canvas.
+#
+# `hf_lookup._SNIPPET_KEYS` carries the write-side reason (a diffusers snippet's `height=512` is
+# template boilerplate, not a statement about this weight, and every canvas value the route produced
+# over the live library was wrong). This is the same fact expressed where a READER can use it:
+# `settings_backfill.apply_to_payload` prunes a card-provenanced entry for any field outside this
+# set, so a sidecar written by the version that could claim a canvas stops displaying one without a
+# schema bump and without anyone re-running a refresh.
+#
+# The same shape as `resolve._apply_quorum`: a gate the writer applies is ALSO applied on the read,
+# from the evidence the entry carries about itself, so a file written by any version resolves the
+# same way.
+CARD_STATABLE_FIELDS: frozenset[str] = frozenset({"steps", "cfg", "guidance", "shift"})
+
 
 def has_site_settings(block: dict[str, Any] | None) -> bool:
     """Whether a `recommended` block carries anything the SITE said about this weight.

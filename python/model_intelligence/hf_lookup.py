@@ -6,7 +6,8 @@ flag adds `siblings[].lfs.sha256`, and without it `siblings` carries filenames o
 
 For settings, the diffusers snippet in a card is the most reliable machine-readable source --
 `num_inference_steps=50, guidance_scale=3.5` is what the authors actually run -- so it outranks
-the prose regexes, which are a genuine guess.
+the prose regexes, which are a genuine guess. SAMPLING kwargs only: see `_SNIPPET_KEYS` for the
+measurement that took the canvas fields back out of it.
 """
 from __future__ import annotations
 
@@ -36,18 +37,30 @@ class HfThrottled(RuntimeError):
     correctly dropped from 38/79 to 25/79 for exactly this reason, and reported no errors.
     """
 
+# SAMPLING kwargs only. `height`, `width`, `num_frames` and `fps` were here until 2026-09-18 and
+# every value they produced over the live library was wrong:
+#
+#   LTX23_video_vae_bf16   width 50      (the regex found `width` in prose that is not a canvas)
+#   wan2.2_vae             512x512, 24 frames   (a VAE repo's demo snippet)
+#   wan2.2_*_pov_* LoRAs   854x480, 16 frames @ 8 fps   (a LoRA pack's demo snippet)
+#
+# The distinction is real rather than a reaction to four bad rows. `num_inference_steps=28` in a
+# card's snippet is the author STATING how to sample this weight; `height=512` in the same snippet
+# is boilerplate from the diffusers template, copied into thousands of cards, and it describes the
+# demo the author happened to render rather than a canvas the model wants. The prose regexes below
+# have never claimed a canvas for the same reason.
+#
+# `recommended.FIELDS` still carries width/height/frames/fps -- the SITE's example images state
+# them honestly (that is `site:image-meta-mode`, read from real renders of this model) and so does
+# `family_seed_table`. It is the CARD-snippet route that cannot tell a canvas from a template.
 _SNIPPET_KEYS = {
     "num_inference_steps": "steps",
     "guidance_scale": "guidance",
     "true_cfg_scale": "cfg",
     "shift": "shift",
-    "num_frames": "frames",
-    "fps": "fps",
-    "height": "height",
-    "width": "width",
 }
 _SNIPPET_RE = re.compile(
-    r"\b(num_inference_steps|guidance_scale|true_cfg_scale|shift|num_frames|fps|height|width)"
+    r"\b(num_inference_steps|guidance_scale|true_cfg_scale|shift)"
     r"\s*=\s*([0-9]+(?:\.[0-9]+)?)"
 )
 _PROSE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

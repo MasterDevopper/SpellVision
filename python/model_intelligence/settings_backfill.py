@@ -58,6 +58,32 @@ def _source_already_named(payload: dict[str, Any], repo: str) -> bool:
     return False
 
 
+def prune_card_claims(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Drop `card:*` entries for a field a card cannot honestly state. Never mutates the argument.
+
+    A sidecar written before 2026-09-18 can carry a card-sourced `width`, `height`, `frames` or
+    `fps`, because `hf_lookup._SNIPPET_KEYS` read those out of the diffusers snippet. Measured over
+    the live library, every value that route produced was wrong -- `width 50` on an LTX VAE, a wan
+    VAE's demo `512x512`, a LoRA pack's `854x480 @ 8fps` -- because a snippet's canvas is template
+    boilerplate rather than a statement about the weight.
+
+    The write side no longer reads them. This is the read side of the same fact, so a file already
+    on disk stops displaying a number under a caption naming the card it came from, without a
+    schema bump and without re-running the 58-minute refresh. Only a `card:*` entry is touched: a
+    site-stated or user-set canvas is exactly the evidence this arc exists to surface.
+    """
+    block = payload.get("recommended") or {}
+    dropped = [field for field, entry in block.items()
+               if isinstance(entry, dict)
+               and str(entry.get("provenance") or "").startswith("card:")
+               and field not in card_settings.CARD_STATABLE_FIELDS]
+    if not dropped:
+        return payload, []
+    out = dict(payload)
+    out["recommended"] = {f: e for f, e in block.items() if f not in dropped}
+    return out, dropped
+
+
 def apply_to_payload(payload: dict[str, Any], card: dict[str, Any] | None,
                      settings: dict[str, dict[str, Any]] | None) -> tuple[dict[str, Any], list[str]]:
     """Return (payload, the fields actually changed). Never mutates the argument."""
@@ -117,7 +143,7 @@ class SettingsBackfillJob:
         files = list(self.files) if self.files is not None else backfill.sidecar_files(self.roots)
         total = len(files)
         examined = skipped_has_site = no_digest = no_repo = no_card_settings = 0
-        lookup_failed = updated = unchanged = 0
+        lookup_failed = updated = unchanged = pruned = 0
         cancelled = False
         errors: list[dict[str, str]] = []
 
@@ -134,6 +160,17 @@ class SettingsBackfillJob:
             if not isinstance(payload, dict):
                 errors.append({"path": str(path), "error": "sidecar is not an object"})
                 continue
+
+            # The prune runs FIRST and costs no request, so every sidecar is cleaned on any pass
+            # -- including the 587 the gate below skips and the ones a 429 will stop short of.
+            payload, dropped = prune_card_claims(payload)
+            if dropped:
+                pruned += 1
+                if not self.dry_run:
+                    try:
+                        _write(path, payload)
+                    except OSError as exc:
+                        errors.append({"path": str(path), "error": f"write: {exc}"})
 
             if not card_settings.needs_card_settings(payload.get("recommended")):
                 skipped_has_site += 1
@@ -187,6 +224,7 @@ class SettingsBackfillJob:
             "examined": examined,
             "updated": updated,
             "unchanged": unchanged,
+            "pruned": pruned,
             "skipped_has_site": skipped_has_site,
             "no_digest": no_digest,
             "no_repo": no_repo,
