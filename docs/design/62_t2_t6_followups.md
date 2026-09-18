@@ -242,6 +242,26 @@ The refresh now fetches the parent for every hit, memoised per model id on the c
 
 ---
 
+## 3bis. The exit teardown could kill a running ComfyUI — FIXED 2026-09-18 (`f975e17`)
+
+Three of the eleven long-standing Python failures were **one defect**, and the only one in that set that destroyed work.
+
+`MainWindow::tearDownComfyOnExit` decided "is ComfyUI busy?" by walking **SpellVision's own `QueueManager`** — the jobs this app submitted and still remembers — and never asked ComfyUI. Work the server was genuinely doing was invisible whenever this app had not submitted it: a render from ComfyUI's own web UI, one from a second SpellVision, anything from before a queue reset. The next line was `terminate()`.
+
+**It is not true that the guard was never wired, and I briefed it wrongly.** `4acf804` (2026-09-09, *"fix(quit): do not probe Comfy /queue for 500ms on aboutToQuit"*) **deliberately deleted it** — the diff is nearly line-for-line what has now been restored — and pinned the deletion with `assert "probeComfyQueueState" not in tear` in `test_first_run_honesty::test_launch_and_quit_do_not_block_the_window`.
+
+**So the suite carried two tests in direct contradiction for nine days.** Three said the probe must be there; one said it must not. Both could not hold, and the three were simply left red — which is how a red suite becomes background noise. That is the real lesson here, and it is §4d's cost made concrete: the pre-commit hook runs only the ratchet-marked subset, so nothing ever forced the contradiction to be resolved.
+
+**The latency complaint behind the deletion was real** — quit paid a 500 ms budget with the window still on screen. The resolution keeps both intents rather than picking a winner: the teardown now calls `hide()` **before** it loads the profile or touches the network (synchronous on Windows), so the budget is spent by a process with nothing on screen. The rewritten assertion holds *that property* — hide precedes the probe, the budget is a named constant, it is passed explicitly, and it is ≤ 500 ms — instead of holding the removal. It is strictly stronger than the sentence it replaced, which only said "no probe".
+
+**What each state does now:** *not ours* returns before anything is probed or logged; *our own queue Busy* detaches without spending a probe at all (it is trustworthy in exactly one direction — its **negative** was the bug); *Busy* detaches; *Unknown* detaches with its own log line; *Idle*, verified by the server rather than by our memory, is the only path that still reaches `terminate()`. `Unknown` covers a refused connection, no answer in budget, an error status, missing queue arrays and an unparseable body — the same "could not check is not checked and fine" distinction `223e466` settled for the drop path.
+
+Gates verified independently: **ctest 44 of 45** (new `comfy_exit_guard` target, 9 cases; only the pre-existing `shell_layout` SEGFAULT fails) and **Python 8 failures, exactly the expected names** — down from eleven, with no set swap.
+
+**A sweep rule worth building, described here rather than built:** for every free function declared in a `qt_ui/**/*.h` namespace, and every public function in a `python/` module, count call sites **excluding its own definition and excluding `tests/`**; zero is a violation. Excluding `tests/` is the whole trick — **all four** of this arc's dead functions had tests, and the test is exactly what made them look alive: `hf_lookup`, `CivitaiClient.model()`, `probeComfyQueueState`, and the drop path's stale fallback. This rule would have tripped on `probeComfyQueueState` the day `4acf804` orphaned it.
+
+---
+
 ## 4. Test-suite debt
 
 **4a. `test_godfile_split` — FIXED 2026-09-17** (`9f1f318`, `759ba55`). `ImageGenerationPage.cpp` went 3135 → **1008** lines. `buildUi()` moved whole into a new `qt_ui/ImageGenerationPage_ui.cpp` (2211 lines), which now owns widget construction: the three splitter panes, every card and control in them, the controllers created alongside the widgets they drive, and construction-time connections. The parent keeps what the page *does*. A second commit removed 65 lines the earlier preview split had left dead. The header gained nothing — it was a move, not a refactor. Fourteen Python checks had spelled `ImageGenerationPage.cpp` and asserted on lines that merely happened to live there; they were restated as properties (`cpp_source.family_text()`, `definition_body("buildUi")`) rather than repointed at the new filename, and two sweep baselines were rekeyed, not raised. **3e and 3f are unblocked.**
