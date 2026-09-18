@@ -112,6 +112,7 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/ImageGenerationPage_preview.cpp
     qt_ui/ImageGenerationPage_video.cpp
     qt_ui/ImageGenerationPage_catalog.cpp
+    qt_ui/ImageGenerationPage_ui.cpp
     qt_ui/generation/CockpitWidgetKit.cpp
     qt_ui/generation/CockpitWidgetKit.h
 
@@ -266,6 +267,8 @@ qt_add_library(SpellVisionCore STATIC
     qt_ui/workflows/ModelResolutionDialog.h
     qt_ui/workflows/WorkflowDownloadDialog.cpp
     qt_ui/workflows/WorkflowDownloadDialog.h
+    qt_ui/workflows/WorkflowCompileVerdict.cpp
+    qt_ui/workflows/WorkflowCompileVerdict.h
     qt_ui/workflows/WorkflowDraftBuilder.cpp
     qt_ui/workflows/WorkflowDraftBuilder.h
     qt_ui/workflows/WorkflowDropCoordinator.cpp
@@ -723,6 +726,18 @@ qt_add_executable(test_workflow_drop_coordinator tests/cpp/test_workflow_drop_co
 target_link_libraries(test_workflow_drop_coordinator PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME workflow_drop_coordinator COMMAND test_workflow_drop_coordinator)
 
+# Doc 62 3q: Flows built `record.compiledPromptPath` out of the import DIRECTORY, unconditionally,
+# on every refresh -- it had never seen a compile -- and handed that path to the draft builder, which
+# reads values out of it and puts them in the cockpit. A dangling-id check does not catch the files
+# that matter: the seven stale prompt_api.json artefacts on this box are well-formed and carry a
+# WIDTH in a `batch_size` field. So the case that matters most here asserts a NEGATIVE against a real
+# one -- the file is on disk, it would build a perfectly good-looking draft, and after a refusal it
+# is still not read. Driven by real compile replies read off python/workflow_library_commands.py and
+# real artefacts under runtime/imported_workflows: no worker, no socket, no ComfyUI.
+qt_add_executable(test_workflow_compile_verdict tests/cpp/test_workflow_compile_verdict.cpp)
+target_link_libraries(test_workflow_compile_verdict PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME workflow_compile_verdict COMMAND test_workflow_compile_verdict)
+
 # W5 Task 1: the Models page's tabs come from the classifier, not from a path substring. The old
 # detectType answered with six names matched against the path, so clip_vision and text_encoders
 # shared one "Encoder" bucket and an embedding had no kind at all -- it sat under "Model" beside
@@ -790,6 +805,7 @@ set_target_properties(test_responsive_matrix test_worker_response_parser test_sa
                       test_runtime_probe test_image_preview_controller test_model_defaults_apply
                       test_optimization_panel test_workflow_mode_resolver test_window_drop_target
                       test_workflow_draft_builder test_workflow_drop_coordinator
+                      test_workflow_compile_verdict
                       test_model_kind_tabs test_model_card_sidecar test_model_inspector
                       test_model_refresh_action
                       test_endpoint_registry test_endpoint_routing test_endpoint_panel

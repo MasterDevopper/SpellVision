@@ -93,6 +93,57 @@ QJsonObject compileReplyFor(const QString &slug)
     return reply;
 }
 
+// What compile_workflow_prompt replies when the converter REFUSES: a null path on purpose, the
+// classes it could not resolve, and the packs the workflow itself declares for them. This is the
+// reply shape cd6d5ba introduced -- read off python/workflow_library_commands.py, not guessed.
+QJsonObject refusedCompileReply()
+{
+    QJsonObject pack;
+    pack.insert(QStringLiteral("pack"), QStringLiteral("ComfyUI_Comfyroll_CustomNodes"));
+    pack.insert(QStringLiteral("repo_url"),
+                QStringLiteral("https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes"));
+    pack.insert(QStringLiteral("version"), QStringLiteral("d78b780"));
+    pack.insert(QStringLiteral("classes"), QJsonArray{QStringLiteral("CR Text Concatenate")});
+
+    const QString refusal = QStringLiteral(
+        "Cannot convert UI-graph workflow: object_info has no schema for node class(es): "
+        "CR Text Concatenate. Install the missing custom nodes first.\n"
+        "The workflow names the pack(s) it needs:\n"
+        "  - ComfyUI_Comfyroll_CustomNodes "
+        "(https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes) -- supplies CR Text Concatenate");
+
+    QJsonObject reply;
+    reply.insert(QStringLiteral("type"), QStringLiteral("workflow_compile_result"));
+    reply.insert(QStringLiteral("ok"), false);
+    reply.insert(QStringLiteral("object_info_available"), true);
+    reply.insert(QStringLiteral("graph_format"), QStringLiteral("comfy_ui_graph"));
+    reply.insert(QStringLiteral("compiled_prompt_path"), QJsonValue());
+    reply.insert(QStringLiteral("missing_classes"), QJsonArray{QStringLiteral("CR Text Concatenate")});
+    reply.insert(QStringLiteral("missing_packs"), QJsonArray{pack});
+    reply.insert(QStringLiteral("errors"), QJsonArray{refusal});
+    reply.insert(QStringLiteral("dangling_links"), QJsonArray());
+    reply.insert(QStringLiteral("reason"), refusal);
+    reply.insert(QStringLiteral("node_count"), 0);
+    return reply;
+}
+
+// What compile_workflow_prompt replies when ComfyUI is DOWN. Read off
+// python/workflow_library_commands.py: `ok:false`, the flag, an empty missing_classes (it must not
+// claim to know what is missing), and -- since nothing about the FILE needs a schema -- what kind of
+// graph it is and where it lives.
+QJsonObject unreachableCompileReply()
+{
+    QJsonObject reply;
+    reply.insert(QStringLiteral("type"), QStringLiteral("workflow_compile_result"));
+    reply.insert(QStringLiteral("ok"), false);
+    reply.insert(QStringLiteral("object_info_available"), false);
+    reply.insert(QStringLiteral("graph_format"), QStringLiteral("comfy_ui_graph"));
+    reply.insert(QStringLiteral("missing_classes"), QJsonArray());
+    reply.insert(QStringLiteral("reason"),
+                 QStringLiteral("ComfyUI is not reachable, so node availability could not be checked."));
+    return reply;
+}
+
 QJsonObject readinessReply(bool ready, const QString &summary = QString())
 {
     QJsonObject reply;
@@ -196,6 +247,16 @@ private slots:
     void acceptingTheDownloadReimportsWithConsentAndUsesTheRETRYsAnswer();
     void aFailedImportRefusesInsteadOfOpeningAnEmptyDraft();
     void packsAlreadyOnDiskAreNotMissing();
+    void aRefusedCompileYieldsNoPathEvenWithAStalePromptSittingInTheImportRoot();
+    void aRefusedCompileRefusesTheDropWithThePackItNamed();
+    void anOldWorkerThatWroteAPathBesideItsRefusalIsStillRefused();
+    void anUnreachableSchemaOpensTheDropInsteadOfRefusingIt();
+    void theOfflineDropNeverReadsThePromptApiJsonSittingRightThere();
+    void offlineSubmissionStaysClosedEvenWhenReadinessSaysReady();
+    void aRefusalIsStillARefusalWhenTheSchemaFlagAlsoSaysUnreachable();
+    void anOfflineApiPromptGraphResolvesToTheGraphAndNotToTheArtefact();
+    void anApiPromptGraphStillResolvesToTheImportsOwnWorkflowPath();
+    void aReplyThatCarriesNothingAtAllStillFallsBackAndSaysSoInTheLog();
 
 private:
     QString slug_ = QStringLiteral("asteral-json"); // a real owner t2i workflow with a compiled prompt
@@ -594,6 +655,257 @@ void WorkflowDropCoordinatorTest::packsAlreadyOnDiskAreNotMissing()
     QJsonObject noPlan = importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image"));
     noPlan.insert(QStringLiteral("missing_custom_nodes"), QJsonArray{QStringLiteral("SomeNode")});
     QCOMPARE(WorkflowDropCoordinator::missingNodeNames(noPlan), QStringList{QStringLiteral("SomeNode")});
+}
+
+// --- 8: a refusal is not a silence ---------------------------------------------------------------
+//
+// compiledPromptPathFor fell back to whatever prompt_api.json sat in the import root whenever the
+// reply carried no path. That was written when "no path" meant "the worker did not answer". Since
+// the converter began refusing a graph whose classes it cannot resolve, "no path" ALSO means "the
+// worker just said this must not be compiled" -- so the fallback fired exactly then, and answered
+// with the older file from the same directory. Seven of those exist on this box, carrying a width
+// in a batch_size field. They are well-formed JSON, so nothing downstream rejects them.
+
+void WorkflowDropCoordinatorTest::aRefusedCompileYieldsNoPathEvenWithAStalePromptSittingInTheImportRoot()
+{
+    // The whole point: the file IS there, and it still is not used.
+    QVERIFY2(hasCompiledPrompt(slug_), "this case is vacuous without a prompt_api.json to fall back to");
+
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(refusedCompileReply(), importReply);
+
+    QVERIFY2(compiled.path.isEmpty(), qPrintable(compiled.path));
+    QVERIFY(!compiled.fromStaleFallback);
+    QVERIFY(!compiled.refusal.isEmpty());
+    QCOMPARE(WorkflowDropCoordinator::compiledPromptPathFor(refusedCompileReply(), importReply), QString());
+}
+
+void WorkflowDropCoordinatorTest::aRefusedCompileRefusesTheDropWithThePackItNamed()
+{
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = refusedCompileReply();
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    QSignalSpy refused(&coordinator, &WorkflowDropCoordinator::refused);
+
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    // No page, and emphatically no draft built from the stale file.
+    QCOMPARE(shell.opens, 0);
+    QCOMPARE(refused.count(), 1);
+    QCOMPARE(shell.refusals.size(), 1);
+
+    // The Python side already resolved the pack to a repository URL. Swallowing that and showing
+    // "no compiled prompt is available" is how the user ends up with nowhere to go.
+    const QString message = shell.refusals.first();
+    QVERIFY2(message.contains(QStringLiteral("CR Text Concatenate")), qPrintable(message));
+    QVERIFY2(message.contains(QStringLiteral("ComfyUI_Comfyroll_CustomNodes")), qPrintable(message));
+    QVERIFY2(message.contains(QStringLiteral("https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes")),
+             qPrintable(message));
+
+    // And no readiness round trip after a refusal: there is nothing left to be ready for.
+    QCOMPARE(worker.commands, (QStringList{QStringLiteral("import_workflow"),
+                                           QStringLiteral("compile_workflow_prompt")}));
+}
+
+void WorkflowDropCoordinatorTest::anOldWorkerThatWroteAPathBesideItsRefusalIsStillRefused()
+{
+    // Before the worker learned to refuse, compile_workflow_prompt wrote prompt_api.json
+    // UNCONDITIONALLY and replied ok:false beside it. Such a reply names a path and refuses in the
+    // same breath, and the file it names is the rotten one -- so the refusal is read first.
+    QJsonObject oldReply = compileReplyFor(slug_);
+    oldReply.insert(QStringLiteral("ok"), false);
+    oldReply.insert(QStringLiteral("missing_classes"), QJsonArray{QStringLiteral("CR Text Concatenate")});
+
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(oldReply, importReply);
+
+    QVERIFY2(compiled.path.isEmpty(), qPrintable(compiled.path));
+    QVERIFY2(compiled.refusal.contains(QStringLiteral("CR Text Concatenate")), qPrintable(compiled.refusal));
+}
+
+void WorkflowDropCoordinatorTest::anUnreachableSchemaOpensTheDropInsteadOfRefusingIt()
+{
+    // object_info_available:false is the worker saying it COULD NOT CHECK. It was briefly treated as
+    // a refusal, which is defensible and wrong: "we could not check" is a fact about the machine and
+    // "we checked and it is broken" is a fact about the graph, and only the second has nothing to
+    // show. The workflow is exactly as readable as it was a minute ago, so the page opens.
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = unreachableCompileReply();
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(shell.opens, 1);
+    QVERIFY2(shell.refusals.isEmpty(), qPrintable(shell.refusals.join(QStringLiteral(" | "))));
+    QCOMPARE(shell.openedMode, QStringLiteral("t2i"));
+
+    // A warning, in the user's words, and not an error.
+    bool warned = false;
+    for (const QJsonValue &value : shell.openedDraft.value(QStringLiteral("warnings")).toArray())
+        warned = warned || value.toString().contains(QStringLiteral("ComfyUI is offline"));
+    QVERIFY2(warned, "an offline open has to say why it could not be checked");
+}
+
+void WorkflowDropCoordinatorTest::theOfflineDropNeverReadsThePromptApiJsonSittingRightThere()
+{
+    // The property that must survive widening the path: opening offline is NOT the door the stale
+    // artefact comes back through. The file is on disk, it would build a perfectly healthy-looking
+    // draft if anyone read it (test_workflow_compile_verdict asserts exactly that), and it is not
+    // read. Values offline come from the SOURCE graph or from nowhere.
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(unreachableCompileReply(), importReply);
+
+    QVERIFY2(compiled.path.isEmpty(), qPrintable(compiled.path));
+    QVERIFY(compiled.refusal.isEmpty());
+    QVERIFY(!compiled.unverifiedReason.isEmpty());
+    QVERIFY(!compiled.fromStaleFallback);
+
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = importReply;
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = unreachableCompileReply();
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(shell.opens, 1);
+    // Present, and still unused -- the difference between "no draft was produced" and "no draft was
+    // produced FROM IT".
+    QVERIFY(hasCompiledPrompt(slug_));
+    const QString carried =
+        shell.openedDraft.value(QStringLiteral("compiled_prompt_path")).toString();
+    QVERIFY2(!carried.contains(QStringLiteral("prompt_api.json")), qPrintable(carried));
+    // And none of that file's values arrived by another route: a UI graph offline yields nothing.
+    QVERIFY(!shell.openedDraft.contains(QStringLiteral("steps")));
+    QVERIFY(!shell.openedDraft.contains(QStringLiteral("sampler")));
+    QVERIFY(!shell.openedDraft.contains(QStringLiteral("prompt")));
+}
+
+void WorkflowDropCoordinatorTest::offlineSubmissionStaysClosedEvenWhenReadinessSaysReady()
+{
+    // Assert the OUTCOME, not a property beside it. Readiness answers READY here -- the models are
+    // all on disk, which is a true statement and not a verdict on a graph nobody compiled -- and
+    // submission still has to be closed on the draft the cockpit actually reads.
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = unreachableCompileReply();
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(shell.opens, 1);
+    QVERIFY(shell.openedDraft.contains(QStringLiteral("safe_to_submit")));
+    QCOMPARE(shell.openedDraft.value(QStringLiteral("safe_to_submit")).toBool(true), false);
+}
+
+void WorkflowDropCoordinatorTest::aRefusalIsStillARefusalWhenTheSchemaFlagAlsoSaysUnreachable()
+{
+    // The regression guard, and the important one. Widening the offline path must not become a way
+    // for a graph with unresolvable classes to open: a reply that NAMES a fault has checked
+    // something, whatever it says about reachability, and that is still a refusal with no page.
+    QJsonObject reply = refusedCompileReply();
+    reply.insert(QStringLiteral("object_info_available"), false);
+
+    QVERIFY(WorkflowDropCoordinator::schemaUnavailableWarning(reply).isEmpty());
+
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = withReadiness(
+        importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = reply;
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(shell.opens, 0);
+    QCOMPARE(shell.refusals.size(), 1);
+    QVERIFY2(shell.refusals.first().contains(QStringLiteral("CR Text Concatenate")),
+             qPrintable(shell.refusals.first()));
+}
+
+void WorkflowDropCoordinatorTest::anOfflineApiPromptGraphResolvesToTheGraphAndNotToTheArtefact()
+{
+    // Offline, the worker can still say WHAT the file is -- that needs no schema -- and a graph that
+    // is already an API prompt is readable without one. So this case fills the cockpit properly
+    // while still being unverified, and the path it names is the imported graph, never the artefact.
+    QJsonObject reply = unreachableCompileReply();
+    reply.insert(QStringLiteral("graph_format"), QStringLiteral("comfy_api_prompt"));
+
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(reply, importReply);
+
+    QCOMPARE(compiled.path, QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("workflow.json")));
+    QVERIFY(compiled.refusal.isEmpty());
+    QVERIFY(!compiled.unverifiedReason.isEmpty());
+    QVERIFY2(!compiled.path.contains(QStringLiteral("prompt_api.json")), qPrintable(compiled.path));
+}
+
+void WorkflowDropCoordinatorTest::anApiPromptGraphStillResolvesToTheImportsOwnWorkflowPath()
+{
+    // Unchanged, and asserted because it is the one legitimate reply with a null path: the graph WAS
+    // an API prompt, so nothing was compiled and the source workflow is the prompt.
+    QJsonObject apiPrompt;
+    apiPrompt.insert(QStringLiteral("type"), QStringLiteral("workflow_compile_result"));
+    apiPrompt.insert(QStringLiteral("ok"), true);
+    apiPrompt.insert(QStringLiteral("object_info_available"), true);
+    apiPrompt.insert(QStringLiteral("graph_format"), QStringLiteral("comfy_api_prompt"));
+    apiPrompt.insert(QStringLiteral("missing_classes"), QJsonArray());
+    apiPrompt.insert(QStringLiteral("compiled_prompt_path"), QJsonValue());
+
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(apiPrompt, importReply);
+
+    QCOMPARE(compiled.path,
+             QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("workflow.json")));
+    QVERIFY(compiled.refusal.isEmpty());
+    QVERIFY(!compiled.fromStaleFallback);
+}
+
+void WorkflowDropCoordinatorTest::aReplyThatCarriesNothingAtAllStillFallsBackAndSaysSoInTheLog()
+{
+    // The one case the fallback is still for: a worker older than every field above, which answers
+    // nothing at all. The artefact is still a guess, so it is announced rather than used silently.
+    const QJsonObject importReply =
+        withReadiness(importReplyFor(slug_, QStringLiteral("t2i"), QStringLiteral("image")), true);
+    const auto compiled = WorkflowDropCoordinator::compiledPromptFor(QJsonObject(), importReply);
+
+    QCOMPARE(compiled.path, QDir(importedWorkflowDir(slug_)).filePath(QStringLiteral("prompt_api.json")));
+    QVERIFY(compiled.refusal.isEmpty());
+    QVERIFY(compiled.fromStaleFallback);
+
+    FakeWorker worker;
+    worker.replies[QStringLiteral("import_workflow")] = importReply;
+    worker.replies[QStringLiteral("compile_workflow_prompt")] = QJsonObject();
+
+    Shell shell;
+    WorkflowDropCoordinator coordinator;
+    coordinator.bind(bindingsFor(worker, shell));
+    coordinator.handleDroppedWorkflow(QStringLiteral("D:/drops/asteral.json"));
+
+    QCOMPARE(shell.opens, 1);
+    bool announced = false;
+    for (const QString &line : shell.log)
+        announced = announced || line.contains(QStringLiteral("recompile the workflow"));
+    QVERIFY2(announced, "a fallback to a file of unknown age has to say so, not happen silently");
 }
 
 QTEST_MAIN(WorkflowDropCoordinatorTest)

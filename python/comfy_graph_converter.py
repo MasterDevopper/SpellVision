@@ -28,8 +28,15 @@ assume positions. Two schema facts drive the mapping:
 Scope / known limits (reported, not silently wrong): pure-UI and non-executing nodes (Note, MarkdownNote,
 muted ``mode==2``, bypassed ``mode==4``) are dropped; a link whose source was dropped leaves that input
 unset. Reroute / GetNode-SetNode pass-through and bypass rewiring are NOT resolved here -- workflows that
-lean on them may convert incompletely (they still bind, but may not render). Nodes ``object_info`` does
-not know (missing custom nodes) raise a clear error rather than emitting a malformed node.
+lean on them may convert incompletely (they still bind, but may not render).
+
+A node whose class ``object_info`` does not know used to be omitted while every link INTO it stayed,
+which produced a prompt ComfyUI rejects with ``KeyError: '<id>'`` raised inside ``validate_inputs``
+-- an id the user has never seen, and no word anywhere about a missing pack. Ten of the imported
+library's UI graphs converted that way and nothing reported a thing. Now ``comfy_graph_links``
+checks the FINISHED prompt for references to ids it does not contain and REFUSES, naming the packs
+the workflow itself declares (``comfy_missing_packs``) -- the same refusal the strict submit path
+has always made, now made by the non-strict compile path too.
 """
 from __future__ import annotations
 
@@ -41,10 +48,23 @@ from typing import Any
 class ConversionResult:
     """What a non-strict conversion produced, and what it could not resolve."""
 
+    # EMPTY when the conversion refused (see ``errors``). A partial prompt is never handed out:
+    # omitting an unresolvable node while keeping every reference to it produced a graph ComfyUI
+    # rejects with an opaque ``KeyError``, and nothing said a pack was missing.
     prompt: dict[str, Any] = field(default_factory=dict)
     # Classes this ComfyUI has no schema for. NOT "the workflow is broken" -- it usually means a
     # custom node pack is not installed.
     missing_classes: list[str] = field(default_factory=list)
+    # Why the conversion refused, in the words a user can act on -- the missing packs by name where
+    # the workflow declares them. Empty iff ``prompt`` is usable.
+    errors: list[str] = field(default_factory=list)
+    # The same refusal as data: [{pack, repo_url, version, classes}]. Empty when nothing is missing
+    # or when the graph declares no pack for what is missing.
+    missing_packs: list[dict[str, Any]] = field(default_factory=list)
+    # Post-condition failures: "referring_node.input -> missing_id". Non-empty means the prompt was
+    # refused -- either an unresolvable class something referenced, or (with nothing missing) a
+    # converter bug.
+    dangling_links: list[str] = field(default_factory=list)
     # Node ids dropped because they never execute (muted, bypassed, or pure-UI).
     dropped_ui_only: list[str] = field(default_factory=list)
     node_count: int = 0
@@ -184,6 +204,9 @@ def convert_ui_graph_to_api_prompt(
             excluded.add(node_id)
 
     unknown: set[str] = set()
+    # node id -> class, for the nodes omitted because their class has no schema. Kept so a dangling
+    # reference can be explained by the pack it belongs to instead of by a bare node id.
+    unknown_nodes: dict[str, str] = {}
     api: dict[str, Any] = {}
     for node in nodes:
         if not isinstance(node, dict):
@@ -201,6 +224,7 @@ def convert_ui_graph_to_api_prompt(
                 node_schema = object_info.get(class_type)
         if not isinstance(node_schema, dict):
             unknown.add(class_type)
+            unknown_nodes[node_id] = class_type
             continue
 
         schema_inputs = node_schema.get("input", {}) or {}
@@ -279,19 +303,29 @@ def convert_ui_graph_to_api_prompt(
 
         api[node_id] = {"class_type": class_type, "inputs": api_inputs}
 
-    if unknown and strict:
-        raise ValueError(
-            "Cannot convert UI-graph workflow: object_info has no schema for node class(es): "
-            + ", ".join(sorted(unknown))
-            + ". Install the missing custom nodes first."
-        )
+    # The structural post-condition, and the refusal it drives. Both live in comfy_graph_links so
+    # that no future code path can build a prompt here and skip the check by accident -- the only
+    # exit from this function runs through `verdict`.
+    from comfy_graph_links import prompt_verdict
+
+    verdict = prompt_verdict(api, workflow, unknown, unknown_nodes, object_info)
+    errors = verdict.errors
+
+    if errors and strict:
+        raise ValueError("\n".join(errors))
     if strict:
         return api
     return ConversionResult(
-        prompt=api,
+        # A refused conversion hands back no graph at all. Callers that want to SEE what is missing
+        # read missing_classes / missing_packs; a caller that reads `prompt` gets either something
+        # submittable or nothing.
+        prompt={} if errors else api,
         missing_classes=sorted(unknown),
+        errors=errors,
+        missing_packs=verdict.missing_packs,
+        dangling_links=[link.describe() for link in verdict.dangling],
         dropped_ui_only=sorted(excluded),
-        node_count=len(api),
+        node_count=0 if errors else len(api),
         resolved_display_names=dict(sorted(resolved_display_names.items())),
     )
 
@@ -306,5 +340,9 @@ def convert_ui_graph(workflow: dict[str, Any], object_info: dict[str, Any]) -> "
 
     The caller still has to distinguish "these classes are missing" from "I could not check" --
     see the object_info_available contract in workflow_library_commands.
+
+    A refusal is reported, not softened: ``errors`` is non-empty and ``prompt`` is ``{}``. Returning
+    a partial graph here was the defect -- ``ok`` was computed from ``missing_classes`` by one
+    caller and ignored by the next, and the partial prompt reached disk either way.
     """
     return convert_ui_graph_to_api_prompt(workflow, object_info, strict=False)

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 from credential_store import get_credential  # noqa: E402
 from model_intelligence import readable_roots, refresh, sidecar  # noqa: E402
 from model_intelligence.civitai_lookup import CivitaiClient  # noqa: E402
+from model_intelligence.hf_lookup import HfClient  # noqa: E402
 
 
 def main() -> int:
@@ -45,6 +46,8 @@ def main() -> int:
     job = refresh.RefreshJob(
         args.roots,
         client=CivitaiClient(api_key=get_credential("civitai_api_key")),
+        # The second arm. Public cards need no token; a stored one buys rate-limit headroom only.
+        hf=HfClient(token=get_credential("hf_token")),
         models_root=args.roots[0],
         progress=progress,
         cancel=(lambda: args.limit and seen["n"] >= args.limit) if args.limit else None,

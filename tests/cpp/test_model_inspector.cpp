@@ -225,10 +225,28 @@ void TestModelInspector::trigger_words_and_the_licence_line_come_from_the_sideca
     panel.showModel(library.weight, QStringLiteral("krea2_darkbrush.safetensors"));
     QCOMPARE(panel.triggerWords(), QStringList{QStringLiteral("monochrome ink wash style")});
 
-    // This library's CivitAI answers carry no licence name. "Not stated by the site" and
-    // "unknown -- not identified" are different facts, and for a library that may ship
-    // commercially the difference is the whole question.
-    QCOMPARE(panel.licenceText(), QStringLiteral("Licence: not stated by the site"));
+    // CivitAI states PERMISSIONS and never an SPDX name, so reading `license.name` alone made
+    // every CivitAI weight read "not stated by the site" while its terms sat in the file. The
+    // line must carry whichever halves the site actually supplied.
+    const QString licence = panel.licenceText();
+    QVERIFY2(licence.startsWith(QStringLiteral("Licence: ")), qPrintable(licence));
+    QVERIFY2(!licence.contains(QStringLiteral("not stated by the site")), qPrintable(licence));
+    QVERIFY2(licence.contains(QStringLiteral("derivatives"))
+                 || licence.contains(QStringLiteral("commercial use"))
+                 || licence.contains(QStringLiteral("credit")),
+             qPrintable(licence));
+
+    // A model the site knows and published no terms for is still a different answer from one
+    // nobody asked about -- that distinction is what this line exists for.
+    spellvision::assets::ModelIntel silent;
+    silent.present = true; // a sidecar exists; without this it reads as never-asked
+    spellvision::assets::ModelIntelSource source;
+    source.site = QStringLiteral("civitai");
+    source.modelId = 1;
+    source.versionId = 1;
+    silent.sources.append(source);
+    QCOMPARE(ModelInspectorPanel::licenceTextFor(silent),
+             QStringLiteral("Licence: not stated by the site"));
 
     Library bare;
     QVERIFY(layDown(bare, QStringLiteral("sd3.5_medium_incl_clips_t5xxlfp8scaled"),

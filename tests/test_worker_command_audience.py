@@ -264,14 +264,21 @@ def test_free_vram_stays_reachable():
 
 
 def test_cockpit_unload_models_reaches_runtime_free_vram() -> None:
-    """Free VRAM lives on Runtime. Generation pages need Unload without a rail hop."""
-    igp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    """Free VRAM lives on Runtime. Generation pages need Unload without a rail hop.
+
+    Read over the whole ImageGenerationPage family rather than two named TUs: which split file
+    holds the button is a housekeeping detail, and pinning it made this rule fail the first time
+    buildUi() moved -- a green-to-red that said nothing about Unload being reachable.
+    """
+    family = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "qt_ui").glob("ImageGenerationPage*.cpp"))
+    )
     igph = (ROOT / "qt_ui" / "ImageGenerationPage.h").read_text(encoding="utf-8")
-    preview = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
     mw = (ROOT / "qt_ui" / "MainWindow.cpp").read_text(encoding="utf-8")
     assert "unloadModelsRequested" in igph
-    assert 'QStringLiteral("Unload models")' in igp
-    assert "unloadButton_" in preview
+    assert 'QStringLiteral("Unload models")' in family
+    assert "unloadButton_" in family
     assert "unloadModelsRequested" in mw
     assert "freeRuntimeVram" in mw
 

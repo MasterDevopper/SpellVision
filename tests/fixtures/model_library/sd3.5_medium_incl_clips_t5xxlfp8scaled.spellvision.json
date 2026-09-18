@@ -1,87 +1,88 @@
 {
- "schema": "spellvision.model-sidecar/1",
- "identity": {
-  "file_name": "sd3.5_medium_incl_clips_t5xxlfp8scaled.safetensors",
-  "size": 11638004202,
-  "hashes": {
-   "sha256": "1778e8857679042c176c21cd8a0da7b29bded68be018557477f84419df79bacf",
-   "autov2": "1778e88576"
+  "schema": "spellvision.model-sidecar/1",
+  "identity": {
+    "file_name": "sd3.5_medium_incl_clips_t5xxlfp8scaled.safetensors",
+    "size": 11638004202,
+    "hashes": {
+      "sha256": "1778e8857679042c176c21cd8a0da7b29bded68be018557477f84419df79bacf",
+      "autov2": "1778e88576"
+    },
+    "kind": "checkpoint",
+    "family": "sd3",
+    "base_model": null,
+    "quantisation": null,
+    "sources": []
   },
-  "kind": "checkpoint",
-  "family": "sd3",
-  "base_model": null,
-  "quantisation": null,
-  "sources": []
- },
- "display": {
-  "name": {
-   "value": "sd3.5_medium_incl_clips_t5xxlfp8scaled",
-   "user_override": false
+  "display": {
+    "name": {
+      "value": "sd3.5_medium_incl_clips_t5xxlfp8scaled",
+      "user_override": false
+    },
+    "description_html": {
+      "value": "",
+      "user_override": false
+    },
+    "creator": null,
+    "license": {
+      "name": null,
+      "allowCommercialUse": null,
+      "allowDerivatives": null,
+      "allowNoCredit": null,
+      "allowDifferentLicense": null
+    },
+    "nsfw_level": null,
+    "trigger_words": {
+      "value": [],
+      "user_override": false
+    },
+    "images": []
   },
-  "description_html": {
-   "value": "",
-   "user_override": false
+  "recommended": {
+    "steps": {
+      "value": 28,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "cfg": {
+      "value": 4.0,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "sampler": {
+      "value": "euler",
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "scheduler": {
+      "value": "simple",
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "width": {
+      "value": 1024,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "height": {
+      "value": 1024,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    }
   },
-  "creator": null,
-  "license": {
-   "name": null,
-   "allowCommercialUse": null,
-   "allowDerivatives": null,
-   "allowNoCredit": null
-  },
-  "nsfw_level": null,
-  "trigger_words": {
-   "value": [],
-   "user_override": false
-  },
-  "images": []
- },
- "recommended": {
-  "steps": {
-   "value": 28,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "cfg": {
-   "value": 4.0,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "sampler": {
-   "value": "euler",
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "scheduler": {
-   "value": "simple",
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "width": {
-   "value": 1024,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "height": {
-   "value": 1024,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
+  "user": {
+    "notes": "",
+    "favorite": false
   }
- },
- "user": {
-  "notes": "",
-  "favorite": false
- }
 }

@@ -58,3 +58,23 @@ def find_definition(name: str, *, qualifier: str | None = None) -> tuple[Path, s
 
 def definition_body(name: str, *, qualifier: str | None = None) -> str:
     return find_definition(name, qualifier=qualifier)[1]
+
+
+def family_text(stem: str, *, directory: str = "qt_ui") -> str:
+    """Every translation unit of a split page, concatenated.
+
+    A page that has outgrown one file lives in ``<stem>.cpp`` plus ``<stem>_*.cpp``. A test that
+    asserts a control exists, or that a literal is spelled a particular way, cares that the page
+    builds it -- not which of those files currently holds the line. Fourteen checks went red the
+    first time ``buildUi()`` moved out of ``ImageGenerationPage.cpp``, every one of them about a
+    widget that had not changed.
+    """
+    root = Path(__file__).resolve().parents[1] / directory
+    paths = sorted(root.glob(f"{stem}*.cpp"))
+    assert paths, f"no translation units for {directory}/{stem}*.cpp"
+    return "".join(path.read_text(encoding="utf-8", errors="replace") for path in paths)
+
+
+def image_generation_page_text() -> str:
+    """The cockpit page across all of its split units."""
+    return family_text("ImageGenerationPage")

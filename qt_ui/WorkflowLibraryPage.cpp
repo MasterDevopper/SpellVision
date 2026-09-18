@@ -3,6 +3,7 @@
 
 #include "ThemeManager.h"
 #include "workflows/ModelResolutionDialog.h"
+#include "workflows/WorkflowCompileVerdict.h"
 #include "workflows/WorkflowDraftBuilder.h"
 #include "workflows/WorkflowLaunchController.h"
 #include "style/SvKit.h"
@@ -936,10 +937,158 @@ void WorkflowLibraryPage::onApplyClicked()
         return;
 
     const WorkflowRecord &record = workflows_.at(index);
+    // The draft held on the record was extracted from a file this page NAMED but never verified --
+    // it answers "could this shape open as a draft at all", which is what the button's visibility
+    // needs, and it is not what gets handed over. The handoff is compiled first.
     if (!record.reusableDraftPresent)
         return;
 
-    emit workflowDraftRequested(record.reusableDraft);
+    requestVerifiedDraft(index);
+}
+
+// Flows' last unguarded route from a stale artefact to a render.
+//
+// loadWorkflowRecord builds compiledPromptPath out of the import DIRECTORY, so until now the Open-in
+// button handed WorkflowDraftBuilder whatever prompt_api.json happened to be lying there, and the
+// cockpit filled itself from it. cd6d5ba guarded the render path worker-side and fe3ad7d taught the
+// drop path to tell a refusal from a silence; this is the third door, and it is the one a user walks
+// through on purpose.
+//
+// It asks. compile_workflow_prompt runs the live converter against live /object_info, and the draft
+// is built from the path THAT reply names. Which costs one round trip, on a deliberate click -- the
+// same price Check Readiness already pays, and paid only when the user actually opens a workflow
+// rather than on every row of every refresh.
+//
+// Four outcomes, kept apart by WorkflowCompileVerdict: a refusal (the user gets the worker's own
+// sentence, with the packs and repository URLs the Python side resolved), an UNVERIFIED reply --
+// ComfyUI unreachable, so nothing was checked, which opens from the source graph with submission
+// closed and the reason shown as a warning -- a named path (the draft), and silence (which is not a
+// yes, and says so).
+//
+// The unverified case was briefly folded into the refusal. It is separated again because "we could
+// not check" is a fact about the MACHINE and "we checked and it is broken" is a fact about the
+// GRAPH: the second has nothing to open, the first has a workflow that is exactly as readable as it
+// was a minute ago. What must not come back with it is the stale artefact -- so the values are read
+// from the source workflow and the import folder's prompt_api.json is never touched.
+void WorkflowLibraryPage::requestVerifiedDraft(int index)
+{
+    if (index < 0 || index >= workflows_.size())
+        return;
+
+    if (workflowLifecycleProcess_)
+    {
+        QMessageBox::information(
+            this,
+            tr("Open Workflow"),
+            tr("A workflow lifecycle operation is already running. Wait for it to finish before starting another."));
+        return;
+    }
+
+    const WorkflowRecord record = workflows_.at(index);
+    const QString importRoot = record.importRoot.trimmed();
+    const QString profilePath = record.profilePath.trimmed();
+    if (importRoot.isEmpty() && profilePath.isEmpty())
+    {
+        showWorkerFailure(
+            tr("Open Workflow"),
+            tr("%1 cannot be compiled: the library row names neither an import folder nor a profile.")
+                .arg(record.displayName),
+            QString());
+        return;
+    }
+
+    startWorkflowLifecycleCommand(
+        spellvision::workflows::WorkflowCompileVerdict::buildCompileRequest(importRoot, profilePath),
+        tr("Compiling %1 against the live ComfyUI schema...").arg(record.displayName),
+        tr("Compiling the workflow timed out."),
+        3 * 60 * 1000,
+        [this, index, record](const QJsonObject &response, const QString &stderrText) {
+            const auto compiled = spellvision::workflows::WorkflowCompileVerdict::fromCompileReply(
+                response,
+                record.sourceWorkflowPath);
+
+            // The refusal already names what to install. Replacing it with "no compiled prompt is
+            // available" is how the user ends up with nowhere to go.
+            if (!compiled.refusal.isEmpty())
+            {
+                showWorkerFailure(
+                    tr("Open Workflow"),
+                    tr("%1 cannot be opened as a draft.\n\n%2").arg(record.displayName, compiled.refusal),
+                    stderrText);
+                return;
+            }
+
+            // ComfyUI is down. Nothing checked this graph, but nothing found it broken either, and
+            // the workflow is exactly as readable as it was a minute ago -- so it OPENS, with the
+            // reason carried into the draft as a warning and submission closed by construction. The
+            // values come from the SOURCE graph; the import folder's prompt_api.json is not touched,
+            // because opening offline must not be the door the stale artefact comes back through.
+            if (compiled.schemaUnavailable)
+            {
+                WorkflowRecord unverified = record;
+                unverified.compiledPromptPath = compiled.path;
+                unverified.compiledPromptVerified = false;
+                buildUnverifiedDraft(unverified, compiled.unverifiedReason);
+
+                if (!unverified.reusableDraftPresent)
+                {
+                    showWorkerFailure(
+                        tr("Open Workflow"),
+                        tr("%1 cannot be opened as a draft.\n\n%2")
+                            .arg(record.displayName, unverified.reusableDraftReason),
+                        stderrText);
+                    return;
+                }
+
+                emit workflowDraftRequested(unverified.reusableDraft);
+                return;
+            }
+
+            if (!compiled.verified)
+            {
+                showWorkerFailure(
+                    tr("Open Workflow"),
+                    tr("%1 cannot be opened as a draft.\n\n%2")
+                        .arg(record.displayName, compiled.unverifiedReason),
+                    stderrText);
+                return;
+            }
+
+            // Built from the compile's own path, not from the record's constructed one.
+            WorkflowRecord verified = record;
+            verified.compiledPromptPath = compiled.path;
+            verified.compiledPromptVerified = true;
+            buildReusableDraft(verified);
+
+            if (!verified.reusableDraftPresent)
+            {
+                showWorkerFailure(
+                    tr("Open Workflow"),
+                    tr("%1 compiled, but no draft could be built from the result.\n\n%2")
+                        .arg(record.displayName,
+                             verified.reusableDraftReason.isEmpty()
+                                 ? tr("The compiled prompt carried nothing the cockpit can open.")
+                                 : verified.reusableDraftReason),
+                    stderrText);
+                return;
+            }
+
+            // The panel should stop claiming the unverified reading once a verified one exists. The
+            // row may have moved under a refresh while the compile ran, so it is identified by its
+            // profile path rather than by the index alone.
+            if (index < workflows_.size() && workflows_.at(index).profilePath == record.profilePath)
+            {
+                WorkflowRecord &live = workflows_[index];
+                live.compiledPromptVerified = true;
+                live.reusableDraftPresent = verified.reusableDraftPresent;
+                live.reusableDraftSafeToSubmit = verified.reusableDraftSafeToSubmit;
+                live.reusableDraftReason = verified.reusableDraftReason;
+                live.reusableDraft = verified.reusableDraft;
+                updateDetailsPanel();
+            }
+
+            emit workflowDraftRequested(verified.reusableDraft);
+        });
 }
 
 void WorkflowLibraryPage::onRevealFolderClicked()
@@ -1870,7 +2019,17 @@ WorkflowLibraryPage::WorkflowRecord WorkflowLibraryPage::loadWorkflowRecord(cons
     if (record.importRoot.isEmpty())
         record.importRoot = QFileInfo(profilePath).absolutePath();
 
+    // THIS IS A GUESS, and it is labelled as one. Nothing here has seen a compile: it is the
+    // directory being read, and a file of that name means only that something wrote one, at some
+    // point, with some converter. The seven stale artefacts on this box are well-formed JSON with a
+    // width sitting in a `batch_size` field, so no structural check rejects them.
+    //
+    // It stays because the readiness command and the details panel want somewhere to look and the
+    // worker guards what it reads (cd6d5ba). What it may no longer do is reach the cockpit: a DRAFT
+    // is built only from a path a compile named, which onApplyClicked asks for. `false` is the only
+    // value this flag ever takes on the disk walk -- verification comes from a reply, never a stat.
     record.compiledPromptPath = QDir(record.importRoot).filePath(QStringLiteral("prompt_api.json"));
+    record.compiledPromptVerified = false;
 
     record.sourceWorkflowPath = resolvePossiblyRelativePath(
         record.importRoot,
@@ -2505,6 +2664,29 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
     record.reusableDraft = result.draft;
 }
 
+// The same row when ComfyUI is down. Same Source, same builder, different route: the compiled
+// artefact is dropped rather than read, and the draft that comes back is never submittable.
+void WorkflowLibraryPage::buildUnverifiedDraft(WorkflowRecord &record, const QString &reason)
+{
+    spellvision::workflows::WorkflowDraftBuilder::Source source;
+    source.displayName = record.displayName;
+    source.profilePath = record.profilePath;
+    source.sourceWorkflowPath = record.sourceWorkflowPath;
+    source.sourceWorkflowFormat = record.sourceWorkflowFormat;
+    source.compiledPromptPath = record.compiledPromptPath;
+    source.modeId = record.modeId;
+    source.mediaType = record.mediaType;
+    source.backend = record.backend;
+    source.missingRuntimeAssets = record.missingRuntimeAssets;
+    source.missingCustomNodes = record.missingCustomNodes;
+
+    const auto result = spellvision::workflows::WorkflowDraftBuilder::buildUnverified(source, reason);
+    record.reusableDraftPresent = result.present;
+    record.reusableDraftSafeToSubmit = result.safeToSubmit;
+    record.reusableDraftReason = result.reason;
+    record.reusableDraft = result.draft;
+}
+
 void WorkflowLibraryPage::rebuildFilters()
 {
     const QString taskCurrent = taskFilter_->currentData().toString();
@@ -2757,7 +2939,9 @@ void WorkflowLibraryPage::updateDetailsPanel()
     if (applyButton_)
     {
         applyButton_->setVisible(canApplyDraft);
-        applyButton_->setEnabled(canApplyDraft);
+        // Opening now runs a compile, so it takes the same busy latch every other worker round trip
+        // on this page takes.
+        applyButton_->setEnabled(canApplyDraft && !workflowLifecycleBusy_);
         const QString normalized = normalizedModeId(record.modeId);
         if (normalized == QStringLiteral("i2i"))
             applyButton_->setText(tr("Open in I2I"));
@@ -2767,7 +2951,10 @@ void WorkflowLibraryPage::updateDetailsPanel()
             applyButton_->setText(tr("Open in T2V"));
         else
             applyButton_->setText(tr("Open in T2I"));
-        applyButton_->setToolTip(record.reusableDraftReason);
+        applyButton_->setToolTip(
+            record.reusableDraftReason.isEmpty()
+                ? tr("Compile this workflow against the live ComfyUI schema and open the result as a draft.")
+                : record.reusableDraftReason);
     }
 
     const bool canCheckReadiness =
@@ -2966,6 +3153,12 @@ QString WorkflowLibraryPage::workflowDetailsText(const WorkflowRecord &record) c
     lines << QString();
     lines << tr("Source workflow format: %1").arg(record.sourceWorkflowFormat);
     lines << tr("Compiled prompt present: %1").arg(record.compiledPromptPresent ? tr("yes") : tr("no"));
+    // "Present" is a stat of a path this page constructed from the directory. This is the different,
+    // and load-bearing, question: did a compile say so.
+    lines << tr("Compiled prompt verified by a compile: %1")
+                 .arg(record.compiledPromptVerified
+                          ? tr("yes")
+                          : tr("not yet — the workflow is recompiled against the live schema when it is opened"));
     lines << tr("Compiled prompt format: %1").arg(record.compiledPromptFormat.isEmpty() ? QStringLiteral("unknown") : record.compiledPromptFormat);
     lines << tr("Launch artifact path: %1").arg(record.launchArtifactPath.isEmpty() ? tr("<missing>") : record.launchArtifactPath);
     lines << tr("Launch artifact format: %1").arg(record.launchArtifactFormat.isEmpty() ? QStringLiteral("unknown") : record.launchArtifactFormat);

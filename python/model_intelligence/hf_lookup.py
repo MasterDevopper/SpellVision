@@ -11,14 +11,30 @@ the prose regexes, which are a genuine guess.
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 API = "https://huggingface.co/api/models"
 RESOLVE = "https://huggingface.co"
 USER_AGENT = "SpellVision/1.0"
+MAX_ATTEMPTS = 4
+
+
+class HfThrottled(RuntimeError):
+    """429 survived every retry.
+
+    Raised rather than swallowed, and the distinction is not academic: the candidate step asks HF
+    up to 25 times per unidentified weight, so a run over a whole library WILL meet a 429. Before
+    this existed, `_get` raised a bare HTTPError, `hf_candidates._search` caught it as "no
+    candidates", and the weight was recorded as not on HuggingFace -- a throttle wearing the
+    costume of an answer. Measured 2026-09-17: a pass that had already been identifying weights
+    correctly dropped from 38/79 to 25/79 for exactly this reason, and reported no errors.
+    """
 
 _SNIPPET_KEYS = {
     "num_inference_steps": "steps",
@@ -50,10 +66,12 @@ _PROSE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 
 class HfClient:
-    def __init__(self, token: str | None = None, *, opener: Any = None, timeout: float = 25.0):
+    def __init__(self, token: str | None = None, *, opener: Any = None, timeout: float = 25.0,
+                 sleep: Callable[[float], None] = time.sleep):
         self.token = str(token or "").strip() or None
         self._opener = opener or urllib.request.build_opener()
         self._timeout = timeout
+        self._sleep = sleep
 
     def _headers(self) -> dict[str, str]:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -62,14 +80,46 @@ class HfClient:
         return headers
 
     def _get(self, url: str) -> str | None:
-        request = urllib.request.Request(url, headers=self._headers())
+        last: Exception | None = None
+        for attempt in range(MAX_ATTEMPTS):
+            request = urllib.request.Request(url, headers=self._headers())
+            try:
+                with self._opener.open(request, timeout=self._timeout) as response:
+                    return response.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403, 404):
+                    return None
+                if exc.code != 429:
+                    raise
+                last = exc
+                if attempt < MAX_ATTEMPTS - 1:
+                    self._sleep(min(8.0, 2**attempt) + random.random())
+        raise HfThrottled(f"429 from huggingface.co after {MAX_ATTEMPTS} attempts") from last
+
+    def search(self, query: str, *, author: str | None = None, limit: int = 20) -> list[str]:
+        """Repo ids matching a free-text query, most relevant first.
+
+        The candidate step HF's missing by-hash endpoint forces (`hf_candidates`). Nothing here
+        identifies anything on its own -- a search result is a GUESS, and only `sha256_index`
+        confirms it -- so a failure to search is an empty list, never an exception worth the run.
+        """
+        text = str(query or "").strip()
+        if len(text) < 3:
+            return []
+        params = {"search": text, "limit": str(int(limit))}
+        if author:
+            params["author"] = str(author)
+        body = self._get(f"{API}?{urllib.parse.urlencode(params)}")
+        if not body:
+            return []
         try:
-            with self._opener.open(request, timeout=self._timeout) as response:
-                return response.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403, 404):
-                return None
-            raise
+            payload = json.loads(body)
+        except ValueError:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [str(entry.get("modelId") or entry.get("id") or "")
+                for entry in payload if isinstance(entry, dict)]
 
     def model_info(self, repo: str) -> dict[str, Any] | None:
         body = self._get(f"{API}/{str(repo).strip('/')}?blobs=true")

@@ -385,8 +385,37 @@ QString ModelInspectorPanel::licenceText() const
 {
     if (weightPath_.isEmpty())
         return QString();
+    return licenceTextFor(intel_);
+}
+
+QString ModelInspectorPanel::licenceTextFor(const ModelIntel &intel_)
+{
+    // A name and a set of permissions are different answers, and the two sites supply different
+    // ones: CivitAI states permissions and never an SPDX name, HuggingFace card frontmatter
+    // states a name. Render whichever halves exist rather than treating the name as the only
+    // licence there is -- doing that read "not stated by the site" for 677 models whose terms
+    // were sitting in the file.
+    QStringList parts;
     if (!intel_.licenseName.isEmpty())
-        return QStringLiteral("Licence: %1").arg(intel_.licenseName);
+        parts << intel_.licenseName;
+    if (!intel_.licenseCommercialUse.isEmpty())
+        parts << QStringLiteral("commercial use: %1").arg(intel_.licenseCommercialUse.join(QStringLiteral(", ")));
+    else if (intel_.licenseAllowsDerivatives >= 0)
+        parts << QStringLiteral("no commercial use");
+    const auto permission = [&parts](int state, const QString &yes, const QString &no) {
+        if (state > 0)
+            parts << yes;
+        else if (state == 0)
+            parts << no;
+    };
+    permission(intel_.licenseAllowsDerivatives, QStringLiteral("derivatives allowed"),
+               QStringLiteral("no derivatives"));
+    permission(intel_.licenseAllowsNoCredit, QStringLiteral("credit not required"),
+               QStringLiteral("credit required"));
+    permission(intel_.licenseAllowsDifferentLicense, QStringLiteral("relicensing allowed"),
+               QStringLiteral("same licence only"));
+    if (!parts.isEmpty())
+        return QStringLiteral("Licence: %1").arg(parts.join(QStringLiteral(" · ")));
     if (intel_.identification() == ModelIdentification::Identified)
     {
         // The site knows this weight and published no licence. Saying "the site did not say"

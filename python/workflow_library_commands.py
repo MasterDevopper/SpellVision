@@ -401,7 +401,16 @@ def _recheck_workflow_dependencies(
         if api_prompt.is_file():
             try:
                 _, api_payload = load_workflow_source(str(api_prompt))
-                api_report = scan_workflow(api_payload)
+                # A stored compile outlives the converter that wrote it. One with dangling ids was
+                # written by the silent-drop behaviour and is not a graph -- reading models off it
+                # answers from a file ComfyUI would refuse. Fall through to a fresh conversion,
+                # which is what the launch path submits anyway.
+                from comfy_graph_links import find_dangling_links
+
+                if find_dangling_links(api_payload):
+                    api_report = None
+                else:
+                    api_report = scan_workflow(api_payload)
             except Exception:
                 api_report = None
         if api_report is None and is_ui_graph(payload):
@@ -717,12 +726,24 @@ def handle_compile_workflow_prompt_command(req: dict[str, Any]) -> dict[str, Any
 
         if object_info is None:
             # Report the unknown honestly rather than guessing in either direction.
+            #
+            # What CAN still be answered is answered. Whether this graph is a UI graph or already an
+            # API prompt is a fact about the FILE and needs no schema, so it is reported, together
+            # with the path of the graph itself. That is what lets a caller open this workflow for
+            # INSPECTION from the source graph it already has, rather than reaching for a
+            # prompt_api.json of unknown age -- the artefact this whole arc exists to stop reading.
+            # An api-prompt graph therefore yields every value offline; a UI graph yields none,
+            # which is correct, because turning one into a prompt is precisely the step that needs
+            # the live schema. The PATH is not repeated here -- both callers already hold it, from
+            # the import reply's artifacts and from the library row, and a reply key nobody reads is
+            # the defect one file over.
             return {
                 "type": "workflow_compile_result",
                 "ok": False,
                 "action": "compile_workflow_prompt",
                 "import_root": str(import_root),
                 "object_info_available": False,
+                "graph_format": "comfy_ui_graph" if is_ui_graph(workflow) else "comfy_api_prompt",
                 "missing_classes": [],
                 "reason": "ComfyUI is not reachable, so node availability could not be checked.",
             }
@@ -743,19 +764,29 @@ def handle_compile_workflow_prompt_command(req: dict[str, Any]) -> dict[str, Any
 
         result = convert_ui_graph(workflow, object_info)
 
+        # A refused conversion writes NOTHING. The previous version wrote result.prompt
+        # unconditionally, so a graph with unresolvable classes left a prompt_api.json full of
+        # dangling ids on disk -- read afterwards by the draft builder and the readiness pass as
+        # though it were a compile that had worked. `ok` was already False beside it; a file that
+        # says otherwise outlives the reply that carried the flag.
         compiled_path = import_root / "prompt_api.json"
-        compiled_path.write_text(json.dumps(result.prompt, indent=2), encoding="utf-8")
+        if not result.errors:
+            compiled_path.write_text(json.dumps(result.prompt, indent=2), encoding="utf-8")
 
         return {
             "type": "workflow_compile_result",
-            "ok": not result.missing_classes,
+            "ok": not result.errors,
             "action": "compile_workflow_prompt",
             "import_root": str(import_root),
             "object_info_available": True,
             "graph_format": "comfy_ui_graph",
-            "compiled_prompt_path": str(compiled_path),
+            "compiled_prompt_path": str(compiled_path) if not result.errors else None,
             "node_count": result.node_count,
             "missing_classes": result.missing_classes,
+            "missing_packs": result.missing_packs,
+            "errors": result.errors,
+            "dangling_links": result.dangling_links,
+            "reason": result.errors[0] if result.errors else "",
             "dropped_ui_only_count": len(result.dropped_ui_only),
         }
     except Exception as exc:

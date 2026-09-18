@@ -1,135 +1,142 @@
 {
- "schema": "spellvision.model-sidecar/1",
- "identity": {
-  "file_name": "krea2_darkbrush.safetensors",
-  "size": 469291992,
-  "hashes": {
-   "sha256": "f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6",
-   "autov2": "f47c4316dd"
+  "schema": "spellvision.model-sidecar/1",
+  "identity": {
+    "file_name": "krea2_darkbrush.safetensors",
+    "size": 469291992,
+    "hashes": {
+      "sha256": "f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6",
+      "autov2": "f47c4316dd"
+    },
+    "kind": "lora",
+    "family": "krea2",
+    "base_model": "Krea 2",
+    "quantisation": null,
+    "sources": [
+      {
+        "site": "civitai",
+        "model_id": 2726235,
+        "version_id": 3064381,
+        "url": "https://civitai.com/models/2726235?modelVersionId=3064381",
+        "fetched_at": "2026-09-16T18:37:43.608977+00:00"
+      }
+    ]
   },
-  "kind": "lora",
-  "family": "krea2",
-  "base_model": "Krea 2",
-  "quantisation": null,
-  "sources": [
-   {
-    "site": "civitai",
-    "model_id": 2726235,
-    "version_id": 3064381,
-    "url": "https://civitai.com/models/2726235?modelVersionId=3064381",
-    "fetched_at": "2026-09-16T18:37:43.608977+00:00"
-   }
-  ]
- },
- "display": {
-  "name": {
-   "value": "Krea 2 Official Loras",
-   "user_override": false
+  "display": {
+    "name": {
+      "value": "Krea 2 Official Loras",
+      "user_override": false
+    },
+    "description_html": {
+      "value": "<p>A LoRA for <a target=\"_blank\" rel=\"ugc\" href=\"https://huggingface.co/krea\">Krea 2</a> — darkbrush (trigger: <code>monochrome ink wash style</code>).</p>",
+      "user_override": false
+    },
+    "creator": "daceheg192491",
+    "license": {
+      "name": null,
+      "allowCommercialUse": [
+        "Image",
+        "RentCivit",
+        "Rent",
+        "Sell",
+        "SellMerge"
+      ],
+      "allowDerivatives": true,
+      "allowNoCredit": true,
+      "allowDifferentLicense": true
+    },
+    "nsfw_level": 3,
+    "trigger_words": {
+      "value": [
+        "monochrome ink wash style"
+      ],
+      "user_override": false
+    },
+    "images": [
+      {
+        "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/4c5f94d1-48f2-4b89-84c3-497554b41593/original=true/134685801.jpeg",
+        "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\0.jpg",
+        "width": 2048,
+        "height": 2048,
+        "nsfw_level": 2,
+        "is_cover": true,
+        "user_override": false,
+        "meta": {}
+      },
+      {
+        "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/bf2cd445-498a-45b6-ad78-470f28e794bb/original=true/134685800.jpeg",
+        "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\1.jpg",
+        "width": 2048,
+        "height": 2048,
+        "nsfw_level": 1,
+        "is_cover": false,
+        "user_override": false,
+        "meta": {}
+      },
+      {
+        "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/61ee13ac-11c0-4519-b9fd-e043cf0eed0a/original=true/134685814.jpeg",
+        "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\2.jpg",
+        "width": 2048,
+        "height": 2048,
+        "nsfw_level": 2,
+        "is_cover": false,
+        "user_override": false,
+        "meta": {}
+      }
+    ]
   },
-  "description_html": {
-   "value": "<p>A LoRA for <a target=\"_blank\" rel=\"ugc\" href=\"https://huggingface.co/krea\">Krea 2</a> — darkbrush (trigger: <code>monochrome ink wash style</code>).</p>",
-   "user_override": false
+  "recommended": {
+    "prompt_prefix": {
+      "value": "monochrome ink wash style",
+      "provenance": "site:trainedWords",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "steps": {
+      "value": 52,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "cfg": {
+      "value": 3.5,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "sampler": {
+      "value": "er_sde",
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "scheduler": {
+      "value": "simple",
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "width": {
+      "value": 1024,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    },
+    "height": {
+      "value": 1024,
+      "provenance": "table:family-default",
+      "confidence": 1.0,
+      "n": null,
+      "total": null
+    }
   },
-  "creator": null,
-  "license": {
-   "name": null,
-   "allowCommercialUse": null,
-   "allowDerivatives": null,
-   "allowNoCredit": null
-  },
-  "nsfw_level": 3,
-  "trigger_words": {
-   "value": [
-    "monochrome ink wash style"
-   ],
-   "user_override": false
-  },
-  "images": [
-   {
-    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/4c5f94d1-48f2-4b89-84c3-497554b41593/original=true/134685801.jpeg",
-    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\0.jpg",
-    "width": 2048,
-    "height": 2048,
-    "nsfw_level": 2,
-    "is_cover": true,
-    "user_override": false,
-    "meta": {}
-   },
-   {
-    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/bf2cd445-498a-45b6-ad78-470f28e794bb/original=true/134685800.jpeg",
-    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\1.jpg",
-    "width": 2048,
-    "height": 2048,
-    "nsfw_level": 1,
-    "is_cover": false,
-    "user_override": false,
-    "meta": {}
-   },
-   {
-    "origin_url": "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/61ee13ac-11c0-4519-b9fd-e043cf0eed0a/original=true/134685814.jpeg",
-    "local_path": "F:\\AI_ASSETS\\models\\.spellvision\\previews\\f47c4316dd93af66e0518c93b582f459571d4925b519133770c73a52cd5db7c6\\2.jpg",
-    "width": 2048,
-    "height": 2048,
-    "nsfw_level": 2,
-    "is_cover": false,
-    "user_override": false,
-    "meta": {}
-   }
-  ]
- },
- "recommended": {
-  "prompt_prefix": {
-   "value": "monochrome ink wash style",
-   "provenance": "site:trainedWords",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "steps": {
-   "value": 52,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "cfg": {
-   "value": 3.5,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "sampler": {
-   "value": "er_sde",
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "scheduler": {
-   "value": "simple",
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "width": {
-   "value": 1024,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
-  },
-  "height": {
-   "value": 1024,
-   "provenance": "table:family-default",
-   "confidence": 1.0,
-   "n": null,
-   "total": null
+  "user": {
+    "notes": "",
+    "favorite": false
   }
- },
- "user": {
-  "notes": "",
-  "favorite": false
- }
 }

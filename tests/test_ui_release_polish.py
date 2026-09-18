@@ -105,7 +105,11 @@ def test_the_workflows_actions_are_two_rows() -> None:
 # --- C: developer tools are gated once ------------------------------------------------------------
 
 def test_the_hunt_list_button_is_a_dev_tool() -> None:
-    body = _read("qt_ui/ImageGenerationPage.cpp")
+    # The whole cockpit family: the button is built in whichever split unit holds construction.
+    body = "".join(
+        _read(f"qt_ui/{path.name}")
+        for path in sorted((ROOT / "qt_ui").glob("ImageGenerationPage*.cpp"))
+    )
     assert "queueHuntListButton_->setVisible(spellvision::shell::ShellNavigationController::devToolsVisible())" in body
 
 

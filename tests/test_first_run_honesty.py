@@ -4,11 +4,23 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cpp_source import definition_body
+from cpp_source import definition_body, family_text
 
 ROOT = Path(__file__).resolve().parents[1]
 DIALOG = ROOT / "qt_ui" / "shell" / "FirstRunDialog.cpp"
 MAIN = ROOT / "qt_ui" / "MainWindow.cpp"
+
+
+# The cockpit page is five translation units. These checks are about what the page does, not
+# about which of its split files currently holds the line -- reading one file by name turned a
+# pure code move into fourteen red tests. _igp() is the whole family; _build_ui() is the
+# construction pass wherever it lives, for the checks that are specifically about it.
+def _igp() -> str:
+    return family_text("ImageGenerationPage")
+
+
+def _build_ui() -> str:
+    return definition_body("buildUi", qualifier="ImageGenerationPage")
 
 
 def test_first_run_has_starting_state_and_no_f_drive_assumption() -> None:
@@ -352,7 +364,7 @@ def test_ltx_family_select_swaps_wan_primary() -> None:
     """Live 2026-09-10: LTX tab said Ready while primary stayed wan2.2_t2v_*."""
     video = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
     assert "applyVideoFamilyCheckpointIfNeeded" in video
-    page = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    page = _igp()
     after = page.split("videoFamilyCombo_", 1)[1]
     assert "applyVideoFamilyCheckpointIfNeeded" in after
 
@@ -518,7 +530,7 @@ def test_generation_request_sends_extra_model_roots() -> None:
         encoding="utf-8"
     )
     assert "extraModelsRoots" in header
-    page = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    page = _igp()
     assert "extraModelsRootsFromSettings" in page
     assert "draft.extraModelsRoots" in page
 
@@ -571,7 +583,7 @@ def test_sage_probe_strips_foreign_pythonpath() -> None:
 
 def test_t2i_prompt_row_offers_reference_dropzone() -> None:
     """T2I had no source chip. I2I dropzone is the reference UI — T2I must match."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     block = cpp.split("Prompt-row left slot", 1)[1].split("promptEdit_", 1)[0]
     assert "isVideoMode()" in block
     assert "Only I2I / I2V get a live dropzone" not in block
@@ -579,7 +591,7 @@ def test_t2i_prompt_row_offers_reference_dropzone() -> None:
 
 def test_t2i_canvas_accepts_reference_drop() -> None:
     """The 84px chip is easy to miss. Canvas drop must fill T2I/I2I/I2V the same way."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:900]
     assert "DropTargetFrame" in block
     assert "onFileDropped" in block
@@ -588,7 +600,7 @@ def test_t2i_canvas_accepts_reference_drop() -> None:
 
 def test_prompt_editor_does_not_steal_file_drops() -> None:
     """QTextEdit accepts file drops as text. A still or .json on the prompt never reached the chip."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     hdr = (ROOT / "qt_ui" / "ImageGenerationPage.h").read_text(encoding="utf-8")
     assert "promptEdit_->setAcceptDrops(false)" in cpp
     assert "dragEnterEvent" in hdr
@@ -613,7 +625,7 @@ def test_studio_prompt_editors_do_not_steal_file_drops() -> None:
 
 def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
     """Canvas DropTargetFrame used to treat .json as a still. T2 drop then silently failed."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     fn = cpp.split("void ImageGenerationPage::acceptDroppedLocalFile", 1)[1].split("void ImageGenerationPage::", 1)[0]
     assert "acceptDroppedWorkflow" in fn
     assert ".json" in fn.lower()
@@ -621,7 +633,7 @@ def test_canvas_json_drop_imports_workflow_not_input_image() -> None:
 
 def test_t2v_canvas_accepts_workflow_json_drop() -> None:
     """T2V canvas had acceptDrops off, so a .json never reached the workflow router."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     block = cpp.split("widget the cap constrains cannot also be the measure", 1)[1][:1600]
     assert "setAcceptDrops(!isVideoMode() || isImageInputMode())" not in block
     assert "previewDrop->setAcceptDrops(true)" in block
@@ -629,7 +641,7 @@ def test_t2v_canvas_accepts_workflow_json_drop() -> None:
 
 def test_prompt_input_clear_is_not_opaque_secondary_chip() -> None:
     """Ivory Secondary + QPushButton min-height 30 painted a white hole over the thumb."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     after = cpp.split('QStringLiteral("PromptInputClear")', 1)[1][:900]
     assert "Role::Secondary" not in after
     assert "min-height:18px" in after
@@ -653,7 +665,7 @@ def test_apply_workflow_draft_sets_t2i_reference() -> None:
 
 def test_t2i_still_honesty_banner_says_edit_not_reference() -> None:
     """T2I+still remaps to i2i. The chip must say Edit, not a silent reference."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     preview = (ROOT / "qt_ui" / "ImageGenerationPage_preview.cpp").read_text(encoding="utf-8")
     catalog = (ROOT / "qt_ui" / "ImageGenerationPage_catalog.cpp").read_text(encoding="utf-8")
     blob = cpp + preview + catalog
@@ -666,7 +678,7 @@ def test_t2i_still_honesty_banner_says_edit_not_reference() -> None:
 
 def test_i2v_does_not_offer_denoise() -> None:
     """I2V showed Denoise. Wan/LTX/Hunyuan ignore it. A knob that does nothing is a Generate lie."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _build_ui()
     line = next(l for l in cpp.splitlines() if "denoiseRow_->setVisible" in l)
     assert "!isVideoMode()" in line
 
@@ -705,7 +717,7 @@ def test_hunyuan_hides_negative() -> None:
 
 def test_ltx_does_not_offer_unread_vision_encoder() -> None:
     """Native LTX i2v is LoadImage + conditioners. Vision encoder was a Generate lie."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     assert 'QStringLiteral("Vision encoder")' not in cpp
     graphs = (ROOT / "python" / "native_video_graphs.py").read_text(encoding="utf-8")
     assert "ltx_vision_encoder_name" not in graphs
@@ -720,7 +732,7 @@ def test_t2i_reference_is_not_empty_state() -> None:
 
 def test_t2i_offers_use_last_image() -> None:
     """T2I has a reference slot. Hiding Use Last Image on T2I makes that slot a dead end."""
-    cpp = (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    cpp = _igp()
     call = cpp.split("useLatestT2IButton_->setVisible", 1)[1].split(";", 1)[0]
     assert "isImageInputMode()" not in call or "isVideoMode()" in call
 

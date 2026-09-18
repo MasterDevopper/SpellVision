@@ -526,8 +526,11 @@ BASELINE: dict[str, dict[str, int]] = {
     # both write steps and CFG, and which one the user sees depends on the order they touched them.
     # That interaction is recorded for the Models/UI wave, not resolved here.
     "sampling-defaults-are-data": {
-        "qt_ui/ImageGenerationPage.cpp": 15,
         "qt_ui/ImageGenerationPage_catalog.cpp": 30,
+        # 2026-09-17: these rows did not grow -- they moved file. buildUi() left
+        # ImageGenerationPage.cpp for ImageGenerationPage_ui.cpp and took every one of
+        # its sites with it, so the parent entry is gone rather than zeroed.
+        "qt_ui/ImageGenerationPage_ui.cpp": 15,
         "qt_ui/VideoGenerationPage.cpp": 1,
         "qt_ui/chain/ChainConfigPanelWidget.cpp": 2,
         "qt_ui/studios/ComicStudioPage.cpp": 2,
@@ -545,7 +548,10 @@ BASELINE: dict[str, dict[str, int]] = {
         "qt_ui/Gen3DPage.cpp": 5,
         "qt_ui/HomeDashboardPage.cpp": 5,
         "qt_ui/HomeModuleFrame.cpp": 1,
-        "qt_ui/ImageGenerationPage.cpp": 11,
+        # 2026-09-17: these rows did not grow -- they moved file. buildUi() left
+        # ImageGenerationPage.cpp for ImageGenerationPage_ui.cpp and took every one of
+        # its sites with it, so the parent entry is gone rather than zeroed.
+        "qt_ui/ImageGenerationPage_ui.cpp": 11,
         "qt_ui/InspirationPage.cpp": 5,
         "qt_ui/MainWindow.cpp": 3,
         "qt_ui/ManagerPage.cpp": 1,

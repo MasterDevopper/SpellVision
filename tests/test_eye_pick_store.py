@@ -1,5 +1,9 @@
 """Inspiration KEEP/NO store is registered and wired. No house auto-pin."""
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cpp_source import family_text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CMAKE = ROOT / "CMakeLists.txt"
@@ -48,6 +52,6 @@ def test_eye_pick_store_is_in_cmake_and_page() -> None:
     assert "pickStore_.setMark" in hist
     assert '"picks"' in store or "picks" in store
     assert "keep" in store and "no" in store
-    assert "Queue list…" in (ROOT / "qt_ui" / "ImageGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "Queue list…" in family_text("ImageGenerationPage")
     video = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
     assert "applyKrea2002CanvasIfDefault" not in video

@@ -287,6 +287,7 @@ it every weight under `roots` is walked, smallest first.
   "job_id": "mi_4f1c9a2b7de0",
   "examined": 475,
   "identified": 402,
+  "identified_hf": 7,
   "no_match": 73,
   "lookup_failed": 0,
   "cancelled": false,
@@ -304,6 +305,14 @@ site answering that it does not know this hash, and it is recorded in the sideca
 is the lookup never completing -- offline, throttled, a malformed response -- and such a file
 keeps whatever a previous successful refresh established: its name, trigger words, sources and
 pictures are not overwritten by an empty answer.
+
+TWO sites are asked, in order, and `identified_hf` says how many of `identified` came from the
+second. CivitAI answers by hash. A weight it does not know goes to HuggingFace, which has **no
+by-hash endpoint at all** -- a repo is guessed from the filename, the folder and a short list of
+packagers, and confirmed by `siblings[].lfs.sha256`, so a wrong guess costs a request and can
+never mislabel a file. A `lookup_failed` never reaches the second arm: "CivitAI does not have it"
+and "we could not ask CivitAI" are different facts. Before 2026-09-17 there was no second arm and
+`no_match` read as though both sites had been asked (Doc 62 3j).
 
 ### Model Intel Cancel Request
 

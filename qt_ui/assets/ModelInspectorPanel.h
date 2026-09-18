@@ -69,6 +69,9 @@ public:
     QString headlineText() const;
     QString descriptionText() const;
     QString licenceText() const;
+    // The licence sentence, free of the panel, so a test can put a ModelIntel in front of it
+    // without laying a sidecar on disk. `licenceText()` is this, applied to the shown model.
+    static QString licenceTextFor(const ModelIntel &intel);
     QStringList triggerWords() const;
     // One line per recommended field, each ending in where the number came from.
     QStringList recommendedLines() const;

@@ -191,6 +191,7 @@ def test_igp_split_units_registered():
         "qt_ui/ImageGenerationPage_preview.cpp",
         "qt_ui/ImageGenerationPage_video.cpp",
         "qt_ui/ImageGenerationPage_catalog.cpp",
+        "qt_ui/ImageGenerationPage_ui.cpp",
     ):
         assert name in cmake, f"missing CMake source {name}"
     assert HELPERS_H.is_file()

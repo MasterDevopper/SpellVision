@@ -71,8 +71,25 @@ def user_values(existing: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _is_unfilled(value: Any) -> bool:
+    """A display value the fresh payload did not manage to fill.
+
+    Deliberately narrow: `None`, an empty string, and a dict whose every value is `None` -- which
+    is exactly the shape `display.license` takes when the parent-model fetch could not be made.
+    It cannot fire on `name` / `description_html` / `trigger_words`, whose dicts always carry a
+    `user_override: False`, so "fresh wins" is untouched for every field that HAS a fresh answer.
+
+    This exists for the same reason `carry_forward` does: a run that could not ask must not
+    overwrite what a run that did ask established. Without it one throttled refresh would blank
+    every creator and licence the backfill wrote, and report ok while doing it.
+    """
+    if value is None or value == "":
+        return True
+    return isinstance(value, dict) and bool(value) and all(v is None for v in value.values())
+
+
 def merge(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> dict[str, Any]:
-    """Fresh data wins, except where the user has spoken."""
+    """Fresh data wins, except where the user has spoken -- or where fresh has nothing to say."""
     if not existing:
         return dict(fresh)
 
@@ -83,6 +100,8 @@ def merge(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> dict[str, A
         if isinstance(entry, dict) and entry.get("user_override"):
             display[field] = entry
         elif field not in display:
+            display[field] = entry
+        elif _is_unfilled(display.get(field)) and not _is_unfilled(entry):
             display[field] = entry
 
     # The gallery is a list, so the loop above cannot protect it -- see `user_images`. The user's
@@ -153,6 +172,46 @@ def carry_forward(
     return payload
 
 
+LICENSE_FLAGS = ("allowCommercialUse", "allowDerivatives", "allowNoCredit", "allowDifferentLicense")
+
+
+def creator_of(civitai_model: dict[str, Any] | None,
+               civitai_version: dict[str, Any] | None = None) -> str | None:
+    """Who uploaded this. ONLY the parent-model payload carries it.
+
+    The by-hash VERSION payload has no `creator` at all -- which is why every one of the 680
+    identified sidecars on this box wrote `"creator": null` while the field looked wired. The
+    version is still read as a fallback so a future payload that gains one is not ignored.
+    """
+    for source in (civitai_model, civitai_version):
+        creator = (source or {}).get("creator")
+        if isinstance(creator, dict):
+            name = str(creator.get("username") or "").strip()
+            if name:
+                return name
+    return None
+
+
+def license_of(civitai_model: dict[str, Any] | None,
+               card: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The licence block: a NAME if a card states one, and CivitAI's four permission flags.
+
+    CivitAI states permissions, never an SPDX name -- `allowCommercialUse` is a list
+    (`["Image", "RentCivit", "Rent"]`), the other three are booleans. `name` therefore stays the
+    card's field and is null for a CivitAI-only weight; the Qt inspector reads `name` ALONE today,
+    so the flags are disclosed in the file before anything renders them (see the report for Doc 62
+    3k). The version payload's `model` sub-object holds `name`/`type`/`nsfw`/`poi` and no flag,
+    which is why reading it produced four nulls.
+    """
+    parent = civitai_model or {}
+    card = card or {}
+    block: dict[str, Any] = {"name": card.get("license") or card.get("license_name")}
+    for flag in LICENSE_FLAGS:
+        value = parent.get(flag)
+        block[flag] = value if value is not None else None
+    return block
+
+
 def build_payload(
     *,
     weight: str | Path,
@@ -164,6 +223,7 @@ def build_payload(
     recommended: dict[str, dict[str, Any]],
     images: list[dict[str, Any]] | None = None,
     fetched_at: str | None = None,
+    civitai_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     path = Path(str(weight))
     version = civitai_version or {}
@@ -219,14 +279,8 @@ def build_payload(
         "display": {
             "name": {"value": name, "user_override": False},
             "description_html": {"value": version.get("description") or "", "user_override": False},
-            "creator": (version.get("creator") or {}).get("username")
-                       if isinstance(version.get("creator"), dict) else None,
-            "license": {
-                "name": card.get("license") or card.get("license_name"),
-                "allowCommercialUse": model.get("allowCommercialUse"),
-                "allowDerivatives": model.get("allowDerivatives"),
-                "allowNoCredit": model.get("allowNoCredit"),
-            },
+            "creator": creator_of(civitai_model, version),
+            "license": license_of(civitai_model, card),
             "nsfw_level": version.get("nsfwLevel"),
             "trigger_words": {"value": trained, "user_override": False},
             "images": images or [],

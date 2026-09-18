@@ -52,6 +52,12 @@ class CivitaiClient:
         self._opener = opener or urllib.request.build_opener()
         self._timeout = timeout
         self._sleep = sleep
+        # Parent-model payloads, keyed by model id, INCLUDING the misses. 759 weights on this box
+        # carry only 532 distinct model ids, so several weights share a parent and a per-weight
+        # fetch would ask for the same one up to a dozen times; a cached 404 matters for the same
+        # reason -- a model id the site has forgotten must cost one request per run, not one per
+        # weight. The memo lives for the life of a client, which is the life of one refresh.
+        self._model_cache: dict[int, dict[str, Any] | None] = {}
 
     def _headers(self) -> dict[str, str]:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -107,5 +113,22 @@ class CivitaiClient:
         return found
 
     def model(self, model_id: int) -> dict[str, Any] | None:
-        payload = self._request(f"models/{int(model_id)}")
-        return payload if isinstance(payload, dict) else None
+        """The PARENT model behind a version. The only place creator and licence live.
+
+        Measured 2026-09-17, anonymously, against three live ids: the by-hash VERSION payload
+        carries neither a `creator` nor a licence flag -- its `model` sub-object holds only
+        `name`, `type`, `nsfw`, `poi` -- while this one carries `creator.username` and all four
+        permission flags (`allowCommercialUse` as a LIST, e.g. `["Image", "RentCivit", "Rent"]`,
+        plus `allowDerivatives`, `allowNoCredit`, `allowDifferentLicense` as booleans). It carries
+        no licence NAME: CivitAI states permissions, not an SPDX identifier.
+        """
+        try:
+            key = int(model_id)
+        except (TypeError, ValueError):
+            return None
+        if key in self._model_cache:
+            return self._model_cache[key]
+        payload = self._request(f"models/{key}")
+        result = payload if isinstance(payload, dict) else None
+        self._model_cache[key] = result
+        return result

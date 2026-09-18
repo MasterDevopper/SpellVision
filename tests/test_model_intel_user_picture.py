@@ -45,6 +45,12 @@ class FakeCivitai:
     def __init__(self, image_url: str = "https://image.civitai.example/site.jpeg") -> None:
         self.image_url = image_url
 
+    def model(self, model_id: int) -> dict:
+        # The parent-model payload -- the only source of creator and licence flags.
+        return {"id": int(model_id), "creator": {"username": "kreauser"},
+                "allowCommercialUse": ["Image"], "allowDerivatives": True,
+                "allowNoCredit": True, "allowDifferentLicense": False}
+
     def by_hash(self, digest: str) -> dict:
         return {
             "id": 3068874,

@@ -41,6 +41,7 @@ from model_intelligence import (
     sidecar,
 )
 from model_intelligence.civitai_lookup import DEFAULT_HOST, CivitaiClient
+from model_intelligence.hf_lookup import HfClient
 from model_intelligence.refresh import RefreshJob
 
 
@@ -240,6 +241,19 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
         except Exception:
             api_key = None
 
+    # The SECOND arm. HF public model cards need no token, so an absent one is normal; a stored
+    # token is passed only for rate-limit headroom and is never logged or echoed. Doc 62 3j: this
+    # module constructed a CivitAI client and nothing else, so `no_match` meant "CivitAI does not
+    # know it" while the summary read as though both sites had been asked.
+    hf_token = req.get("hf_token")
+    if not hf_token:
+        try:
+            from credential_store import get_credential
+
+            hf_token = get_credential("hf_token")
+        except Exception:
+            hf_token = None
+
     try:
         client = CivitaiClient(host=host, api_key=api_key)
     except ValueError as exc:
@@ -276,6 +290,7 @@ def handle_model_intel_refresh_command(req: dict[str, Any], emitter: Any = None)
         roots,
         files=files,
         client=client,
+        hf=HfClient(token=hf_token),
         models_root=req.get("models_root") or roots[0],
         progress=progress,
         cancel=jobs.cancel_check(job_id),

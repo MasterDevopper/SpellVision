@@ -31,6 +31,8 @@
 
 namespace {
 
+// --- Session strip visuals ---------------------------------------------------------------------
+// Neutral rounded tile shown while a thumbnail is still generating (and as the video fallback).
 QPixmap sessionLoadingTile(int size, bool video)
 {
     QPixmap pm(size, size);
@@ -57,6 +59,7 @@ QPixmap sessionLoadingTile(int size, bool video)
     return pm;
 }
 
+// Composite a small play badge (bottom-left) onto a video item's poster thumbnail.
 void paintPlayBadge(QPixmap &pm)
 {
     QPainter p(&pm);
@@ -77,6 +80,7 @@ void paintPlayBadge(QPixmap &pm)
     p.end();
 }
 
+// Write an extracted video frame to a stable per-video poster PNG; returns its path ("" on failure).
 QString writeSessionPoster(const QString &videoPath, const QImage &frame)
 {
     if (frame.isNull())

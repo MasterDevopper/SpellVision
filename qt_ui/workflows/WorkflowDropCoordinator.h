@@ -107,6 +107,56 @@ public:
     // true: a UI graph whose model names live in positional widget values once reported READY over
     // `models 0/0 present`, which is a green badge on a workflow nobody had checked.
     static Readiness readinessOfImportReply(const QJsonObject &importReply);
+
+    // What the compile step answered, as outcomes that can be told apart.
+    //
+    // A REFUSAL and a SILENCE used to be the same thing here: both left `compiled_prompt_path`
+    // empty, and the empty-path branch fell back to whatever prompt_api.json happened to sit in the
+    // import root. Once the worker began REFUSING a conversion whose node classes it cannot resolve
+    // -- replying with a null path on purpose -- that fallback fired in exactly the case where the
+    // worker had just said this graph must not be compiled, and answered it with an older file from
+    // the same directory. Seven such files exist on this box. They are well-formed JSON carrying a
+    // width in a `batch_size` field, so nothing downstream rejects them: they are simply wrong, all
+    // the way to a render.
+    struct CompiledPrompt
+    {
+        QString path;                   // empty when there is nothing safe to read
+        QString refusal;                // the worker's own sentence; non-empty means NEVER fall back
+        // Non-empty means NOBODY CHECKED -- ComfyUI was unreachable. The draft still opens, from the
+        // SOURCE graph and never from an artefact, and it is never submittable. See
+        // schemaUnavailableWarning below for why this is not the same answer as a refusal.
+        QString unverifiedReason;
+        bool fromStaleFallback = false; // the path is an artefact of unknown age -- say so out loud
+    };
+
+    // "We could not check", which is a fact about the MACHINE. Empty unless the reply says
+    // `object_info_available: false` AND names no fault in the graph itself.
+    //
+    // This used to be folded into compileRefusal, and the two answers are genuinely different. A
+    // missing node class is a fact about the GRAPH: something looked, and what it found is broken,
+    // so there is nothing to open and the sentence naming the packs is the whole answer. An
+    // unreachable ComfyUI is a fact about the machine the user is sitting at -- the workflow is
+    // exactly as readable as it was a minute ago, and refusing to show it teaches the user nothing.
+    // Folding them together cost offline inspection, which is why they are split.
+    //
+    // A fault named IN the reply outranks the flag: a worker that reports missing classes while
+    // saying it could not reach the schema has checked something, and that is a refusal.
+    //
+    // The sentence is shared, not re-typed, exactly as compileRefusal is: Flows asks this same
+    // function, because one cause must produce one message and two vocabularies for "ComfyUI is
+    // down" would start disagreeing on the first user who saw both.
+    static QString schemaUnavailableWarning(const QJsonObject &compileReply);
+
+    // The worker's reason there is no prompt AND no point opening one, or empty when it simply did
+    // not say. Covers the refusal (`errors` / `missing_classes` / `dangling_links`) and the failure
+    // that carries a reason, and names the packs `missing_packs` carries even when the reply sent
+    // the arrays without the prose -- a worker older than that field still refuses, and its user
+    // still needs to be told what to install. An unreachable schema is NOT in here; it is the third
+    // state above.
+    static QString compileRefusal(const QJsonObject &compileReply);
+    static CompiledPrompt compiledPromptFor(const QJsonObject &compileReply,
+                                            const QJsonObject &importReply);
+    // The path alone, for callers that only want somewhere to read from. A refusal yields nothing.
     static QString compiledPromptPathFor(const QJsonObject &compileReply, const QJsonObject &importReply);
     static WorkflowDraftBuilder::Source draftSourceFor(const QJsonObject &importReply,
                                                        const QString &compiledPromptPath,
@@ -129,6 +179,10 @@ private:
         QJsonObject importReply;
         QString modeId;
         QString compiledPromptPath;
+        // Set when the compile could not run because ComfyUI was unreachable. Carried through the
+        // async hops so that `finish` builds an UNVERIFIED draft -- opened, warned about, and closed
+        // to submission -- rather than the ordinary one.
+        QString unverifiedReason;
     };
 
     void send(const QJsonObject &request, RequestCompletion completion);

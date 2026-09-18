@@ -214,11 +214,14 @@ def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[
                 # sends the reader to the wrong place entirely.
                 missing = _missing_node_classes(raw, object_info)
                 if missing:
-                    shown = ", ".join(missing[:5])
-                    more = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
-                    reason = (
+                    # Name the PACK where the workflow declares one -- "install
+                    # ComfyUI_Comfyroll_CustomNodes" ends the problem, a list of class names starts
+                    # a search. Falls back to the bare class list when nothing is declared.
+                    from comfy_missing_packs import missing_class_message
+
+                    reason = missing_class_message(raw, missing, object_info) or (
                         f"the workflow needs {len(missing)} node class(es) this ComfyUI does not "
-                        f"have: {shown}{more}"
+                        f"have: {', '.join(missing[:5])}"
                     )
 
     # Fallback: the previously compiled API graph. Only trustworthy if its loaders still carry
@@ -230,6 +233,18 @@ def _load_graph(import_root: Path, object_info: dict[str, Any] | None) -> tuple[
         except Exception:
             compiled = None
         if isinstance(compiled, dict):
+            # Staleness has two shapes, and this only ever checked one. The other is a compile
+            # written by the silent-drop behaviour: nodes omitted, every link into them kept. Such
+            # a file names models that the graph ComfyUI would actually run does not contain.
+            from comfy_graph_links import describe_dangling_links, find_dangling_links
+
+            dangling = find_dangling_links(compiled)
+            if dangling:
+                return None, (
+                    "prompt_api.json is stale -- "
+                    + describe_dangling_links(dangling)
+                    + f" ({reason})"
+                )
             if _loaders_have_inputs(compiled):
                 return compiled, f"prompt_api.json (cached compile; {reason})"
             return None, f"prompt_api.json is stale -- its model loaders carry no inputs ({reason})"
