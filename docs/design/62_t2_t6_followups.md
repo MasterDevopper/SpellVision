@@ -159,6 +159,27 @@ The read side was wrong in three places, not one, and now has a single resolver:
 
 **`clip_skip` — DROPPED, and the measurement is why.** Of the 210 sidecars carrying a `clip_skip`, **203 are sdxl / pony / illustrious / stable_diffusion / unclassified** — the families that render through **diffusers**, where `CLIPSetLastLayer` is not the mechanism at all, so "emit the node in the image builders" would not have reached one of them. The remaining 7 are 5 krea2 at value 1 (the default layer — a no-op) and 2 flux at 2, where a distilled clip_l+T5 stack has no meaningful CLIP layer to skip. The only route that *would* apply the published values is threading `clip_skip=` into the diffusers pipeline call, which silently changes the output of every SDXL render in the library — an unverifiable change in a pass that renders nothing. So the field is gone from `recommended.FIELDS` and from the inspector's `kFieldOrder`, with the reasoning recorded once, on `FIELDS`. `meta_parse` still normalises it exactly as it normalises `seed`, which is also not a recommendation; `_offer` drops anything not in `FIELDS`, so the sidecars already carrying it are inert on read — no schema bump, no invalidated files.
 
+**3e RENDER-VERIFIED 2026-09-18.** The guidance half shipped without a render; it is now settled on pixels for both affected families, with `scripts/dev/verify_guidance_change.py`.
+
+**What the change actually moves.** `cfg` resolves to **1.0** on both families (correct for a distilled model), so the old path — which took `cfg` — fed `FluxGuidance` **1.0**, the nearly-unguided case. The new path feeds the stated guidance: **3.5** flux, **6.0** hunyuan.
+
+| family | guidance | result |
+|---|---|---|
+| flux t2i | 1.0 (old, once model defaults applied) | flattest light, engravings mushy, the alidade collapses into overlapping bars |
+| flux t2i | **3.5 (new)** | clean subject separation, the instrument reads as an instrument |
+| flux t2i | 7.0 (old, from an archived request carrying `cfg: 7`) | sharpest, and the graduation marks and numerals are **legible** — which is what the prompt asked for |
+| hunyuan t2v | 1.0 (old) | flat and washed, **no gutter at all** — just water, though the prompt names one |
+| hunyuan t2v | **6.0 (new)** | the gutter kerb is visible, contrast holds, the scene the prompt asked for |
+
+**Verdict: correct, and a clear improvement over the path a user was actually on.** Both graphs were confirmed to carry the intended number — hunyuan steers through `FluxGuidance` too, as the code comment says.
+
+**One thing it opens:** on flux, 7.0 rendered this detail-heavy prompt visibly better than the family table's 3.5. That fallback may be conservative; a per-model published guidance would outrank it. A data question, not a code one.
+
+**Two recorded traps this run walked into, both worth re-reading:**
+1. **The first A/B was void — a long-running worker is a stale binary.** The worker had been up since 2026-09-17 07:38; the fixes landed 2026-09-18 07:40–07:54. All three flux arms returned `FluxGuidance 7.0` (the *old* behaviour) with identical pixel statistics and 1.4–2.0 s times off ComfyUI's cache. Restarting it made the arms differ immediately, and the 7.0 arm then reproduced the stale run's statistics exactly — which is what confirmed the diagnosis rather than merely suggesting it.
+2. **A request built by copying another family's template renders that other family.** The first hunyuan attempt reported `model_family: ltx` and emitted LTX's node ids, because `model_family`, `video_backend_route`, `video_model_stack` and a dozen siblings came with the copy. Only after stripping every route/family/stack key did the worker classify from the model.
+
+
 **3f. A preset and a model's own defaults both write steps and CFG — FIXED 2026-09-18.** Traced 2026-09-17: the two writers are `applyPreset` (`ImageGenerationPage_catalog.cpp:1190`, fired from the preset combo at `ImageGenerationPage_ui.cpp:341`, writing steps/cfg/width/height/sampler/scheduler) and `applyModelDefaults` (`ImageGenerationPage_video.cpp:978`, fired on every model change, overlaying whatever the resolver answered through the same `applyResolvedSettings`). **Neither knows the other exists**, so the last one to fire wins and the user cannot tell which they are looking at.
 
 The ruling stands: **a preset is a deliberate user choice and wins until the model changes.** Implementing it means `applyModelDefaults` must know whether a preset has been chosen since the last model change, and must skip exactly the fields that preset owns — not all of its fields, since the overlay's value is that a field the preset does not set still gets the model's answer.
