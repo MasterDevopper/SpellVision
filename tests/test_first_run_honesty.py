@@ -692,12 +692,32 @@ def test_empty_prompt_blocks_generate() -> None:
 
 
 def test_ltx_hides_steps_and_cfg() -> None:
-    """LTX distilled pins CFG 1 and ManualSigmas. Steps/CFG spinners were lies."""
+    """LTX distilled pins CFG 1 and ManualSigmas. Steps/CFG spinners were lies.
+
+    Asserted as the RULE, not as one spelling of it. This pinned the whole expression
+    `setVisible(!isLtx && !isFlux3)` and so failed the moment `advanced_` joined it as a third
+    factor -- a Simple/Advanced leak fix that made the line strictly more correct. What this test
+    is about is that LTX and FLUX.3 are factors in whether those two rows show; it has no opinion
+    on what else is. tests/cpp/test_model_defaults_apply.cpp owns the disclosure half.
+    """
     cpp = (ROOT / "qt_ui" / "ImageGenerationPage_video.cpp").read_text(encoding="utf-8")
     fn = cpp.split("void ImageGenerationPage::updateVideoFamilyUi()", 1)[1]
     fn = fn.split("\nvoid ImageGenerationPage::", 1)[0]
-    assert "stepsRow_->setVisible(!isLtx && !isFlux3)" in fn
-    assert "cfgRow_->setVisible(!isLtx && !isFlux3)" in fn
+    for row in ("stepsRow_", "cfgRow_"):
+        call = fn.split(row + "->setVisible(", 1)
+        assert len(call) == 2, row + " visibility is no longer set in updateVideoFamilyUi"
+        expression = call[1].split(");", 1)[0]
+        # The argument may be a bare identifier -- the two rows share one condition, so hoisting it
+        # into a named bool is the natural way to write it. Follow that one hop rather than forcing
+        # the condition to be spelled inline twice, which is what pinning the call site did.
+        if expression.isidentifier():
+            declaration = fn.split("bool " + expression + " =", 1)
+            assert len(declaration) == 2, (
+                row + " is gated on '" + expression + "', which is not declared in this function"
+            )
+            expression = declaration[1].split(";", 1)[0]
+        assert "!isLtx" in expression, "LTX no longer gates " + row + ": " + expression
+        assert "!isFlux3" in expression, "FLUX.3 no longer gates " + row + ": " + expression
 
 
 def test_flux3_hides_upscale() -> None:
