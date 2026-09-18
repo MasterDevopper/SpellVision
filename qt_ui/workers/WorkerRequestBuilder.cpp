@@ -258,6 +258,10 @@ QJsonObject buildWorkerGenerationRequest(const QString &modeId,
     // and Wan split never reached enqueue — the worker then looked like it ignored them.
     const QStringList cockpitKeys = {
         QStringLiteral("batch_count"),
+        // Distilled guidance (Doc 62 3e). The named inserts above carry `cfg` and not this -- so a
+        // Guidance control that reached buildRequestPayload correctly would still have been dropped
+        // HERE, one hop further on, which is the exact shape of every entry in this list.
+        QStringLiteral("guidance"),
         QStringLiteral("models_root"),
         QStringLiteral("extra_models_roots"),
         QStringLiteral("enable_vae_tiling"),

@@ -51,6 +51,7 @@ private slots:
     void theDefaultsAreWhatShipped();
     void aStatedValueBeatsTheDefault();
     void theSeedSurvivesBeyondThirtyTwoBits();
+    void guidanceSurvivesTheWhitelist();
 
     void imageModesCarryNoFrameCount();
     void videoModesCarryFramesAndFps();
@@ -130,6 +131,25 @@ void TestWorkerRequestBuilder::aStatedValueBeatsTheDefault()
     const QJsonObject r = buildWorkerGenerationRequest(QStringLiteral("t2i"), p, tmp_.path());
     QCOMPARE(r.value(QStringLiteral("steps")).toInt(), 8);
     QCOMPARE(r.value(QStringLiteral("cfg")).toDouble(), 1.0);
+}
+
+void TestWorkerRequestBuilder::guidanceSurvivesTheWhitelist()
+{
+    // Doc 62 3e. This builder is a WHITELIST, and `guidance` is not among the named inserts that
+    // carry steps/cfg/seed/width/height -- so a Guidance control that filled the draft correctly
+    // and reached `GenerationRequestBuilder::build` correctly would still have been dropped HERE,
+    // one hop further on. That is the exact shape of every entry in `cockpitKeys`, whose own
+    // comment records that batch count, VAE tiling, upscale and the Wan split all "never reached
+    // enqueue -- the worker then looked like it ignored them".
+    QJsonObject p = minimalPayload(tmp_.path());
+    p.insert(QStringLiteral("cfg"), 7.0);
+    p.insert(QStringLiteral("guidance"), 3.5);
+    const QJsonObject r = buildWorkerGenerationRequest(QStringLiteral("t2i"), p, tmp_.path());
+    QVERIFY2(r.contains(QStringLiteral("guidance")),
+             "guidance was dropped on the way to the worker; the control would do nothing");
+    QCOMPARE(r.value(QStringLiteral("guidance")).toDouble(), 3.5);
+    // And cfg is untouched: on the families that read guidance they are two different numbers.
+    QCOMPARE(r.value(QStringLiteral("cfg")).toDouble(), 7.0);
 }
 
 void TestWorkerRequestBuilder::theSeedSurvivesBeyondThirtyTwoBits()
