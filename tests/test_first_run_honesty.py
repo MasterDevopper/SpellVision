@@ -145,8 +145,26 @@ def test_launch_and_quit_do_not_block_the_window() -> None:
     tear = definition_body("tearDownComfyOnExit", qualifier="MainWindow")
     assert "waitForFinished" not in tear
     assert "setParent(nullptr)" in tear
-    assert "probeComfyQueueState" not in tear, (
-        "quit used to wait 500ms on /queue; that blocks the window's disappearance"
+    # This used to read `"probeComfyQueueState" not in tear`, from 4acf804 -- "quit used to wait
+    # 500ms on /queue; that blocks the window's disappearance". The latency complaint was real.
+    # What the removal left behind was not: with the probe gone, quit decided whether ComfyUI was
+    # busy by walking SpellVision's OWN queue, which cannot see a render this app did not submit
+    # (ComfyUI's web UI, a second instance, anything from before a queue reset), and the next line
+    # was terminate(). tests/test_comfy_active_queue_shutdown.py had specified that guard all
+    # along and went red the day this assertion was written.
+    #
+    # So the probe is back, and this holds the property the removal was protecting instead of the
+    # removal itself: the window is hidden BEFORE anything touches the network, and the ask
+    # carries its own short budget rather than inheriting a default someone later widens.
+    assert "probeComfyQueueState" in tear
+    assert tear.index("hide()") < tear.index("probeComfyQueueState"), (
+        "quit must put the window away before it spends anything on /queue"
+    )
+    budget = re.search(r"constexpr int (kComfyExitQueueProbeTimeoutMs)\s*=\s*(\d+);", main)
+    assert budget, "the exit probe's budget should be a named constant in MainWindow.cpp"
+    assert budget.group(1) in tear, "the probe must be given that budget explicitly"
+    assert int(budget.group(2)) <= 500, (
+        "a quit may not wait longer than half a second on a backend that is not answering"
     )
     worker = definition_body("stopOwnedWorkerService", qualifier="MainWindow")
     assert "waitForFinished" not in worker

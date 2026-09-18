@@ -159,6 +159,12 @@ constexpr int kWorkerReadinessDeadlineMs = 30000;
 constexpr int kComfyReadinessDeadlineMs = 90000;
 constexpr int kRuntimeTerminateGraceMs = 2000;
 
+// Exit is a deadline, not a lifetime. The /queue probe that gates the shutdown runs on
+// aboutToQuit, so it gets one short bounded ask and no retry ladder: a probe that cannot answer
+// inside this budget returns Unknown, and Unknown detaches rather than kills. Half a second is
+// the probe's own default and is already an eternity for a loopback GET.
+constexpr int kComfyExitQueueProbeTimeoutMs = 500;
+
 QString comfyRuntimeStateRoot()
 {
     QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
@@ -3796,6 +3802,8 @@ void MainWindow::sendWorkerRequestAsync(
 
 void MainWindow::tearDownComfyOnExit()
 {
+    // Ownership first. A ComfyUI this app adopted rather than started is somebody else's process
+    // and is never ours to stop, whatever any queue says about it.
     QProcess *ownedProcess = ownedComfyProcess_;
     if (!ownedProcess)
         return;
@@ -3808,7 +3816,14 @@ void MainWindow::tearDownComfyOnExit()
         return;
     }
 
-    const bool busy = [this]() {
+    // Our own queue is a cheap local signal, and it is trustworthy in exactly ONE direction: when
+    // it says busy we are busy, and no probe can overturn that. Its negative is what was wrong
+    // here -- it lists the jobs THIS app submitted and still remembers, so work ComfyUI is
+    // genuinely doing is invisible to it whenever we did not submit it: a render started from
+    // ComfyUI's own web UI, one from a second SpellVision, one from before a queue reset. This
+    // used to be the whole check, and the line after it was terminate(). A false is a reason to
+    // ask the server, not a licence to kill.
+    const bool localQueueBusy = [this]() {
         if (!queueManager_)
             return false;
         for (const QueueItem &item : queueManager_->items())
@@ -3819,9 +3834,38 @@ void MainWindow::tearDownComfyOnExit()
         }
         return false;
     }();
-    if (busy)
+
+    // So ask ComfyUI itself -- but only when our own queue has nothing to say, and only once, on a
+    // short explicit budget, because this runs on aboutToQuit and must never stall a quit.
+    //
+    // 4acf804 deleted this probe for exactly that reason: quit paid the budget with the window
+    // still on screen, and it pinned the deletion with a source assertion. What the deletion left
+    // behind was a kill decided entirely from SpellVision's own queue, which is the defect above.
+    // The answer is not to stop asking -- it is to be GONE before we ask. Hiding here is
+    // synchronous on Windows (ShowWindow(SW_HIDE) inside QWidget::hide), so the window is off the
+    // screen before the first socket call, and whatever the probe spends is spent by a process
+    // that no longer has anything on it.
+    hide();
+
+    const spellvision::shell::RuntimeProfile profile =
+        spellvision::shell::RuntimeProfile::load(resolveProjectRoot());
+    const spellvision::shell::ComfyQueueState queueState =
+        localQueueBusy ? spellvision::shell::ComfyQueueState::Busy
+                       : spellvision::shell::probeComfyQueueState(profile.comfyHost,
+                                                                  profile.comfyPort,
+                                                                  kComfyExitQueueProbeTimeoutMs);
+
+    // Verified idle -- by the server, not by our memory of it -- is the ONLY state in which an
+    // app-owned ComfyUI may be terminated. Unknown means "we could not check", which is not "we
+    // checked and it is idle" (223e466 settled the same distinction for the drop path): a fact
+    // about the machine is not a fact about the work, so it detaches like Busy does.
+    if (queueState != spellvision::shell::ComfyQueueState::Idle)
     {
-        appendLogLine(QStringLiteral("ComfyUI still has active work; leaving the app-started runtime running."));
+        appendLogLine(queueState == spellvision::shell::ComfyQueueState::Busy
+                          ? QStringLiteral("ComfyUI still has active work; leaving the app-started "
+                                           "runtime running.")
+                          : QStringLiteral("ComfyUI's queue could not be checked; leaving the "
+                                           "app-started runtime running."));
         disconnect(ownedProcess, nullptr, this, nullptr);
         ownedProcess->setParent(nullptr);
         ownedComfyProcess_ = nullptr;

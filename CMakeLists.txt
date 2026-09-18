@@ -534,6 +534,17 @@ qt_add_executable(test_comfy_endpoint_profile tests/cpp/test_comfy_endpoint_prof
 target_link_libraries(test_comfy_endpoint_profile PRIVATE SpellVisionCore Qt6::Test)
 add_test(NAME comfy_endpoint_profile COMMAND test_comfy_endpoint_profile)
 
+# Exit's kill gate. `probeComfyQueueState` was specified, built and called by NOTHING, while
+# tearDownComfyOnExit decided "is ComfyUI busy?" from SpellVision's own queue -- so a render
+# started anywhere else read as idle and the next line was terminate(). The probe is that
+# decision's engine now, and the property held here is the one the guard rests on: no failure
+# resolves to Idle. A closed port, a silent server, an error status and an unparseable body are
+# each "could not check", which is Unknown, which detaches -- proven over a real loopback socket,
+# because a source check would pass just as happily on a probe that answered Idle on refusal.
+qt_add_executable(test_comfy_exit_guard tests/cpp/test_comfy_exit_guard.cpp)
+target_link_libraries(test_comfy_exit_guard PRIVATE SpellVisionCore Qt6::Test)
+add_test(NAME comfy_exit_guard COMMAND test_comfy_exit_guard)
+
 # The second machine was a string literal: ManagerPage printed it, probed it with the host spelled
 # again, and then read the MASTER's health back out of a QLabel's text. Endpoints are data now, and
 # these are the three properties that make the data trustworthy -- a round trip, a local entry that
@@ -798,6 +809,7 @@ add_test(NAME model_refresh_action COMMAND test_model_refresh_action)
 # one. The environment block below is the other half of the fix.
 set_target_properties(test_responsive_matrix test_worker_response_parser test_sampling_controller
                       test_project_root test_worker_request_builder test_comfy_endpoint_profile
+                      test_comfy_exit_guard
                       test_worker_session_secret test_worker_socket_frames test_app_version test_canvas_aspect
                       test_lora_stack_row test_action_row_pill test_queue_tally test_canvas_size_default
                       test_family_license test_eliding_label test_telemetry_presenter test_sv_fonts
