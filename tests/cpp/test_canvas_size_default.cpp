@@ -16,11 +16,16 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QTemporaryDir>
 
+#include "DatasetGenerationPage.h"
 #include "ImageGenerationPage.h"
+#include "workers/WorkerRequestBuilder.h"
 
 namespace
 {
@@ -105,6 +110,104 @@ QComboBox *videoPrimaryModelComboOf(ImageGenerationPage &page)
     }
     return nullptr;
 }
+
+// --- the dataset page's half of the same question -----------------------------------------------
+
+// The dataset page's canvas spins: range 0..2048 with the em-dash special value. Same shape as the
+// cockpit's, different maximum, and they live inside the Advanced block.
+CanvasSpins datasetCanvasSpins(DatasetGenerationPage &page)
+{
+    CanvasSpins spins;
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->maximum() != 2048 || box->specialValueText() != QStringLiteral("—"))
+            continue;
+        if (!spins.width)
+            spins.width = box;
+        else if (!spins.height)
+            spins.height = box;
+    }
+    return spins;
+}
+
+// The read-only line the page shows about the canvas, found by what it SAYS. An object name would
+// be an implementation detail; this sentence is the thing the ruling is about -- Dataset inherits
+// the cockpit canvas AND SAYS SO -- so the test looks for it the way a user would.
+QLabel *canvasCaptionOf(DatasetGenerationPage &page)
+{
+    for (QLabel *label : page.findChildren<QLabel *>())
+    {
+        if (label->text().startsWith(QStringLiteral("Canvas:")))
+            return label;
+    }
+    return nullptr;
+}
+
+QPushButton *buttonWithText(DatasetGenerationPage &page, const QString &text)
+{
+    for (QPushButton *button : page.findChildren<QPushButton *>())
+    {
+        if (button->text() == text)
+            return button;
+    }
+    return nullptr;
+}
+
+// The page refuses on an empty destination before it ever looks at the canvas, so every generate
+// case has to get past that first. The single QLineEdit on the page is the output directory.
+void stageOutputFolder(DatasetGenerationPage &page, const QString &path)
+{
+    if (QLineEdit *edit = page.findChild<QLineEdit *>())
+        edit->setText(path);
+}
+
+// The page's own status line -- where the refusal sentence lands.
+QLabel *previewLabelOf(DatasetGenerationPage &page)
+{
+    return page.findChild<QLabel *>(QStringLiteral("DatasetPreview"));
+}
+
+// What ImageGenerationPage::buildRequestPayload hands the shell. 768x1344 rather than a round
+// number on purpose: a case that passed because page and cockpit happened to agree on 1024 would
+// prove nothing, and 1024 is the exact house default this change removed.
+QJsonObject cockpitDraftWithCanvas(int width, int height)
+{
+    QJsonObject draft;
+    draft.insert(QStringLiteral("model"), QStringLiteral("krea2.safetensors"));
+    if (width > 0)
+        draft.insert(QStringLiteral("width"), width);
+    if (height > 0)
+        draft.insert(QStringLiteral("height"), height);
+    return draft;
+}
+
+// generateDataset() writes train/lastDatasetRoot into the REAL DarkDuck/SpellVision store -- it
+// constructs its own QSettings with those names rather than using the application's, so the test
+// harness's organisation name does not contain it. Saved and put back, so running the suite does
+// not repoint the Train page at a temporary directory that no longer exists.
+class RestoreDatasetRootSetting
+{
+public:
+    RestoreDatasetRootSetting()
+        : settings_(QStringLiteral("DarkDuck"), QStringLiteral("SpellVision")),
+          had_(settings_.contains(QStringLiteral("train/lastDatasetRoot"))),
+          previous_(settings_.value(QStringLiteral("train/lastDatasetRoot")))
+    {
+    }
+
+    ~RestoreDatasetRootSetting()
+    {
+        if (had_)
+            settings_.setValue(QStringLiteral("train/lastDatasetRoot"), previous_);
+        else
+            settings_.remove(QStringLiteral("train/lastDatasetRoot"));
+    }
+
+private:
+    QSettings settings_;
+    bool had_ = false;
+    QVariant previous_;
+};
 
 QString writePng(const QTemporaryDir &dir, const QString &name, const QSize &size)
 {
@@ -374,6 +477,142 @@ private slots:
         page.useImageAsInput(second);
         QCOMPARE(spins.width->value(), 720);
         QCOMPARE(spins.height->value(), 1280);
+    }
+
+    // --- Doc 62: Dataset in Simple inherits the cockpit canvas, and says so ---------------------
+    //
+    // adb1c97 removed the house default from the two dataset canvas spins -- correctly, it stated a
+    // size nobody chose. But those spins live in the Advanced block, so a Simple user was left
+    // pressing Generate and reading "Choose a canvas size to generate." beside no canvas control at
+    // all. The old default had been masking a dead end rather than causing it.
+    //
+    // The ruling is inheritance, stated: the size comes from Text to Image, the page names it
+    // before the user commits, and the substitution happens in ONE place -- the shell's
+    // mergeDatasetRequestFromCockpit, which until now could not run, because the page refused
+    // before emitting anything it could act on. These cases drive the page and then run what it
+    // emits through that merge, which is the whole of the path the worker sees.
+
+    void a_simple_dataset_page_generates_with_the_canvas_it_inherited()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const RestoreDatasetRootSetting guard;
+
+        DatasetGenerationPage page;
+        page.updateDisclosure(false); // Simple: the width/height spins are not on screen
+        stageOutputFolder(page, dir.path());
+        page.setInheritedCanvas(768, 1344);
+
+        QSignalSpy submitted(&page, &DatasetGenerationPage::generateDatasetRequested);
+        QPushButton *generate = buttonWithText(page, QStringLiteral("Generate Dataset"));
+        QVERIFY2(generate, "the Generate Dataset button was not found");
+        generate->click();
+
+        QCOMPARE(submitted.count(), 1);
+        const QJsonObject payload = submitted.at(0).at(0).toJsonObject();
+        // The page reports its canvas as UNSET. It does not copy the inherited numbers in: the rule
+        // would then live in two places, which is the duplication this codebase keeps paying for.
+        QCOMPARE(payload.value(QStringLiteral("width")).toInt(), 0);
+        QCOMPARE(payload.value(QStringLiteral("height")).toInt(), 0);
+
+        // ...and what reaches the worker carries the cockpit's canvas.
+        const QJsonObject merged = spellvision::workers::mergeDatasetRequestFromCockpit(
+            payload, cockpitDraftWithCanvas(768, 1344));
+        QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 768);
+        QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 1344);
+    }
+
+    void a_simple_dataset_page_with_nothing_to_inherit_still_refuses()
+    {
+        // The gate is not relaxed. It now fires on the case it was always for -- nothing anywhere
+        // states a canvas -- and it keeps the same words, because they are still the right words.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const RestoreDatasetRootSetting guard;
+
+        DatasetGenerationPage page;
+        page.updateDisclosure(false);
+        stageOutputFolder(page, dir.path());
+        page.setInheritedCanvas(0, 0);
+
+        QSignalSpy submitted(&page, &DatasetGenerationPage::generateDatasetRequested);
+        QPushButton *generate = buttonWithText(page, QStringLiteral("Generate Dataset"));
+        QVERIFY(generate);
+        generate->click();
+
+        QCOMPARE(submitted.count(), 0);
+        QLabel *preview = previewLabelOf(page);
+        QVERIFY(preview);
+        QCOMPARE(preview->text(), QStringLiteral("Choose a canvas size to generate."));
+    }
+
+    void a_stated_dataset_canvas_outranks_the_inherited_one()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const RestoreDatasetRootSetting guard;
+
+        DatasetGenerationPage page;
+        page.updateDisclosure(true); // Advanced: the spins are revealed in place
+        stageOutputFolder(page, dir.path());
+        page.setInheritedCanvas(768, 1344);
+
+        const CanvasSpins spins = datasetCanvasSpins(page);
+        QVERIFY2(spins.width && spins.height, "the dataset canvas spin boxes were not found");
+        spins.width->setValue(512);
+        spins.height->setValue(512);
+
+        QSignalSpy submitted(&page, &DatasetGenerationPage::generateDatasetRequested);
+        QPushButton *generate = buttonWithText(page, QStringLiteral("Generate Dataset"));
+        QVERIFY(generate);
+        generate->click();
+
+        QCOMPARE(submitted.count(), 1);
+        const QJsonObject payload = submitted.at(0).at(0).toJsonObject();
+        QCOMPARE(payload.value(QStringLiteral("width")).toInt(), 512);
+        const QJsonObject merged = spellvision::workers::mergeDatasetRequestFromCockpit(
+            payload, cockpitDraftWithCanvas(768, 1344));
+        QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 512);
+        QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 512);
+    }
+
+    void the_caption_names_the_inherited_canvas_and_where_it_came_from()
+    {
+        // Saying it is the point of the ruling. A silent inheritance would be exactly the hidden
+        // output-changing state the v0.1.0 hardening pass was about, and from the user's side of
+        // the screen it would be indistinguishable from a house default.
+        DatasetGenerationPage page;
+        page.setInheritedCanvas(768, 1344);
+        page.updateDisclosure(false);
+
+        QLabel *caption = canvasCaptionOf(page);
+        QVERIFY2(caption, "the page states no canvas anywhere");
+        QVERIFY2(caption->text().contains(QStringLiteral("768"))
+                     && caption->text().contains(QStringLiteral("1344")),
+                 qPrintable(caption->text()));
+        QVERIFY2(caption->text().contains(QStringLiteral("Text to Image")), qPrintable(caption->text()));
+
+        // Visible in SIMPLE -- the mode that has no canvas control. A caption that only appeared
+        // beside the spins would be telling the one user who can already see the answer.
+        QVERIFY2(caption->isVisibleTo(&page), "the canvas caption is hidden in Simple");
+        const CanvasSpins spins = datasetCanvasSpins(page);
+        QVERIFY(spins.width);
+        QVERIFY2(!spins.width->isVisibleTo(&page), "Simple is showing the Advanced canvas spins");
+
+        // Advanced reveals the spins IN PLACE; it does not take the sentence away.
+        page.updateDisclosure(true);
+        QVERIFY(caption->isVisibleTo(&page));
+        QVERIFY(spins.width->isVisibleTo(&page));
+    }
+
+    void a_page_with_nothing_to_inherit_says_so_rather_than_naming_a_size()
+    {
+        DatasetGenerationPage page;
+        page.updateDisclosure(false);
+        QLabel *caption = canvasCaptionOf(page);
+        QVERIFY(caption);
+        QVERIFY2(!caption->text().contains(QStringLiteral("1024")), qPrintable(caption->text()));
+        QVERIFY2(caption->text().contains(QStringLiteral("not set")), qPrintable(caption->text()));
     }
 };
 

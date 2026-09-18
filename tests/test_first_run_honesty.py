@@ -479,20 +479,66 @@ def test_dataset_first_run_canvas_and_prompt_are_generateable() -> None:
 
 
 def test_dataset_takes_t2i_canvas_when_dataset_size_is_zero() -> None:
-    """Dataset payload always inserts width/height, so takeIfMissing never fills from T2I."""
+    """Dataset payload always inserts width/height, so takeIfMissing never fills from T2I.
+
+    This test used to assert that ``takeSizeIfUnset`` appeared in the MainWindow lambda, and it
+    passed for the whole time the substitution was structurally unable to run: the dataset page
+    refused on an unset canvas before it emitted, so no payload the lambda could act on ever
+    reached it. A call site is not a behaviour. The rule now lives in
+    ``mergeDatasetRequestFromCockpit`` where a test can run it, and what this file can still say
+    is only that the shell routes through that one function -- the behaviour itself is asserted
+    in tests/cpp/test_worker_request_builder.cpp and tests/cpp/test_canvas_size_default.cpp,
+    both of which fail if the substitution's body is removed.
+    """
     main = MAIN.read_text(encoding="utf-8")
     body = main.split("generateDatasetRequested", 1)[1].split("openModelsRequested", 1)[0]
-    assert "takeSizeIfUnset" in body
-    assert 'takeSizeIfUnset("width")' in body
-    assert 'takeSizeIfUnset("height")' in body
+    assert "mergeDatasetRequestFromCockpit" in body
+    builder = (ROOT / "qt_ui" / "workers" / "WorkerRequestBuilder.cpp").read_text(encoding="utf-8")
+    merge = builder.split("QJsonObject mergeDatasetRequestFromCockpit", 1)[1]
+    assert "takeSizeIfUnset" in merge
+    assert 'takeSizeIfUnset("width")' in merge
+    assert 'takeSizeIfUnset("height")' in merge
+
+
+def test_dataset_simple_inherits_the_cockpit_canvas_and_says_so() -> None:
+    """Doc 62: the canvas spins are Advanced-only, so Simple had no way to satisfy the gate.
+
+    The page does not apply the inheritance -- it is told the cockpit's canvas, it states it, and
+    it sends its own canvas unset for the shell to fill. Two rules in two places is the
+    duplication this codebase keeps paying for, so the page must carry no canvas substitution of
+    its own, and the refusal must consider what it was told.
+    """
+    header = (ROOT / "qt_ui" / "DatasetGenerationPage.h").read_text(encoding="utf-8")
+    page = (ROOT / "qt_ui" / "DatasetGenerationPage.cpp").read_text(encoding="utf-8")
+    assert "void setInheritedCanvas(int width, int height)" in header
+    # The refusal still exists and still reads the same, but no longer fires on an unset canvas
+    # alone -- it needs the cockpit to have nothing either.
+    generate = definition_body("generateDataset", qualifier="DatasetGenerationPage")
+    assert "Choose a canvas size to generate." in generate
+    assert "inherits" in generate
+    # ...and the page still sends what its OWN spins say, inherited numbers included out.
+    assert 'payload.insert(QStringLiteral("width"), width);' in generate
+    assert "inheritedWidth_" not in generate.split("QJsonObject payload;", 1)[1]
+    # The shell is what knows the cockpit canvas, and pushes it on every arrival at the page.
+    main = MAIN.read_text(encoding="utf-8")
+    assert "datasetPage_->setInheritedCanvas(" in main
+    # Said out loud, in a caption that is not inside the Advanced block.
+    assert "canvasCaptionLabel_" in page
+    advanced_block = page.split("advancedBlock_ = new QWidget", 1)[1].split(
+        "advancedBlock_->setVisible(false)", 1
+    )[0]
+    assert "canvasCaptionLabel_" not in advanced_block
 
 
 def test_dataset_submit_copies_extra_model_roots() -> None:
     """Dataset payload omits extras. Fan-out T2I then misses F:/D: on Flux peek."""
+    builder = (ROOT / "qt_ui" / "workers" / "WorkerRequestBuilder.cpp").read_text(encoding="utf-8")
+    merge = builder.split("QJsonObject mergeDatasetRequestFromCockpit", 1)[1]
+    assert 'takeIfMissing("models_root")' in merge
+    assert 'takeIfMissing("extra_models_roots")' in merge
     main = MAIN.read_text(encoding="utf-8")
     body = main.split("generateDatasetRequested", 1)[1].split("openModelsRequested", 1)[0]
-    assert 'takeIfMissing("models_root")' in body
-    assert 'takeIfMissing("extra_models_roots")' in body
+    assert "mergeDatasetRequestFromCockpit" in body
 
 
 def test_dataset_simple_hides_backend_canvas_knobs() -> None:

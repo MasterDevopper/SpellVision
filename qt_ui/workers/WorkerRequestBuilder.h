@@ -42,4 +42,24 @@ QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile,
                                        const QString &projectRoot,
                                        const QString &managedComfyRoot);
 
+// The dataset enqueue request, completed from the live T2I cockpit draft.
+//
+// Dataset states prompts, a count and a destination; everything else about HOW the images are made
+// belongs to the cockpit the user already set up, and this is where the two are joined. Two rules,
+// and they differ:
+//
+//   * a model / sampler / root the dataset page did not state is taken from the draft (missing key,
+//     or a key whose value is an empty string);
+//   * the CANVAS is different, because the dataset page always sends width and height -- 0 is what
+//     its em-dash special value serialises to -- so "missing" never describes it. An unset canvas
+//     is a number below 64, and only then is the draft's canvas substituted.
+//
+// The second rule is the ruling that Dataset in Simple mode inherits the cockpit's canvas, and it
+// lives HERE rather than in the page so that the page has no canvas policy of its own to disagree
+// with. A stated canvas always wins: the < 64 test is the whole of the precedence.
+//
+// Returns the completed request; the arguments are untouched.
+QJsonObject mergeDatasetRequestFromCockpit(const QJsonObject &datasetRequest,
+                                           const QJsonObject &cockpitDraft);
+
 }  // namespace spellvision::workers

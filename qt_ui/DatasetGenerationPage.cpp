@@ -45,6 +45,40 @@ void DatasetGenerationPage::updateDisclosure(bool advanced)
 {
     if (advancedBlock_)
         advancedBlock_->setVisible(advanced);
+    // The caption sits OUTSIDE advancedBlock_ and stays visible in both modes: revealing the spins
+    // does not relocate it, and hiding them does not take the sentence away with them.
+    updateCanvasCaption();
+}
+
+void DatasetGenerationPage::setInheritedCanvas(int width, int height)
+{
+    inheritedWidth_ = width;
+    inheritedHeight_ = height;
+    updateCanvasCaption();
+}
+
+void DatasetGenerationPage::updateCanvasCaption()
+{
+    if (!canvasCaptionLabel_)
+        return;
+    const int stated = datasetWidthSpin_ ? datasetWidthSpin_->value() : 0;
+    const int statedHeight = datasetHeightSpin_ ? datasetHeightSpin_->value() : 0;
+    if (stated >= 64 && statedHeight >= 64) {
+        canvasCaptionLabel_->setText(
+            QStringLiteral("Canvas: %1 × %2").arg(stated).arg(statedHeight));
+        return;
+    }
+    if (inheritedWidth_ >= 64 && inheritedHeight_ >= 64) {
+        // Saying it is the point. The shell substitutes this canvas into the request on its way to
+        // the worker, and a substitution the user was never shown is the hidden output-changing
+        // state this codebase spent a hardening pass removing.
+        canvasCaptionLabel_->setText(QStringLiteral("Canvas: %1 × %2, from Text to Image")
+                                         .arg(inheritedWidth_)
+                                         .arg(inheritedHeight_));
+        return;
+    }
+    canvasCaptionLabel_->setText(
+        QStringLiteral("Canvas: not set — set one on Text to Image, or turn on Advanced here."));
 }
 
 void DatasetGenerationPage::setBusy(bool busy, const QString &message)
@@ -188,6 +222,16 @@ void DatasetGenerationPage::buildUi()
     advancedBlock_->setVisible(false);
     settingsLayout->addWidget(advancedBlock_, 2, 0, 1, 2);
 
+    // Read-only, in the Simple half of the form. Not a knob -- a Simple user cannot type a canvas
+    // here, and is not being asked to. It reports the size the images will actually come out at,
+    // which is the cockpit's canvas whenever this page has not been given one of its own.
+    canvasCaptionLabel_ = new QLabel(settingsGroup);
+    canvasCaptionLabel_->setObjectName(QStringLiteral("DatasetCanvasCaption"));
+    canvasCaptionLabel_->setWordWrap(true);
+    canvasCaptionLabel_->setTextInteractionFlags(Qt::NoTextInteraction);
+    settingsLayout->addWidget(canvasCaptionLabel_, 3, 0, 1, 2);
+    updateCanvasCaption();
+
     controlsLayout->addWidget(settingsGroup);
 
     auto *optionsGroup = new QGroupBox(QStringLiteral("Options"), controlsGroup);
@@ -235,6 +279,8 @@ void DatasetGenerationPage::buildUi()
     mainLayout->addWidget(controlsGroup);
     mainLayout->addWidget(previewGroup, 1);
 
+    connect(datasetWidthSpin_, &QSpinBox::valueChanged, this, [this]() { updateCanvasCaption(); });
+    connect(datasetHeightSpin_, &QSpinBox::valueChanged, this, [this]() { updateCanvasCaption(); });
     connect(generateDatasetButton_, &QPushButton::clicked, this, &DatasetGenerationPage::generateDataset);
     connect(previewDatasetButton_, &QPushButton::clicked, this, &DatasetGenerationPage::updateDatasetPreview);
     connect(openOutputButton_, &QPushButton::clicked, this, [this]() {
@@ -267,6 +313,7 @@ void DatasetGenerationPage::applyTheme()
                       "QLabel#DatasetPreview { background: @s0@; border: 1px solid @bd@; border-radius: @rctl@;"
                       " padding: 12px; color: @mid@; }"
                       "QLabel#DatasetStatus { @caption@ color: @mute@; }"
+                      "QLabel#DatasetCanvasCaption { @caption@ color: @mid@; }"
                       // Generate is Role::Primary, the other two Role::Secondary, and the fields
                       // are the style's field panel. Spacing is all a sheet may say about them.
                       "QPushButton { padding: 8px 12px; min-height: 30px; }"
@@ -312,7 +359,12 @@ void DatasetGenerationPage::generateDataset()
     }
     const int width = datasetWidthSpin_ ? datasetWidthSpin_->value() : 0;
     const int height = datasetHeightSpin_ ? datasetHeightSpin_->value() : 0;
-    if (width < 64 || height < 64) {
+    // Unset here is not the same as unknown. The width/height spins live in the Advanced block, so
+    // in Simple they are always unset -- and refusing on that alone left a Simple user reading
+    // "choose a canvas" beside no canvas control at all. The refusal belongs to the case where
+    // NOTHING states a canvas: not this page, and not the cockpit it inherits from.
+    const bool inherits = inheritedWidth_ >= 64 && inheritedHeight_ >= 64;
+    if ((width < 64 || height < 64) && !inherits) {
         if (datasetPreviewLabel_)
             datasetPreviewLabel_->setText(QStringLiteral("Choose a canvas size to generate."));
         return;
@@ -334,6 +386,9 @@ void DatasetGenerationPage::generateDataset()
     payload.insert(QStringLiteral("images_per_prompt"),
                    imagesPerPromptSpin_ ? imagesPerPromptSpin_->value() : 4);
     payload.insert(QStringLiteral("seed_start"), seedStartSpin_ ? seedStartSpin_->value() : 0);
+    // Sent AS STATED, including 0 for an unset spin. The inherited canvas is deliberately not
+    // copied in here: the shell's mergeDatasetRequestFromCockpit substitutes it, and a page that
+    // also applied the rule would be a second copy of it to drift against.
     payload.insert(QStringLiteral("width"), width);
     payload.insert(QStringLiteral("height"), height);
     payload.insert(QStringLiteral("save_metadata"),

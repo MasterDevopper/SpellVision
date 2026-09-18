@@ -23,6 +23,7 @@
 
 using spellvision::workers::buildWorkerGenerationRequest;
 using spellvision::workers::buildWorkflowLaunchRequest;
+using spellvision::workers::mergeDatasetRequestFromCockpit;
 using spellvision::workers::workerTaskCommandForMode;
 
 class TestWorkerRequestBuilder : public QObject
@@ -74,6 +75,12 @@ private slots:
 
     void theWorkflowLaunchTakesItsComfyRootFromTheCaller();
     void theWorkflowSlugIsFilesystemSafe();
+
+    void anUnsetDatasetCanvasTakesTheCockpitCanvas();
+    void aStatedDatasetCanvasOutranksTheCockpit();
+    void aCockpitWithNoCanvasFillsNothing();
+    void oneAxisIsFilledWithoutTheOther();
+    void theModelStackStillMergesTheOldWay();
 };
 
 void TestWorkerRequestBuilder::initTestCase()
@@ -362,6 +369,99 @@ void TestWorkerRequestBuilder::aLocalChoiceCarriesNothingNew()
         const QJsonObject r = buildWorkerGenerationRequest(QStringLiteral("t2i"), p, tmp_.path());
         QVERIFY2(!r.contains(QStringLiteral("comfy_api_url")), qPrintable(local));
     }
+}
+
+
+// --- the dataset canvas the user never typed ----------------------------------------------------
+//
+// Dataset in Simple has no canvas control at all -- width and height are Advanced-only -- so the
+// size its images come out at is the cockpit's, stated on the page and substituted here. The
+// substitution had been written once already and could not run: the page refused before emitting,
+// so nothing carrying an unset canvas ever reached it, and the only test on it asserted that the
+// CALL SITE existed. A call site is not a behaviour. These four cases fail if the body goes.
+
+namespace
+{
+
+// What the dataset page emits: prompts, a destination, and its canvas exactly as stated -- 0 for
+// the em-dash special value that means "unset".
+QJsonObject datasetRequest(int width, int height)
+{
+    QJsonObject req;
+    req.insert(QStringLiteral("command"), QStringLiteral("generate_dataset"));
+    req.insert(QStringLiteral("prompts"), QStringLiteral("a knight"));
+    req.insert(QStringLiteral("output_root"), QStringLiteral("D:/ds"));
+    req.insert(QStringLiteral("width"), width);
+    req.insert(QStringLiteral("height"), height);
+    return req;
+}
+
+// What ImageGenerationPage::buildRequestPayload hands over. 768x1344 rather than any round number:
+// a case that passed because the page and the cockpit happened to agree on 1024 would prove
+// nothing, and 1024 is the exact house default this whole change removed.
+QJsonObject cockpitDraft(int width, int height)
+{
+    QJsonObject draft;
+    draft.insert(QStringLiteral("model"), QStringLiteral("krea2.safetensors"));
+    draft.insert(QStringLiteral("sampler"), QStringLiteral("euler"));
+    draft.insert(QStringLiteral("steps"), 10);
+    if (width > 0)
+        draft.insert(QStringLiteral("width"), width);
+    if (height > 0)
+        draft.insert(QStringLiteral("height"), height);
+    return draft;
+}
+
+} // namespace
+
+void TestWorkerRequestBuilder::anUnsetDatasetCanvasTakesTheCockpitCanvas()
+{
+    const QJsonObject merged =
+        mergeDatasetRequestFromCockpit(datasetRequest(0, 0), cockpitDraft(768, 1344));
+    QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 768);
+    QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 1344);
+}
+
+void TestWorkerRequestBuilder::aStatedDatasetCanvasOutranksTheCockpit()
+{
+    // An Advanced user who typed a size gets that size. The whole of the precedence is the < 64
+    // test, so this is the case that says the substitution is a fallback and not an override.
+    const QJsonObject merged =
+        mergeDatasetRequestFromCockpit(datasetRequest(512, 512), cockpitDraft(768, 1344));
+    QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 512);
+    QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 512);
+}
+
+void TestWorkerRequestBuilder::aCockpitWithNoCanvasFillsNothing()
+{
+    // Nothing knows a canvas. The request must come out unset rather than carrying an invented one
+    // -- the page refuses this case before it ever emits, and the merge must not quietly rescue it.
+    const QJsonObject merged =
+        mergeDatasetRequestFromCockpit(datasetRequest(0, 0), cockpitDraft(0, 0));
+    QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 0);
+    QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 0);
+}
+
+void TestWorkerRequestBuilder::oneAxisIsFilledWithoutTheOther()
+{
+    // The rule is per-axis, which matters because the two spins can disagree about being set.
+    const QJsonObject merged =
+        mergeDatasetRequestFromCockpit(datasetRequest(512, 0), cockpitDraft(768, 1344));
+    QCOMPARE(merged.value(QStringLiteral("width")).toInt(), 512);
+    QCOMPARE(merged.value(QStringLiteral("height")).toInt(), 1344);
+}
+
+void TestWorkerRequestBuilder::theModelStackStillMergesTheOldWay()
+{
+    // The canvas rule moved in beside the model-stack rules; the model-stack rules are unchanged.
+    // An absent key and an empty-string key both take the cockpit's value, and a stated one does not.
+    QJsonObject req = datasetRequest(0, 0);
+    req.insert(QStringLiteral("sampler"), QStringLiteral("   "));
+    req.insert(QStringLiteral("steps"), 40);
+    const QJsonObject merged = mergeDatasetRequestFromCockpit(req, cockpitDraft(768, 1344));
+    QCOMPARE(merged.value(QStringLiteral("model")).toString(), QStringLiteral("krea2.safetensors"));
+    QCOMPARE(merged.value(QStringLiteral("sampler")).toString(), QStringLiteral("euler"));
+    QCOMPARE(merged.value(QStringLiteral("steps")).toInt(), 40);
 }
 
 QTEST_MAIN(TestWorkerRequestBuilder)

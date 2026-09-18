@@ -436,4 +436,55 @@ QJsonObject buildWorkflowLaunchRequest(const QJsonObject &profile,
     return request;
 }
 
+
+QJsonObject mergeDatasetRequestFromCockpit(const QJsonObject &datasetRequest,
+                                           const QJsonObject &cockpitDraft)
+{
+    QJsonObject req = datasetRequest;
+    const QJsonObject &draft = cockpitDraft;
+
+    // Merge model stack from T2I cockpit when the dataset page has no model.
+    const auto takeIfMissing = [&](const char *key) {
+        const QString k = QString::fromUtf8(key);
+        if (!req.contains(k)) {
+            if (draft.contains(k))
+                req.insert(k, draft.value(k));
+            return;
+        }
+        const QJsonValue cur = req.value(k);
+        if (cur.isString() && cur.toString().trimmed().isEmpty() && draft.contains(k))
+            req.insert(k, draft.value(k));
+    };
+    takeIfMissing("model");
+    takeIfMissing("model_display");
+    if (!req.contains(QStringLiteral("loras")) && draft.contains(QStringLiteral("loras")))
+        req.insert(QStringLiteral("loras"), draft.value(QStringLiteral("loras")));
+    takeIfMissing("sampler");
+    takeIfMissing("scheduler");
+    takeIfMissing("cfg");
+    takeIfMissing("steps");
+    takeIfMissing("negative_prompt");
+    takeIfMissing("models_root");
+    takeIfMissing("extra_models_roots");
+    // Dataset always sends width/height, including 0 for the em-dash special value.
+    // takeIfMissing therefore never copies T2I canvas. Live Generate then
+    // bounced on a form that looked Ready with no canvas control anywhere in Simple.
+    //
+    // This lambda was written for that failure and then could not run: the page refused before it
+    // ever emitted, so no payload it could act on reached the shell. The page now sends its unset
+    // canvas through, and the substitution below is what the user was told would happen -- the
+    // caption on the dataset page names this canvas and where it came from before they press
+    // Generate, which is the difference between an inheritance and a hidden default.
+    const auto takeSizeIfUnset = [&](const char *key) {
+        const QString k = QString::fromUtf8(key);
+        if (req.value(k).toInt() < 64 && draft.contains(k)
+            && draft.value(k).toInt() >= 64)
+            req.insert(k, draft.value(k));
+    };
+    takeSizeIfUnset("width");
+    takeSizeIfUnset("height");
+
+    return req;
+}
+
 }  // namespace spellvision::workers

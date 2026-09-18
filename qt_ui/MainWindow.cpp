@@ -1891,43 +1891,13 @@ void MainWindow::buildPages()
     connect(datasetPage_, &DatasetGenerationPage::generateDatasetRequested, this,
             [this](const QJsonObject &payload) {
                 QJsonObject req = payload;
-                // Merge model stack from T2I cockpit when the dataset page has no model.
+                // Merge model stack AND canvas from the T2I cockpit -- the rules, and the comments
+                // that explain why the canvas needs a rule of its own, live in
+                // workers/WorkerRequestBuilder.cpp so that a test can run them without a window.
                 ensureGenerationPageBuilt(QStringLiteral("t2i"));
                 if (t2iPage_) {
-                    const QJsonObject draft = t2iPage_->buildRequestPayload();
-                    const auto takeIfMissing = [&](const char *key) {
-                        const QString k = QString::fromUtf8(key);
-                        if (!req.contains(k)) {
-                            if (draft.contains(k))
-                                req.insert(k, draft.value(k));
-                            return;
-                        }
-                        const QJsonValue cur = req.value(k);
-                        if (cur.isString() && cur.toString().trimmed().isEmpty() && draft.contains(k))
-                            req.insert(k, draft.value(k));
-                    };
-                    takeIfMissing("model");
-                    takeIfMissing("model_display");
-                    if (!req.contains(QStringLiteral("loras")) && draft.contains(QStringLiteral("loras")))
-                        req.insert(QStringLiteral("loras"), draft.value(QStringLiteral("loras")));
-                    takeIfMissing("sampler");
-                    takeIfMissing("scheduler");
-                    takeIfMissing("cfg");
-                    takeIfMissing("steps");
-                    takeIfMissing("negative_prompt");
-                    takeIfMissing("models_root");
-                    takeIfMissing("extra_models_roots");
-                    // Dataset always sends width/height, including 0 for the "—" special value.
-                    // takeIfMissing therefore never copies T2I canvas. Live Generate then
-                    // bounced with "Choose a canvas size" on a form that looked Ready.
-                    const auto takeSizeIfUnset = [&](const char *key) {
-                        const QString k = QString::fromUtf8(key);
-                        if (req.value(k).toInt() < 64 && draft.contains(k)
-                            && draft.value(k).toInt() >= 64)
-                            req.insert(k, draft.value(k));
-                    };
-                    takeSizeIfUnset("width");
-                    takeSizeIfUnset("height");
+                    req = spellvision::workers::mergeDatasetRequestFromCockpit(
+                        req, t2iPage_->buildRequestPayload());
                 }
                 if (req.value(QStringLiteral("model")).toString().trimmed().isEmpty()) {
                     if (datasetPage_) {
@@ -6540,6 +6510,22 @@ void MainWindow::switchToMode(const QString &modeId)
 
     if (resolvedModeId == QStringLiteral("runtime") && managerPage_)
         managerPage_->refreshStatus();
+
+    // Dataset shows the canvas it will use, and in Simple that canvas is the cockpit's -- the page
+    // has none of its own there, because its width/height spins are Advanced-only. Pushed on every
+    // arrival rather than once at construction: the user can change the cockpit canvas and come
+    // back, and a caption naming the OLD size would be the same silent substitution written down
+    // wrongly. ensureGenerationPageBuilt is idempotent and builds no window of its own.
+    if (resolvedModeId == QStringLiteral("dataset") && datasetPage_)
+    {
+        ensureGenerationPageBuilt(QStringLiteral("t2i"));
+        if (t2iPage_)
+        {
+            const QJsonObject draft = t2iPage_->buildRequestPayload();
+            datasetPage_->setInheritedCanvas(draft.value(QStringLiteral("width")).toInt(),
+                                             draft.value(QStringLiteral("height")).toInt());
+        }
+    }
 
     applyShellStateForMode(resolvedModeId);
     reflowCurrentGenerationPage();
