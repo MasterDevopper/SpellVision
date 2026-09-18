@@ -119,6 +119,31 @@ void SamplingController::create(QWidget *parent)
     cfgSpin_->setValue(7.0);
     configureDouble(cfgSpin_);
 
+    // Distilled guidance -- the number Flux and Hunyuan-video actually steer with, while their
+    // sampler's real CFG is pinned. It had no control at all until 2026-09-18 (Doc 62 3e): the
+    // builders read `req["guidance"]` and nothing in qt_ui ever put it there, so a model's
+    // published figure was shown in the Models inspector and replaced by the cfg slider at render
+    // time.
+    //
+    // TWO decimals, where cfg has one. That is not cosmetic: a published guidance is routinely 3.5
+    // or 2.75, and it also keeps this box distinguishable from cfg for the tests that find these
+    // widgets by shape rather than by a private pointer.
+    //
+    // 0.00 shows as "Auto (follow CFG)" and is the construction value, so the control appears
+    // stating exactly what the app did before it existed. The request builder sends `guidance` only
+    // above zero, so a user who never touches it changes nothing.
+    guidanceSpin_ = new QDoubleSpinBox(parent);
+    guidanceSpin_->setDecimals(2);
+    guidanceSpin_->setSingleStep(0.25);
+    guidanceSpin_->setRange(0.0, 100.0);
+    guidanceSpin_->setValue(0.0);
+    guidanceSpin_->setSpecialValueText(QStringLiteral("Auto (follow CFG)"));
+    guidanceSpin_->setToolTip(QStringLiteral(
+        "Distilled guidance for Flux and Hunyuan video -- the value that steers those families, "
+        "while their sampler CFG is pinned. Auto follows the CFG box, which is what this app has "
+        "always done. Other families ignore it."));
+    configureDouble(guidanceSpin_);
+
     seedSpin_ = new QSpinBox(parent);
     // 0 is a seed. ComfyUI's KSampler declares seed with min 0, every graph builder now honours it
     // (comfy_graph_helpers.resolve_seed), and it is a value people type deliberately -- a minimum
@@ -188,6 +213,13 @@ int SamplingController::steps() const
 double SamplingController::cfg() const
 {
     return cfgSpin_ ? cfgSpin_->value() : 0.0;
+}
+
+double SamplingController::guidance() const
+{
+    // The floor is the SENTINEL, returned as 0.0 so one caller decides what "Auto" means rather
+    // than every reader re-deriving it from the special value text.
+    return guidanceSpin_ ? guidanceSpin_->value() : 0.0;
 }
 
 int SamplingController::draftSeed() const

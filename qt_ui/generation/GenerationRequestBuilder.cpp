@@ -186,6 +186,16 @@ QJsonObject GenerationRequestBuilder::build(const GenerationRequestDraft &draft)
     payload.insert(QStringLiteral("steps"), draft.steps);
     payload.insert(QStringLiteral("cfg_scale"), draft.cfg);
     payload.insert(QStringLiteral("cfg"), draft.cfg);
+    // Doc 62 3e: `guidance` had a consumer and no producer. `native_image_graphs` and both Hunyuan
+    // video builders read it, and no site in qt_ui ever put it in a request -- so a model's
+    // published guidance was shown in the Models inspector under a provenance caption and then
+    // replaced by cfg at render time.
+    //
+    // Sent only ABOVE ZERO, because 0.0 is the spin box's "Auto (follow CFG)" sentinel. Stating it
+    // unconditionally would make Auto mean "guidance 0", which on a distilled model is the unguided
+    // case -- a control that silently changes the render the moment it appears.
+    if (draft.guidance > 0.0)
+        payload.insert(QStringLiteral("guidance"), draft.guidance);
     payload.insert(QStringLiteral("seed"), draft.seed);
     payload.insert(QStringLiteral("width"), draft.width);
     payload.insert(QStringLiteral("height"), draft.height);

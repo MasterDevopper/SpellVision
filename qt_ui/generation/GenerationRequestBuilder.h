@@ -57,6 +57,9 @@ struct GenerationRequestDraft
 
     int steps = 0;
     double cfg = 0.0;
+    // Distilled guidance (FluxGuidance / embedded_guidance_scale). 0.0 is the cockpit's
+    // "Auto (follow CFG)" sentinel and is NOT sent -- see the builder.
+    double guidance = 0.0;
     int seed = 0;
     int width = 0;
     int height = 0;

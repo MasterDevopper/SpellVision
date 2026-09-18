@@ -1665,6 +1665,11 @@ void ImageGenerationPage::buildUi()
     videoSchedulerRow_->setVisible(isVideoMode());
     stepsRow_ = makeStackedField(quickControlsCard, QStringLiteral("Steps"), sampling_->stepsSpin());
     cfgRow_ = makeStackedField(quickControlsCard, QStringLiteral("CFG"), sampling_->cfgSpin());
+    // Directly under CFG, in the same card, because it is the number CFG stands in for on the
+    // families that use it. "Advanced REVEALS IN PLACE" (CLAUDE.md S2) is satisfied by showing
+    // it beside the control it refines, not by putting it on another tab.
+    guidanceRow_ = makeStackedField(quickControlsCard, QStringLiteral("Guidance"),
+                                    sampling_->guidanceSpin());
     seedRow_ = makeStackedField(quickControlsCard, QStringLiteral("Seed"), sampling_->seedSpin());
     if (sampling_->seedRandomCheck() && seedRow_)
     {
@@ -1714,6 +1719,7 @@ void ImageGenerationPage::buildUi()
     stepsCfgLayout_->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
     stepsCfgLayout_->addWidget(stepsRow_);
     stepsCfgLayout_->addWidget(cfgRow_);
+    stepsCfgLayout_->addWidget(guidanceRow_);
     // Phase 7 D7: denoise/strength is intent-level for i2i, so it RELOCATES out of the Advanced tab
     // into the Sampling tab here (this layout moves into the Sampling tab). Reparent the EXISTING
     // row -- the read (denoiseSpin_->value() -> draft.denoiseStrength) is by member, untouched. It

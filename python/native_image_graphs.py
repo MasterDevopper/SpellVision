@@ -24,7 +24,7 @@ from comfy_graph_helpers import (
     _wan_lora_stack_entries,
     prompt_with_ti_embeddings,
 )
-from request_payload import FIELD_ALIASES, bounded_option
+from request_payload import FIELD_ALIASES, bounded_option, guidance_from_request
 from comfy_extra_model_paths import extra_roots_from_request
 from krea2_graph import krea2_loader_block
 from component_resolver import resolve_stack
@@ -92,21 +92,20 @@ def _resolve_native_image_stack(req: dict[str, Any], object_info: dict[str, Any]
     )
 
 def _flux_guidance_from_request(req: dict[str, Any]) -> float:
-    """Cockpit 'cfg' -> Flux distilled guidance (FluxGuidance.guidance); KSampler cfg stays pinned 1.0.
+    """Flux distilled guidance (FluxGuidance.guidance); the KSampler's cfg stays pinned at 1.0.
 
-    Flux uses distilled guidance, not real classifier-free guidance, so the user-facing cfg slider
-    drives the FluxGuidance node. Falls back to 3.5 (the Flux sweet spot) when cfg is absent/<=0.
-    (The cockpit default cfg ~6.5 is SDXL-tuned and reads a bit high for Flux; a Simple-mode Flux
-    default is a later tuning item, not a correctness issue.)
+    Flux uses distilled guidance, not real classifier-free guidance, so this is the number that
+    actually steers the render -- and until 2026-09-18 it could only come from the cfg slider.
+    `req["guidance"]` was read, but ONLY when cfg was absent or <= 0, which the cockpit never sends:
+    Doc 62 3e, a consumer with no producer. A Flux model's published guidance was fetched, shown in
+    the Models inspector under a provenance caption reading as a promise, and then replaced here.
+
+    The order now lives in ONE function for all three families that steer this way (Flux image,
+    Hunyuan t2v, Hunyuan i2v) -- `request_payload.guidance_from_request`: a stated `guidance` wins,
+    then cfg (what the cockpit has always meant here, and what a user who never opens Advanced is
+    still steering with), then 3.5, the Flux sweet spot.
     """
-    g = float(bounded_option(req, "cfg", 0.0))
-    if g <= 0:
-        raw = req.get("guidance")
-        try:
-            g = float(raw) if raw is not None else 0.0
-        except Exception:
-            g = 0.0
-    return g if g > 0 else 3.5
+    return guidance_from_request(req, fallback=3.5)
 
 def _flux_denoise_from_request(req: dict[str, Any]) -> float:
     """Cockpit i2i strength -> Flux KSampler.denoise, REMAPPED onto a higher band.

@@ -35,16 +35,21 @@ constexpr int kDescriptionCollapsed = 320;
 
 // Order matters: this is what the inspector reads top to bottom, and it is the order the cockpit
 // cares about rather than the alphabetical order the sidecar's JSON object happens to be in.
+//
+// `clip_skip` was removed 2026-09-18 (Doc 62 3e). It was resolved and shown here under a
+// provenance caption naming the site it came from, while NOTHING in the tree could apply it -- no
+// builder emits `CLIPSetLastLayer` and no diffusers call passes `clip_skip=`. The reasoning and the
+// measurement that chose removal over building it live in one place, on
+// `model_intelligence/recommended.FIELDS`; this list drops it so a sidecar written before that
+// decision stops displaying a promise. Old files keep the key and are simply not read.
 const char *kFieldOrder[] = {"steps", "cfg", "guidance", "sampler", "scheduler", "shift",
-                             "clip_skip", "width", "height", "frames", "fps", "lora_strength",
+                             "width", "height", "frames", "fps", "lora_strength",
                              "prompt_prefix"};
 
 QString fieldLabel(const QString &field)
 {
     if (field == QStringLiteral("cfg"))
         return QStringLiteral("CFG");
-    if (field == QStringLiteral("clip_skip"))
-        return QStringLiteral("Clip skip");
     if (field == QStringLiteral("lora_strength"))
         return QStringLiteral("LoRA strength");
     if (field == QStringLiteral("prompt_prefix"))

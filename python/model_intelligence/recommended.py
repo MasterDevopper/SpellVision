@@ -46,8 +46,28 @@ CARD_PROVENANCES: frozenset[str] = frozenset(
 # evidence, and evidence still beats a generic family floor.
 MODE_QUORUM = 3
 
+# `clip_skip` is DELIBERATELY absent, decided 2026-09-18 (Doc 62 3e). It was resolved, displayed in
+# the Models inspector under a provenance caption naming the site it came from, and applied by
+# nothing: no builder in `python/` emits a `CLIPSetLastLayer` node and no diffusers call passes a
+# `clip_skip=`. A number shown under "from this model's own examples" while nothing applies it is
+# precisely the defect this arc exists to remove.
+#
+# It was DROPPED rather than built, and the measurement is why. Of the 210 sidecars on the owner's
+# disks that carried a clip_skip, 203 are sdxl / pony / illustrious / stable_diffusion /
+# unclassified -- the families that render through DIFFUSERS, where `CLIPSetLastLayer` is not the
+# mechanism at all, so "emit the node in the image builders" would not have reached one of them.
+# The remaining 7 are 5 krea2 at value 1 (the default layer -- a no-op) and 2 flux at 2, where a
+# distilled clip_l+T5 stack has no meaningful CLIP layer to skip. So the only route that would
+# actually apply the published values is threading `clip_skip=` into the diffusers pipeline call,
+# which silently changes the output of every SDXL render in the library -- an unverifiable change
+# in a pass whose brief forbids rendering. Shipping that untested is the "reports success while
+# broken" class, so the honest move is to stop promising it.
+#
+# `meta_parse.parse_meta` still NORMALISES it, exactly as it normalises `seed`, which is also not a
+# recommendation. `_offer` drops anything not in this tuple, so a sidecar already carrying the
+# field is inert on read without a rewrite -- no schema bump, no invalidated files.
 FIELDS = (
-    "steps", "cfg", "guidance", "shift", "sampler", "scheduler", "clip_skip",
+    "steps", "cfg", "guidance", "shift", "sampler", "scheduler",
     "width", "height", "frames", "fps", "lora_strength", "prompt_prefix",
 )
 
@@ -85,13 +105,46 @@ def _entry(value: Any, provenance: str, *, n: int | None = None, total: int | No
     }
 
 
+def _rank(provenance: Any) -> int:
+    """Where a provenance sits in the order; an unrecognised one ranks LAST.
+
+    `_offer` indexed `_RANK` directly, which is exact for anything `build` itself produced and
+    raises for anything else -- and `overlay` reads a block back off a sidecar written by some
+    other version of this file. A KeyError there would turn "this file carries a provenance I do
+    not know" into a crashed backfill; ranking it weakest keeps the answer conservative instead.
+    """
+    return _RANK.get(str(provenance or ""), len(PROVENANCE_ORDER))
+
+
 def _offer(out: dict[str, dict[str, Any]], field: str, candidate: dict[str, Any]) -> None:
     """Keep the candidate only if its provenance outranks what is already there."""
     if field not in FIELDS:
         return
     current = out.get(field)
-    if current is None or _RANK[candidate["provenance"]] < _RANK[current["provenance"]]:
+    if current is None or _rank(candidate["provenance"]) < _rank(current["provenance"]):
         out[field] = candidate
+
+
+def overlay(block: dict[str, dict[str, Any]] | None,
+            card_settings: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """Offer card-stated settings into an ALREADY-BUILT block, by the order `build` uses.
+
+    For the sidecar backfill, which has the block a previous run wrote and not the CivitAI payload
+    that produced it -- re-fetching 759 versions to re-run `build` would be a refresh wearing a
+    smaller name (`backfill`'s docstring says the same thing about creator and licence).
+
+    It is the same `_offer`, so it cannot invent a second ordering: a card entry lands only where
+    it outranks what is there, which means never over `user` and never over a `site:*` settings
+    value. Never mutates its argument.
+    """
+    out: dict[str, dict[str, Any]] = {
+        field: dict(entry) for field, entry in (block or {}).items() if isinstance(entry, dict)
+    }
+    for field, entry in (card_settings or {}).items():
+        provenance = str((entry or {}).get("provenance") or "card:prose-regex")
+        if provenance in CARD_PROVENANCES:
+            _offer(out, field, _entry((entry or {}).get("value"), provenance))
+    return out
 
 
 def build(

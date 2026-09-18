@@ -447,8 +447,8 @@ public:
     // and with no flag of its own, the Steps guard was open and a Simple/Advanced toggle reset both
     // spins to 14. Ruling W2-E3 is one flag per field the wave writes; these three were the
     // exception, and they are exactly the fields where a hand-edit is most deliberate.
-    enum class ResolvedField { Steps, Cfg, Sampler, Scheduler, Shift, Width, Height, Frames, Fps,
-                               SplitSteps };
+    enum class ResolvedField { Steps, Cfg, Guidance, Sampler, Scheduler, Shift, Width, Height,
+                               Frames, Fps, SplitSteps };
     void watchForUserEdits();
     bool userEdited(ResolvedField field) const;
     void markUserEdited(ResolvedField field);
@@ -458,6 +458,15 @@ public:
     void clearContentDerivedFields();
     void clearUserEditedFields();
     QSet<int> userEditedFields_;
+    // Doc 62 3f. The resolver-field NAMES the currently chosen preset states -- "steps", "cfg",
+    // "width"... -- recorded by applyPreset and read by applyModelDefaults, which drops exactly
+    // these from the model's overlay. Cleared by a deliberate model change (setSelectedModel) and
+    // by Reset, because "a preset wins UNTIL THE MODEL CHANGES" is the whole ruling.
+    //
+    // Names rather than ResolvedField values on purpose: the thing being filtered is the resolver's
+    // reply, which is keyed by those names, and translating twice is how the two lists drift.
+    QSet<QString> presetOwnedFields_;
+    void notePresetOwns(std::initializer_list<const char *> fields);
     // "This came from the user's own CONTENT", as distinct from "the user typed it".
     //
     // ensureCanvasSizeDefault marks Width/Height when the canvas was taken from a staged image,
@@ -626,6 +635,14 @@ public:
     QWidget *videoSchedulerRow_ = nullptr;
     QWidget *stepsRow_ = nullptr;
     QWidget *cfgRow_ = nullptr;
+    // Distilled guidance (Doc 62 3e). Advanced-only, and ALSO gated on guidanceOffered_ -- it is
+    // shown only where it does something, which on this library is flux and hunyuan_video.
+    QWidget *guidanceRow_ = nullptr;
+    // Whether the last resolved answer carried a `guidance` value. The DATA answer to "does this
+    // family steer with distilled guidance", rather than a family name list in C++: measured over
+    // the owner's 759 sidecars, guidance is present on 33 of 33 flux and 7 of 7 hunyuan_video and
+    // on nothing else, because those are the two rows of family_seed_table that state one.
+    bool guidanceOffered_ = false;
     QWidget *seedRow_ = nullptr;
     // Phase 7 Model-tab grid rows gated Advanced-only -- captured inline labels so both grid cells
     // (label + field) hide together and the QGridLayout row collapses (Workflow=D2; Components=video).

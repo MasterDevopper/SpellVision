@@ -267,12 +267,22 @@ def test_the_arm_is_skipped_entirely_without_a_client(tmp_path: Path):
     assert (result["no_match"], result["identified_hf"]) == (1, 0)
 
 
-def test_a_civitai_hit_never_asks_huggingface(tmp_path: Path):
+def test_a_civitai_hit_that_published_settings_never_asks_huggingface(tmp_path: Path):
     """A hash CivitAI knows is already an identity. Asking HF anyway would spend up to 25 requests
-    per weight across a 759-file library for nothing."""
+    per weight across a 759-file library for nothing.
+
+    NARROWED 2026-09-18: the clause that matters is "that published settings". A hit ends the
+    search for IDENTITY, which is all a hash match establishes -- it does not end the search for
+    what to render the weight with, and `tests/test_model_intelligence_card_settings.py` holds that
+    half. This case keeps the cost property by giving the site something to say: three agreeing
+    example images, so the block comes back carrying `site:image-meta-mode` and the second arm has
+    no question left to ask.
+    """
     class Hit(MissingCivitai):
         def by_hash(self, digest):
-            return {"id": 1, "modelId": 2, "model": {"name": "A Model"}, "images": [], "files": []}
+            meta = {"steps": 30, "cfgScale": 7.0, "sampler": "dpmpp_2m_karras"}
+            return {"id": 1, "modelId": 2, "model": {"name": "A Model"},
+                    "images": [{"meta": dict(meta)} for _ in range(3)], "files": []}
 
         def model(self, model_id):
             return None

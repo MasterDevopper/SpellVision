@@ -15,6 +15,7 @@ from model_intelligence.backfill import BackfillJob
 from model_intelligence.backfill import apply_to_payload as backfill_licence_into
 from model_intelligence.backfill import civitai_model_id
 from model_intelligence.backfill import sidecar_files
+from model_intelligence.card_settings import CardReader, has_site_settings, needs_card_settings
 from model_intelligence.civitai_lookup import (
     ALLOWED_HOSTS,
     DEFAULT_HOST,
@@ -40,6 +41,8 @@ from model_intelligence.recommended import FIELDS, PROVENANCE_ORDER, build
 from model_intelligence.refresh import RefreshJob, refresh_one
 from model_intelligence.resolve import resolve_model_defaults
 from model_intelligence.refresh import plan as plan_refresh
+from model_intelligence.settings_backfill import SettingsBackfillJob
+from model_intelligence.settings_backfill import apply_to_payload as backfill_card_settings_into
 from model_intelligence.sidecar import SCHEMA as SIDECAR_SCHEMA
 from model_intelligence.sidecar import build_payload as build_sidecar_payload
 from model_intelligence.sidecar import carry_forward as carry_forward_sidecar
@@ -52,6 +55,7 @@ from model_intelligence.sidecar import write as write_sidecar
 __all__ = [
     "ALLOWED_HOSTS",
     "autov2",
+    "backfill_card_settings_into",
     "backfill_licence_into",
     "BackfillJob",
     "build",
@@ -59,6 +63,7 @@ __all__ = [
     "cancel_check_refresh_job",
     "cancel_refresh_job",
     "card_identity",
+    "CardReader",
     "carry_forward_sidecar",
     "CivitaiClient",
     "civitai_model_id",
@@ -68,6 +73,7 @@ __all__ = [
     "download_previews",
     "FIELDS",
     "file_sha256",
+    "has_site_settings",
     "hash_and_cache",
     "HashCache",
     "hf_identify",
@@ -79,6 +85,7 @@ __all__ = [
     "KINDS",
     "merge_sidecar",
     "mode_over",
+    "needs_card_settings",
     "normalise_family",
     "normalise_kind",
     "parse_meta",
@@ -96,6 +103,7 @@ __all__ = [
     "seed_for",
     "SEED_TABLE",
     "set_user_picture",
+    "SettingsBackfillJob",
     "settings_from_readme",
     "sha256_index",
     "sidecar_files",

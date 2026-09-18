@@ -378,6 +378,10 @@ void ImageGenerationPage::setSelectedModel(const QString &value, const QString &
         // and its shape is still the shape they asked for. Only clearContentDerivedFields() --
         // called when that content itself changes -- drops those.
         clearUserEditedFields();
+        // Doc 62 3f: "a preset wins UNTIL THE MODEL CHANGES". This is the "until". Picking a
+        // different checkpoint is a request for THAT checkpoint's numbers, so the preset stops
+        // owning anything and the overlay writes every field the resolver answers.
+        presetOwnedFields_.clear();
     }
     refreshSelectedModelUi();
     updatePrimaryActionAvailability();
@@ -1084,6 +1088,11 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
         stepsRow_->setVisible(advanced);
     if (cfgRow_)
         cfgRow_->setVisible(advanced);
+    // GUARD COMPOSITION again: Advanced AND "this family publishes a guidance at all". Simple
+    // gains no knob, and Advanced does not reveal a box that reaches no builder -- a control shown
+    // exactly where it is ignored is the defect `request-keys-have-readers` was written for.
+    if (guidanceRow_)
+        guidanceRow_->setVisible(advanced && guidanceOffered_);
     if (seedRow_)
         seedRow_->setVisible(advanced);
     if (samplerRow_)
@@ -1187,6 +1196,17 @@ void ImageGenerationPage::setNegativePromptVisible(bool open)
         negativeToggleButton_->setChecked(open);
 }
 
+void ImageGenerationPage::notePresetOwns(std::initializer_list<const char *> fields)
+{
+    // Recorded as a SET rather than appended: choosing a second preset replaces the first, it does
+    // not accumulate. Otherwise "Portrait Detail then Upscale / Repair" would leave width and
+    // height owned by a preset that no longer states them, and the model's canvas would be blocked
+    // by a choice the user has already moved on from.
+    presetOwnedFields_.clear();
+    for (const char *field : fields)
+        presetOwnedFields_.insert(QString::fromLatin1(field));
+}
+
 void ImageGenerationPage::applyPreset(const QString &presetName)
 {
     if (isVideoMode())
@@ -1231,6 +1251,11 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         if (denoiseSpin_)
             denoiseSpin_->setValue(0.55);
 
+        // Every field this branch actually STATES. Not sampler/scheduler: the comment above records
+        // that a video preset deliberately sets neither, so the family's own declared default must
+        // keep arriving.
+        notePresetOwns({"steps", "cfg", "width", "height", "frames", "fps"});
+
         schedulePreviewRefresh(0);
         scheduleUiRefresh(0);
         return;
@@ -1247,6 +1272,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         sampling_->cfgSpin()->setValue(6.5);
         widthSpin_->setValue(1024);
         heightSpin_->setValue(1344);
+        notePresetOwns({"steps", "cfg", "width", "height", "sampler", "scheduler"});
     }
     else if (presetName == QStringLiteral("Stylized Concept"))
     {
@@ -1260,6 +1286,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         sampling_->cfgSpin()->setValue(5.0);
         widthSpin_->setValue(1216);
         heightSpin_->setValue(832);
+        notePresetOwns({"steps", "cfg", "width", "height", "sampler", "scheduler"});
     }
     else if (presetName == QStringLiteral("Upscale / Repair"))
     {
@@ -1277,6 +1304,9 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         sampling_->cfgSpin()->setValue(5.5);
         if (denoiseSpin_)
             denoiseSpin_->setValue(0.35);
+        // NO width/height here, and that is the case the ruling turns on: Upscale / Repair states
+        // no canvas, so the model's own published width and height must still arrive.
+        notePresetOwns({"steps", "cfg", "sampler", "scheduler"});
     }
     else
     {
@@ -1292,6 +1322,7 @@ void ImageGenerationPage::applyPreset(const QString &presetName)
         heightSpin_->setValue(1024);
         if (denoiseSpin_)
             denoiseSpin_->setValue(0.45);
+        notePresetOwns({"steps", "cfg", "width", "height", "sampler", "scheduler"});
     }
 
     schedulePreviewRefresh(0);
@@ -1966,6 +1997,7 @@ void ImageGenerationPage::clearForm()
     // values -- otherwise the flags would outlive the numbers and silence the next model.
     const ProgrammaticWrite guard(this);
     clearUserEditedFields();
+    presetOwnedFields_.clear();
     if (presetCombo_)
         presetCombo_->setCurrentText(QStringLiteral("Balanced"));
 
@@ -2071,6 +2103,10 @@ void ImageGenerationPage::persistWorkspaceSettings()
     settings.setValue(QStringLiteral("scheduler"), currentComboValue(sampling_->schedulerCombo()));
     settings.setValue(QStringLiteral("steps"), sampling_->stepsSpin() ? sampling_->stepsSpin()->value() : 28);
     settings.setValue(QStringLiteral("cfg"), sampling_->cfgSpin() ? sampling_->cfgSpin()->value() : 7.0);
+    // 0.0 is the Auto sentinel, and saving it is exactly right -- a returning user who never
+    // touched Guidance comes back on Auto rather than on a number they did not choose.
+    settings.setValue(QStringLiteral("guidance"),
+                      sampling_->guidanceSpin() ? sampling_->guidanceSpin()->value() : 0.0);
     settings.setValue(QStringLiteral("seed"), sampling_->seedSpin() ? sampling_->seedSpin()->value() : 0);
     settings.setValue(QStringLiteral("width"), widthSpin_ ? widthSpin_->value() : 1024);
     settings.setValue(QStringLiteral("height"), heightSpin_ ? heightSpin_->value() : 1024);
@@ -2227,6 +2263,8 @@ void ImageGenerationPage::restoreSnapshot()
             sampling_->stepsSpin()->setValue(settings.value(QStringLiteral("steps")).toInt());
         if (sampling_->cfgSpin() && settings.contains(QStringLiteral("cfg")))
             sampling_->cfgSpin()->setValue(settings.value(QStringLiteral("cfg")).toDouble());
+        if (sampling_->guidanceSpin() && settings.contains(QStringLiteral("guidance")))
+            sampling_->guidanceSpin()->setValue(settings.value(QStringLiteral("guidance")).toDouble());
     }
     if (sampling_->seedSpin() && settings.contains(QStringLiteral("seed")))
         sampling_->seedSpin()->setValue(settings.value(QStringLiteral("seed")).toInt());

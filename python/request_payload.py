@@ -27,6 +27,11 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "denoise": ("denoise", "denoise_strength", "strength"),
     "fps": ("fps", "frame_rate"),
     "frames": ("frames", "num_frames", "frame_count", "length", "video_length"),
+    # DISTILLED guidance, which is a different number from `cfg` and not an alias of it: Flux
+    # and Hunyuan-video pin the sampler's real CFG and steer through a FluxGuidance /
+    # embedded_guidance_scale input instead. `cfg` deliberately does NOT list "guidance" as an
+    # alias, so the two can never collapse into each other.
+    "guidance": ("guidance", "distilled_guidance", "embedded_guidance_scale"),
     "height": ("height",),
     "limit": ("limit",),
     "lora_scale": ("lora_scale",),
@@ -60,6 +65,7 @@ FIELD_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     "denoise": (0.0, 1.0),
     "fps": (1, None),
     "frames": (1, None),
+    "guidance": (0.0, None),
     "height": (1, None),
     "limit": (0, None),
     "lora_scale": (0.0, None),
@@ -176,6 +182,44 @@ def bounded_option(
             value = float(high)
 
     return int(round(value)) if isinstance(default, int) else value
+
+
+def guidance_from_request(
+    req: Mapping[str, Any] | None,
+    *,
+    fallback: float,
+    table: Mapping[str, Any] | None = None,
+) -> float:
+    """DISTILLED guidance for one request -- the `FluxGuidance` / `embedded_guidance_scale` input.
+
+    Three families steer through this rather than through the sampler's CFG (Flux image, Hunyuan
+    video t2v and i2v), and all three read it the same wrong way until 2026-09-18: they took the
+    cockpit's `cfg` and treated `guidance` as a fallback for a cfg of zero. Since the cockpit always
+    sends a cfg, `req["guidance"]` was **unreachable** -- Doc 62 3e: a consumer with no producer. A
+    Flux model's published guidance was fetched, shown in the Models inspector under a provenance
+    caption that reads as a promise, and then replaced by the cfg slider at render time.
+
+    So the order is inverted, once, here:
+
+    1. a STATED `guidance` -- the Advanced control, or the model's own published figure
+    2. else `cfg`, which is what the cockpit has always meant on these families and what a user
+       who never opens Advanced is still steering with
+    3. else `fallback`, the family's own sweet spot
+
+    **Zero is the cockpit's "Auto" sentinel and is deliberately not honoured here**, which is the
+    one place in this module that departs from "a stated zero is a value". It is honest for this
+    field: guidance 0 on a distilled model is the unguided case, it renders nothing anyone wants,
+    and `FIELD_BOUNDS` still allows it so a caller that genuinely means it can pass it through
+    `bounded_option` directly. The spin box shows "Auto (follow CFG)" at 0.00 rather than a number,
+    so nothing on screen claims a zero is in force.
+    """
+    stated = bounded_option(req, "guidance", 0.0)
+    if stated > 0:
+        return float(stated)
+    from_cfg = bounded_option(req, "cfg", 0.0, table=table)
+    if from_cfg > 0:
+        return float(from_cfg)
+    return float(fallback)
 
 
 def numeric_option(req: Mapping[str, Any], key: str, default: float) -> float:

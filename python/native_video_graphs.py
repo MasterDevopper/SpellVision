@@ -48,7 +48,7 @@ from family_operating_points import (
     resolve_operating_point,
 )
 from video_adapters.registry import select_native_video_adapter
-from request_payload import bounded_option
+from request_payload import bounded_option, guidance_from_request
 from upscale_engine import (
     IMAGE_SINKS,
     ROUTE_PIXEL_COMFY,
@@ -2052,10 +2052,10 @@ def _build_native_hunyuan_wrapper_i2v_prompt(req: dict[str, Any], object_info: d
     if steps < 1:
         steps = 30
     try:
-        guidance = bounded_option(req, "cfg", 6.0)
+        # The Advanced Guidance control first, then cfg, then the blueprint's 6. Doc 62 3e: this
+        # read cfg alone, so a Hunyuan model's published guidance could be shown and never applied.
+        guidance = guidance_from_request(req, fallback=6.0)
     except Exception:
-        guidance = 6.0
-    if guidance <= 0:
         guidance = 6.0
     # Hunyuan temporal /4 -> frame length must be (N*4)+1 (blueprint used 65).
     # Cockpit sends `frames`; this used to read only length/num_frames so 49 became 65.
@@ -2160,11 +2160,11 @@ def _build_native_hunyuan_video_prompt(req: dict[str, Any], object_info: dict[st
     if steps < 1:
         steps = 20  # standard (non-distilled); blueprint default 20, honor the cockpit otherwise
     try:
-        guidance = bounded_option(req, "cfg", 6.0, table=_defaults)
+        # Stated guidance -> cfg -> the family point -> the blueprint's 6. NOT pinned (Hunyuan is
+        # non-distilled), and no longer cfg-only: see Doc 62 3e and `guidance_from_request`.
+        guidance = guidance_from_request(req, fallback=6.0, table=_defaults)
     except Exception:
         guidance = 6.0
-    if guidance <= 0:
-        guidance = 6.0  # cfg MAPPED -> FluxGuidance (blueprint 6); NOT pinned (Hunyuan is non-distilled)
     try:
         fps = bounded_option(req, "fps", 24.0)
     except Exception:

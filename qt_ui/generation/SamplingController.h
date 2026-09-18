@@ -27,6 +27,9 @@ public:
     QComboBox *videoSchedulerCombo() const { return videoSchedulerCombo_; }
     QSpinBox *stepsSpin() const { return stepsSpin_; }
     QDoubleSpinBox *cfgSpin() const { return cfgSpin_; }
+    // Distilled guidance (FluxGuidance / embedded_guidance_scale), Advanced-only. 0.00 is the
+    // "Auto (follow CFG)" sentinel, not a guidance of zero -- see `guidance()`.
+    QDoubleSpinBox *guidanceSpin() const { return guidanceSpin_; }
     QSpinBox *seedSpin() const { return seedSpin_; }
     QCheckBox *seedRandomCheck() const { return seedRandomCheck_; }
 
@@ -36,6 +39,8 @@ public:
     QString videoScheduler() const;
     int steps() const;
     double cfg() const;
+    // 0.0 when the box is on Auto, which is what the request builder must NOT send.
+    double guidance() const;
     int draftSeed() const;
 
 private:
@@ -45,6 +50,7 @@ private:
     QComboBox *videoSchedulerCombo_ = nullptr;
     QSpinBox *stepsSpin_ = nullptr;
     QDoubleSpinBox *cfgSpin_ = nullptr;
+    QDoubleSpinBox *guidanceSpin_ = nullptr;
     QSpinBox *seedSpin_ = nullptr;
     QCheckBox *seedRandomCheck_ = nullptr;
 };

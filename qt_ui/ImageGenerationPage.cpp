@@ -317,6 +317,7 @@ QJsonObject ImageGenerationPage::buildRequestPayload() const
     draft.videoScheduler = sampling_->videoScheduler();
     draft.steps = sampling_->steps();
     draft.cfg = sampling_->cfg();
+    draft.guidance = sampling_->guidance();
     draft.seed = sampling_->draftSeed();
     draft.width = widthSpin_ ? widthSpin_->value() : 0;
     draft.height = heightSpin_ ? heightSpin_->value() : 0;

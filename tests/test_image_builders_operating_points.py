@@ -117,6 +117,32 @@ def test_flux_ksampler_cfg_pinned_ignores_request():
     assert any(n.get("class_type") == "FluxGuidance" for n in _flux(cfg=8.0).values() if isinstance(n, dict))
 
 
+def _flux_guidance(graph):
+    return next(n["inputs"]["guidance"] for n in graph.values()
+                if isinstance(n, dict) and n.get("class_type") == "FluxGuidance")
+
+
+def test_a_stated_guidance_reaches_fluxguidance():
+    """Doc 62 3e. The builder read `guidance` ONLY when cfg was absent or <= 0, and the cockpit
+    always sends a cfg -- so the key was unreachable: a consumer with no producer. A Flux model's
+    published guidance was shown in the Models inspector under a provenance caption and then
+    replaced here by the cfg slider."""
+    assert _flux_guidance(_flux(cfg=8.0, guidance=3.5)) == 3.5
+
+
+def test_cfg_still_drives_guidance_when_none_is_stated():
+    """The other half, and the reason `guidance` is sent only above zero. A user who never opens
+    Advanced is still steering Flux with the CFG box, exactly as before."""
+    assert _flux_guidance(_flux(cfg=8.0)) == 8.0
+    # And the cockpit's "Auto" sentinel is not a guidance of zero -- 0 on a distilled model is the
+    # unguided case, which would silently change the render the day the control appeared.
+    assert _flux_guidance(_flux(cfg=8.0, guidance=0.0)) == 8.0
+
+
+def test_with_neither_the_flux_sweet_spot_stands():
+    assert _flux_guidance(_flux(cfg=0.0)) == 3.5
+
+
 # --------------------------------------------------------------------------- routed defaults come from the TABLE
 
 def test_zimage_omitted_steps_from_table():

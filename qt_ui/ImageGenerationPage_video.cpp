@@ -258,6 +258,7 @@ void ImageGenerationPage::watchForUserEdits()
     {
         watchSpin(sampling_->stepsSpin(), ResolvedField::Steps);
         watchDouble(sampling_->cfgSpin(), ResolvedField::Cfg);
+        watchDouble(sampling_->guidanceSpin(), ResolvedField::Guidance);
         // Both halves of each pair: video mode drives the video combos and image mode the image
         // ones, and one page is only ever one of those -- but marking the logical FIELD rather than
         // the widget is what makes a sampler chosen in Advanced survive a Simple/Advanced round
@@ -321,6 +322,13 @@ void ImageGenerationPage::applyResolvedSettings(const QJsonObject &values)
     const QJsonValue cfg = field("cfg");
     if (cfg.isDouble() && !userEdited(ResolvedField::Cfg) && sampling_->cfgSpin())
         sampling_->cfgSpin()->setValue(cfg.toDouble());
+    // Distilled guidance. Written by exactly the same rules as every other field -- carried by the
+    // answer, not typed by the user -- so a Flux model's published 3.5 now lands in a control the
+    // request builder actually reads. Before 2026-09-18 there was no control, and the builder
+    // derived this from the cfg box (Doc 62 3e).
+    const QJsonValue guidance = field("guidance");
+    if (guidance.isDouble() && !userEdited(ResolvedField::Guidance) && sampling_->guidanceSpin())
+        sampling_->guidanceSpin()->setValue(guidance.toDouble());
 
     // Video routes sampler/scheduler through the VIDEO combos (the ones actually shown and sent for
     // video); image mode uses the image combos.
@@ -1005,6 +1013,31 @@ void ImageGenerationPage::applyModelDefaults()
         if (!value.isUndefined() && !value.isNull())
             values.insert(it.key(), value);
     }
+
+    // Doc 62 3f: a preset and a model's defaults both write steps and CFG, and neither knew the
+    // other existed, so the last one to fire won and the user could not tell which they were
+    // looking at. The ruling: **a preset is a deliberate user choice and wins until the model
+    // changes.** So exactly the fields the current preset owns are dropped from this overlay --
+    // not all of them, because the overlay's whole value is that a field the preset does NOT set
+    // still gets the model's answer. `setSelectedModel` clears the record on a model change, which
+    // is the other half of the sentence.
+    //
+    // A preset's writes reach the widgets outside a ProgrammaticWrite scope, so they already trip
+    // markUserEdited -- for a spin box whose value actually MOVED. That near-miss is why the
+    // record is explicit: `setValue(30)` on a box already showing 30 emits nothing, and the
+    // combos are watched on `activated`, which a programmatic selectComboValue never emits, so a
+    // preset's sampler and scheduler were never protected at all.
+    for (const QString &field : presetOwnedFields_)
+        values.remove(field);
+
+    // The DATA answer to "does this family steer with distilled guidance": it published one. See
+    // ImageGenerationPage.h. Read before the preset filter would matter -- a preset never sets
+    // guidance, so the two cannot interact -- and applied through updateDisclosure so the row's
+    // visibility keeps its single owner.
+    guidanceOffered_ = settings.contains(QStringLiteral("guidance"));
+    if (guidanceRow_)
+        guidanceRow_->setVisible(advanced_ && guidanceOffered_);
+
     applyResolvedSettings(values);
 
     refreshModelDefaultsCaption(reply);

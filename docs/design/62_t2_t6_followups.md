@@ -15,7 +15,7 @@ Every gate reads PARTIAL for the same reason: the mechanism works and has been p
 | gate | proven on | the whole |
 |---|---|---|
 | T3 models | **680 identified of 759** (was 14) | 759 |
-| T5 defaults | **706 models carry a `recommended` block**; 483 of them site-sourced | four pages × ~16 families |
+| T5 defaults | **image-only** — see the per-family table below | every family, image and video |
 | T4 optimizations | krea2, ltx | six shipped families |
 | T2 drop | 5 workflows, **none video** | ~90 imported |
 | T6 routing | SDXL on the node | every family it can run |
@@ -23,6 +23,23 @@ Every gate reads PARTIAL for the same reason: the mechanism works and has been p
 **The refresh has been run — 2026-09-17, 58.0 min over both roots.** `examined 759 · identified 680 · no_match 79 · lookup_failed 0 · errors 0`, 759 sidecars on disk, **2060 preview images** referenced, kinds resolved as 498 lora / 131 checkpoint / 51 diffusion_model / 20 vae / 18 text_encoder / 18 other / 8 embedding / 7 clip_vision / 6 upscaler / 2 style_model. Provenance across every resolved field: `site:image-meta-mode` 2591 · `table:family-default` 1738 · `site:trainedWords` 353 · `site:image-meta-weak` 243.
 
 That last list is how item **3j** below was found: three of the nine precedence tiers scored zero, and the reason turned out not to be the library.
+
+**The T5 row above was wrong until 2026-09-18, and the correction matters more than the number did.** It read *"proven on one page, one family"* against *"four pages × ~16 families"*, which describes a wiring gap — and there is none: the provider is wired in `MainWindow`'s **generic** page-construction slot (`MainWindow.cpp:2568`), so all four cockpit pages have had it since the day it landed. Measured instead over the live library — how many weights carry a **non-table** recommended value, i.e. something a publisher actually said rather than our own family fallback:
+
+| family | models | with real settings |
+|---|---|---|
+| sdxl | 287 | 269 |
+| illustrious | 80 | 69 |
+| pony | 52 | 48 |
+| flux | 33 | 25 |
+| krea2 | 28 | 24 |
+| stable_diffusion | 16 | 12 |
+| **wan** | 64 | **26** |
+| **ltx** | 21 | **0** |
+| **hunyuan_video** | 7 | **0** |
+| **mochi** | 2 | **0** |
+
+**T5 was image-only.** Every video family fell back entirely to `family_seed_table` — the thing the whole arc exists to replace. The mechanism was never the gap; the *supply* was, and 3j below explains why it had nowhere to come from. Worked 2026-09-18 — see 3e/3f/3j.
 
 ---
 
@@ -129,16 +146,26 @@ Still true of the rest: the 7 stale `prompt_api.json` files are ignored by every
 
 **3d. A file that is not a workflow is refused for the wrong reason** — treated as an API prompt and timing out, rather than "this is not a workflow".
 
-**3e. `clip_skip` and `guidance` are resolved and never reach a render.** Unblocked by 4a. Traced 2026-09-17, and the two are **not the same defect** — this bullet was one line covering two:
+**3e. `clip_skip` and `guidance` are resolved and never reach a render — BOTH CLOSED 2026-09-18, by opposite decisions.** Traced 2026-09-17, and the two are **not the same defect** — this bullet was one line covering two:
 
 - **`guidance` has a consumer and no producer.** `native_image_graphs.py:104` reads `req.get("guidance")` and wires it into a `FluxGuidance` node. But **no site in `qt_ui/` ever puts `guidance` in a request** — the only C++ mentions are the inspector's display list. So a Flux model's published guidance is fetched from its card, shown to the user in the Models inspector, and then silently replaced by the builder's default at render time. One widget closes it.
 - **`clip_skip` has neither.** No graph builder emits a `CLIPSetLastLayer` node anywhere in `python/` — grep finds zero occurrences of the class. So clip_skip is resolved by the model-intelligence stack, displayed in the inspector, and there is nothing in the tree that could apply it. Adding a widget would not make it work; it needs the node in the builder too, or the field should stop being resolved and displayed.
 
 The honesty problem is the same in both cases and is worse for `clip_skip`: the inspector shows a value under a provenance caption naming the site it came from, which reads as a promise that the value is in force.
 
-**3f. A preset and a model's own defaults both write steps and CFG**, so which the user sees depends on the order they touched them. Unblocked by 4a. Traced 2026-09-17: the two writers are `applyPreset` (`ImageGenerationPage_catalog.cpp:1190`, fired from the preset combo at `ImageGenerationPage_ui.cpp:341`, writing steps/cfg/width/height/sampler/scheduler) and `applyModelDefaults` (`ImageGenerationPage_video.cpp:978`, fired on every model change, overlaying whatever the resolver answered through the same `applyResolvedSettings`). **Neither knows the other exists**, so the last one to fire wins and the user cannot tell which they are looking at.
+**`guidance` — BUILT.** A `Guidance` spin box sits directly under CFG in the Sampling card, Advanced-only, with `0.00` showing as *"Auto (follow CFG)"* and set as its construction value, so a user who never touches it changes nothing. The row is revealed only when the resolved answer actually carries a `guidance` — the DATA answer to "does this family steer this way", rather than a family-name list in C++: measured over the 759 sidecars, `guidance` is present on 33 of 33 flux and 7 of 7 hunyuan_video and on nothing else. `GenerationRequestBuilder` sends the key only above zero, because stating `0` would make Auto mean *unguided*, which on a distilled model is a render nobody wants.
+
+The read side was wrong in three places, not one, and now has a single resolver: `request_payload.guidance_from_request` — a stated `guidance`, else `cfg`, else the family's sweet spot. `native_image_graphs._flux_guidance_from_request` and **both** Hunyuan video builders (`native_video_graphs` t2v and i2v) took cfg and treated `guidance` as a fallback for a cfg of zero, which the cockpit never sends. The original bullet named one of the three.
+
+**`clip_skip` — DROPPED, and the measurement is why.** Of the 210 sidecars carrying a `clip_skip`, **203 are sdxl / pony / illustrious / stable_diffusion / unclassified** — the families that render through **diffusers**, where `CLIPSetLastLayer` is not the mechanism at all, so "emit the node in the image builders" would not have reached one of them. The remaining 7 are 5 krea2 at value 1 (the default layer — a no-op) and 2 flux at 2, where a distilled clip_l+T5 stack has no meaningful CLIP layer to skip. The only route that *would* apply the published values is threading `clip_skip=` into the diffusers pipeline call, which silently changes the output of every SDXL render in the library — an unverifiable change in a pass that renders nothing. So the field is gone from `recommended.FIELDS` and from the inspector's `kFieldOrder`, with the reasoning recorded once, on `FIELDS`. `meta_parse` still normalises it exactly as it normalises `seed`, which is also not a recommendation; `_offer` drops anything not in `FIELDS`, so the sidecars already carrying it are inert on read — no schema bump, no invalidated files.
+
+**3f. A preset and a model's own defaults both write steps and CFG — FIXED 2026-09-18.** Traced 2026-09-17: the two writers are `applyPreset` (`ImageGenerationPage_catalog.cpp:1190`, fired from the preset combo at `ImageGenerationPage_ui.cpp:341`, writing steps/cfg/width/height/sampler/scheduler) and `applyModelDefaults` (`ImageGenerationPage_video.cpp:978`, fired on every model change, overlaying whatever the resolver answered through the same `applyResolvedSettings`). **Neither knows the other exists**, so the last one to fire wins and the user cannot tell which they are looking at.
 
 The ruling stands: **a preset is a deliberate user choice and wins until the model changes.** Implementing it means `applyModelDefaults` must know whether a preset has been chosen since the last model change, and must skip exactly the fields that preset owns — not all of its fields, since the overlay's value is that a field the preset does not set still gets the model's answer.
+
+**Built as `presetOwnedFields_`** — the resolver field *names* each preset branch actually states, recorded by `applyPreset` and dropped from the overlay by `applyModelDefaults`. `setSelectedModel` clears it on a real model change, which is the "until"; Reset clears it too. The `Upscale / Repair` branch states no canvas, so a model's own width and height still arrive after it — that case is what the record being per-field rather than a flag buys.
+
+**Why a flag on the existing user-edit set was not enough**, which is the part worth keeping: a preset's writes land outside a `ProgrammaticWrite` scope, so they *do* trip `markUserEdited` — for a spin box whose value actually moved. `setValue(30)` on a box already showing 30 emits nothing, and the sampler/scheduler combos are watched on `activated`, which a programmatic `selectComboValue` never emits. So a preset that agreed with what was on screen, and every preset's sampler and scheduler, were unprotected. The ordering test is built on exactly that near-miss (the provider's first answer is the preset's own 832×480) and **the plant bit**: with the filter commented out, `aPresetWinsOverALaterModelDefaultsApplication` fails and the other four cases pass.
 
 **3j. The HuggingFace arm has never run — WIRED 2026-09-17, after measuring whether it could be.** `hf_lookup.py` was imported by `model_intelligence/__init__.py`, listed in `__all__`, covered by its own unit-test file — and called by nothing, so the three `card:*` tiers of the precedence order were unreachable, which is why all four provenance values in a 759-model run were `site:*` or `table:*`. The summary's `no_match: 79, lookup_failed: 0` read as "both sites were asked". One was.
 
@@ -162,6 +189,14 @@ But **the `card:*` settings tiers still contribute nothing to this library — t
 2. **`card:*` sits below `site:image-meta-mode` in the precedence order**, so even where both exist the site's own render metadata wins.
 
 So: *reachable in code, unexercised in data.* Say it that way. A future reader who sees "wired" and assumes card values are flowing into defaults would be wrong, and would go looking for a bug that is not there.
+
+**Reason 1 is now closed (2026-09-18): a CivitAI hit ends the search for IDENTITY, not for SETTINGS.** `refresh` asks the card for any weight whose `recommended` block comes back with no `site:*` entry at all — 172 of the 759 — and reports `settings_from_card` beside `identified_hf`, because "HuggingFace holds these bytes" and "HuggingFace's card is where this weight's steps came from" are different facts. The gate is a **cost** control, not a safety one, and that distinction is structural rather than a new rule: `PROVENANCE_ORDER` already ranks every `card:*` tier below every `site:*` settings tier, so a card can only ever fill a field the site left empty. `tests/test_model_intelligence_card_settings.py` asserts that directly rather than trusting the table, and **the plant bit** — moving the card tiers above `site:image-meta-mode` fails it and the older recommended-order test, on the numbers (`assert 8 == 30`).
+
+`python/model_intelligence/settings_backfill.py` + `scripts/dev/backfill_model_settings.py` do the same for the sidecars already on disk: no re-hash (the sha256 that confirms a repo is already in the file), no previews, the `recommended` block and a `huggingface` entry in `identity.sources` and nothing else.
+
+**And the live pass found a second cause the plan did not have, which is the sharper one.** `Lightricks/LTX-2.3`'s card really does yield `steps 8 / cfg 1` — verified anonymously against the live API, 6563 bytes of README. But the owner's `ltx-2.3-22b-dev.safetensors` confirms **`asheng386/LTX-2.3`** for one copy and **`darksidewalker/DaSiWa-LTX2.3`** for another, because `hf_candidates.identify` accepts the FIRST candidate whose sha256 matches and the free-text search ranks re-uploads ahead of the publisher. The hash match is perfectly correct — a mirror holds identical bytes — and the card beside it is a stub. That is Doc 62 3l's shape one layer out: a *correct* match to the wrong source for the question being asked. So a confirmed repo whose card says nothing no longer ends the search: `CardReader._mirror_with_a_card` walks up to six further candidates that **also hold the digest** and takes the first whose card states something. Identity is settled by then, and every repo tried holds the same bytes, so the worst case is a different mirror.
+
+**The other live constraint is the rate limit, and it is the binding one.** HuggingFace's anonymous limit answered 429 for 56 of 172 weights on the first pass and 48 on the second even at two seconds a weight — `HfThrottled` means those are reported as `lookup_failed` rather than as "not on HuggingFace", which is the trap it was written for, but a pass that throttles a third of its work still has to be re-run. `--only-missing` and `--pace` exist for exactly that.
 
 The remaining misses are the honest answer, not a shortfall: the owner's own fused LoRAs (`Fused_*`, `Penis_*`, `st0m4chBulg3_*`) and CivitAI LoRAs nobody mirrored to HF. Live proof through the shipped path: `trellis_2_bf16` → `Comfy-Org/TRELLIS.2` (licence `mit`), `ip-adapter-plus_sd15` → `InvokeAI/ip_adapter_plus_sd15` (`apache-2.0`), and `Lightricks/LTX-2.3`'s card yields `steps 8 / cfg 1` at `card:prose-regex` — the first `card:*` provenance this project has ever resolved, and it agrees with the distilled two-stage route CLAUDE.md §6 records.
 

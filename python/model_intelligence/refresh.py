@@ -28,6 +28,16 @@ and CONFIRMS it by sha256, so a wrong guess costs a request and can never mislab
 arm is skipped entirely when no `hf` client is given, and it only ever sees a real MISS: a lookup
 that FAILED is not evidence that CivitAI lacks the weight. Until 2026-09-17 there was no second
 arm, and the summary's `no_match: 79, lookup_failed: 0` read as "both sites were asked".
+
+**Identity and settings are two questions, and the arms answer them on different schedules**
+(2026-09-18). A CivitAI hit ends the search for IDENTITY -- that is what a hash match establishes,
+and asking the other site again would spend up to 25 requests per weight for a name we already
+have. It does NOT end the search for SETTINGS: CivitAI's `images[].meta` yields no sampler values
+for a video post, so ltx 0/21, hunyuan_video 0/7 and mochi 0/2 carried a publisher-stated value
+while CivitAI held the files. So a weight whose `recommended` block comes back with no `site:*`
+entry at all is asked about a second time, for its card alone (`_card_settings_for`,
+`model_intelligence/card_settings.py`), and `settings_from_card` is reported beside
+`identified_hf` because the two are different facts.
 """
 from __future__ import annotations
 
@@ -37,9 +47,9 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from model_intelligence import (
+    card_settings,
     hashing,
     hf_candidates,
-    hf_lookup,
     kinds,
     previews,
     readable_roots,
@@ -109,8 +119,10 @@ class RefreshJob:
         self.force = force
         # Shared across the whole run on purpose: a repackaged bundle holds a transformer, a VAE
         # and a text encoder that share no searchable name, so confirming one hands us the rest
-        # for free (`hf_candidates.RepoIndex`).
+        # for free (`hf_candidates.RepoIndex`). The reader adds a per-repo README cache on top,
+        # because LTX is 21 files in one repo and that is otherwise 21 fetches of one document.
         self._hf_index = hf_candidates.RepoIndex(self.hf)
+        self._cards = card_settings.CardReader(self.hf, index=self._hf_index)
 
     def _kind_and_family(self, path: Path) -> tuple[str, str | None]:
         if classify_model is None:
@@ -165,26 +177,45 @@ class RefreshJob:
         FAILED must not be treated as "CivitAI does not have it". Before this existed the summary
         said `no_match: 79, lookup_failed: 0`, which reads as "both sites were asked". One was.
 
-        Returns (card, source). `card` is the block `build_payload(hf=...)` wants; `source` is the
-        confirmed repo/path. Both None when nothing confirmed, which is the common answer and
-        costs only searches.
+        Returns (card, settings). `card` is the block `build_payload(hf=...)` wants; `settings` is
+        what the repo's README states. Both None when nothing confirmed, which is the common answer
+        and costs only searches.
+
+        It is also reached on a CivitAI HIT whose settings are empty -- see `_card_settings_for`.
+        That is not a contradiction of the paragraph above: a hit ends the search for IDENTITY, and
+        identity is all a hit establishes.
         """
         if self.hf is None or not digest:
             return None, None
         try:
-            found = hf_candidates.identify(
-                self.hf, weight=path, sha256=digest, index=self._hf_index,
-            )
-            if not found:
-                return None, None
-            info = self._hf_index.info.get(found["repo"])
-            card = dict(hf_lookup.card_identity(info))
-            card.update({"repo": found["repo"], "path": found["path"]})
-            settings = hf_lookup.settings_from_readme(self.hf.readme(found["repo"]))
-            return card, settings
+            return self._cards.read(weight=path, sha256=digest)
         except Exception as exc:  # noqa: BLE001 -- a per-file failure never aborts the run
             errors.append({"path": str(path), "error": f"huggingface: {exc}"})
             return None, None
+
+    def _card_settings_for(self, block: dict[str, dict[str, Any]], digest: str, path: Path,
+                           errors: list[dict[str, str]]) -> tuple[Any, dict[str, dict[str, Any]] | None]:
+        """The card's settings for a weight CivitAI identified and said nothing useful about.
+
+        `card_settings.needs_card_settings` is the gate, and it is a COST control rather than a
+        safety one: `recommended.PROVENANCE_ORDER` ranks every `card:*` tier below every `site:*`
+        settings tier, so a card can only fill a field the site left empty even if this ran on
+        every weight. What the gate buys is that 587 of 759 weights never ask HuggingFace at all.
+
+        Measured 2026-09-18 over the live library: ltx 0/21, hunyuan_video 0/7 and mochi 0/2
+        carried a publisher-stated value, while CivitAI held the files for 14, 2 and 2 of them --
+        so those are identified weights whose settings nobody had asked the right site about.
+
+        The CARD comes back too, and is handed to `build_payload` alongside the CivitAI version.
+        Every identity field there already prefers the version (`name` from `model.name`,
+        `base_model` from `version.baseModel or card.base_model`), so nothing is overwritten -- what
+        it adds is `identity.sources[]` naming the repo the settings were read from. A number shown
+        under a provenance caption whose source is not in the file is the defect this arc is about.
+        """
+        if self.hf is None or not digest or not card_settings.needs_card_settings(block):
+            return None, None
+        card, settings = self._hf(digest, path, errors)
+        return card, (settings or None)
 
     def run(self) -> dict[str, Any]:
         statuses = [readable_roots.root_status(root) for root in self.roots]
@@ -194,6 +225,10 @@ class RefreshJob:
         cache = hashing.HashCache(self.cache_path)
         total = len(files)
         examined = identified = no_match = lookup_failed = identified_hf = 0
+        # Counted apart from `identified_hf` on purpose: "HuggingFace holds these bytes" and
+        # "HuggingFace's card is where this weight's steps came from" are different facts, and
+        # the second is the one this arm was extended for.
+        settings_from_card = 0
         cancelled = False
         errors: list[dict[str, str]] = []
         now = _dt.datetime.now(_dt.timezone.utc).isoformat()
@@ -243,13 +278,31 @@ class RefreshJob:
                     except Exception as exc:  # noqa: BLE001 -- pictures never cost an identity
                         errors.append({"path": str(path), "error": f"previews: {exc}"})
                 parent = self._parent(version, path, errors) if version else None
-                card, card_settings = (None, None) if version else self._hf(digest, path, errors)
+                # The local is `card_values`, not `card_settings`: that name is now the MODULE
+                # holding the one rule for when a card is worth reading, and shadowing it here
+                # would make the gate below resolve to a dict.
+                card, card_values = (None, None) if version else self._hf(digest, path, errors)
                 block = recommended.build(
                     civitai_version=version,
-                    card_settings=card_settings,
+                    card_settings=card_values,
                     family=family,
                     existing_user=sidecar.user_values(existing),
                 )
+                # A CivitAI hit is an identity, not a set of settings. When the site published
+                # nothing about how to render this weight, ask the card and rebuild through the
+                # SAME precedence function -- never by patching the block, which would be a second
+                # ordering. `civitai_version` is passed again unchanged, so identity and every
+                # site value the first build found win exactly as they did.
+                late_card, late = self._card_settings_for(block, digest, path, errors)
+                if late:
+                    block = recommended.build(
+                        civitai_version=version,
+                        card_settings=late,
+                        family=family,
+                        existing_user=sidecar.user_values(existing),
+                    )
+                    card = card or late_card
+                    settings_from_card += 1
                 payload = sidecar.merge(existing, sidecar.build_payload(
                     weight=path, sha256=digest, kind=kind, family=family,
                     civitai_version=version, hf=card, recommended=block,
@@ -285,6 +338,7 @@ class RefreshJob:
             "examined": examined,
             "identified": identified,
             "identified_hf": identified_hf,
+            "settings_from_card": settings_from_card,
             "no_match": no_match,
             "lookup_failed": lookup_failed,
             "cancelled": cancelled,

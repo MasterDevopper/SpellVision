@@ -219,6 +219,65 @@ QJsonObject wanOperatingPointTable()
 
 const QString kKrea2Path = QStringLiteral("D:/AI_ASSETS/models/checkpoints/loxsUtopicWorldKrea2_v20Quants.safetensors");
 
+// The preset combo, found by an entry it offers. Its handler is wired to `activated`, NOT
+// `currentIndexChanged` -- deliberately, so the programmatic setCurrentText in restore/reset does
+// not re-fire it -- so a test has to emit that signal to simulate a human choosing. Qt's `signals:`
+// is `public:`, which is what makes calling it from here legal and is the only way to reach
+// applyPreset() without reaching around the production trigger.
+void choosePreset(ImageGenerationPage &page, const QString &name)
+{
+    QComboBox *combo = comboOffering(page, name);
+    QVERIFY2(combo, qPrintable(QStringLiteral("the preset combo (offering %1) was not found").arg(name)));
+    combo->setCurrentIndex(combo->findData(name));
+    emit combo->activated(combo->currentIndex());
+}
+
+// The Guidance row's spin box: two decimals AND an "Auto" special value, which no other
+// QDoubleSpinBox on the page has (cfg has one decimal, the wan shift spins have two and no special
+// value text).
+QDoubleSpinBox *guidanceSpinOf(ImageGenerationPage &page)
+{
+    for (QDoubleSpinBox *box : page.findChildren<QDoubleSpinBox *>())
+    {
+        if (box->decimals() == 2 && box->specialValueText().startsWith(QStringLiteral("Auto")))
+            return box;
+    }
+    return nullptr;
+}
+
+// The stacked-field CELL a control sits in -- {label above, field below} in one QWidget, which is
+// what updateDisclosure() actually shows and hides (ImageGenerationPage_ui.cpp's makeStackedField).
+//
+// `isHidden()` on that cell, NOT `isVisibleTo(page)`: the page is never shown in this test and the
+// inspector is a QStackedWidget, so `isVisibleTo` answers "would this be painted", which is false
+// for every row on a tab that is not current -- it cannot distinguish a row the disclosure gate
+// hid from a row on a tab nobody selected. `isHidden()` is exactly the setVisible(false) the gate
+// performs. Each case below anchors it against the CFG row, whose gating is not under test.
+bool rowIsHidden(QWidget *control)
+{
+    return control && control->parentWidget() && control->parentWidget()->isHidden();
+}
+
+// The Seed spin box -- the ANCHOR for every disclosure assertion below, because it is
+// Advanced-gated by updateDisclosure() and by nothing else. Identified by its maximum, INT_MAX,
+// which no other spin box on the page uses.
+//
+// CFG deliberately is NOT the anchor, and the reason is a finding rather than a preference:
+// updateVideoStackModeUi() re-runs `cfgRow_->setVisible(!isLtx && !isFlux3)` AFTER
+// updateDisclosure() has hidden it, so on a video page Steps and CFG are showing in SIMPLE. That
+// is a pre-existing disclosure leak in those two rows, recorded here rather than fixed in this
+// pass; an anchor that rode on it would report the Guidance gate as broken every time the leak was
+// closed, and would have silently stopped anchoring anything if it never was.
+QSpinBox *seedSpinOf(ImageGenerationPage &page)
+{
+    for (QSpinBox *box : page.findChildren<QSpinBox *>())
+    {
+        if (box->maximum() == 2147483647)
+            return box;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 class ModelDefaultsApplyTest : public QObject
@@ -247,6 +306,13 @@ private slots:
     void theAnswerIsLookedUpForTheFamilyOnScreen();
     void aHandSetDualNoiseSplitSurvivesASimpleAdvancedToggle();
     void orientationSwapsTheResolvedPairRatherThanReplacingIt();
+    // Doc 62 3e -- guidance had a consumer and no producer.
+    void aPublishedGuidanceLandsInAControlAndSimpleGainsNoKnob();
+    void aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob();
+    // Doc 62 3f -- a preset and a model's defaults both write steps and CFG.
+    void aPresetWinsOverALaterModelDefaultsApplication();
+    void aFieldThePresetDoesNotSetStillGetsTheModelsValue();
+    void aModelChangeEndsThePresetsClaim();
 };
 
 void ModelDefaultsApplyTest::stepsLandInSimpleMode()
@@ -585,6 +651,203 @@ void ModelDefaultsApplyTest::orientationSwapsTheResolvedPairRatherThanReplacingI
     orientation->setCurrentIndex(orientation->findData(QStringLiteral("landscape")));
     QCOMPARE(spins.width->value(), 832);
     QCOMPARE(spins.height->value(), 480);
+}
+
+// --- Doc 62 3e: guidance had a consumer and no producer -----------------------------------------
+
+void ModelDefaultsApplyTest::aPublishedGuidanceLandsInAControlAndSimpleGainsNoKnob()
+{
+    // `native_image_graphs` and both Hunyuan video builders read `req["guidance"]`, and NO site in
+    // qt_ui ever put it in a request -- so a model's published guidance was fetched, shown in the
+    // Models inspector under a provenance caption reading as a promise, and replaced by the cfg
+    // slider at render time. The control that closes it must obey the house rules: Advanced reveals
+    // it IN PLACE (beside CFG, the number it refines), and Simple gains no knob.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/hunyuan_video_t2v.safetensors");
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("guidance"), entry(6.0, QStringLiteral("table:family-default")));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    QDoubleSpinBox *guidance = guidanceSpinOf(page);
+    QVERIFY2(guidance, "the Guidance spin box was not found");
+    // Auto is the construction value, so the control appears saying exactly what the app did before
+    // it existed -- follow CFG.
+    QCOMPARE(guidance->value(), 0.0);
+
+    page.updateDisclosure(false); // Simple
+    selectVideoCheckpoint(page, path, QStringLiteral("hunyuan t2v"));
+    page.refreshModelDefaults();
+
+    // The VALUE arrives in both modes (R2.1, like every other field). The ROW does not: Simple must
+    // not gain a knob.
+    QCOMPARE(guidance->value(), 6.0);
+    QSpinBox *seed = seedSpinOf(page);
+    QVERIFY2(seed, "the Seed spin box (the disclosure anchor) was not found");
+    QVERIFY2(rowIsHidden(seed), "the Seed row is showing in Simple; the anchor for this case is wrong");
+    QVERIFY2(rowIsHidden(guidance),
+             "the Guidance row is showing in Simple; Simple must not gain a knob");
+
+    page.updateDisclosure(true); // Advanced
+    QVERIFY2(!rowIsHidden(seed), "the Seed row is hidden in Advanced; the anchor for this case is wrong");
+    QVERIFY2(!rowIsHidden(guidance),
+             "the Guidance row is hidden in Advanced for a family that publishes one");
+
+    QDoubleSpinBox *cfg = cfgSpinOf(page);
+    QVERIFY2(cfg, "cfg spin box not found");
+
+    // And it sits beside CFG rather than on another tab -- "Advanced REVEALS IN PLACE" is a claim
+    // about WHERE, so assert the where. Both rows are cells of the same card.
+    QVERIFY2(cfg->parentWidget() && guidance->parentWidget()
+                 && cfg->parentWidget()->parentWidget() == guidance->parentWidget()->parentWidget(),
+             "Guidance is not in the same card as CFG -- Advanced must reveal in place, never relocate");
+}
+
+void ModelDefaultsApplyTest::aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob()
+{
+    // The other half. wan states no guidance -- no builder on that family reads one -- so Advanced
+    // must not reveal a box that reaches nothing. A control shown exactly where it is ignored is
+    // the defect the `request-keys-have-readers` sweep exists for, with the sign flipped.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v.safetensors");
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("steps"), entry(28, QStringLiteral("table:family-default")));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    page.updateDisclosure(true); // Advanced
+    selectVideoCheckpoint(page, path, QStringLiteral("wan t2v"));
+    page.refreshModelDefaults();
+
+    QDoubleSpinBox *guidance = guidanceSpinOf(page);
+    QVERIFY2(guidance, "the Guidance spin box was not found");
+    // The page must actually be applying this answer, or the assertion below is satisfied by a
+    // code path that never ran.
+    QCOMPARE(stepsSpinOf(page)->value(), 28);
+    // Anchored: Advanced really is revealing rows on this page, so "hidden" below means the gate
+    // fired rather than that nothing was shown at all.
+    QVERIFY2(!rowIsHidden(seedSpinOf(page)), "Advanced revealed nothing; the anchor for this case is wrong");
+    QVERIFY2(rowIsHidden(guidance),
+             "Advanced revealed a Guidance box for a family that publishes none and whose builder "
+             "never reads one");
+}
+
+// --- Doc 62 3f: a preset and a model's defaults both write steps and CFG -------------------------
+
+void ModelDefaultsApplyTest::aPresetWinsOverALaterModelDefaultsApplication()
+{
+    // The ruling: a preset is a deliberate user choice and wins until the model changes.
+    //
+    // The case is built so the user-edit flag ALONE cannot pass it. The provider's first answer is
+    // the video preset's own 832x480, so `widthSpin_->setValue(832)` on a box already showing 832
+    // emits no valueChanged and marks nothing -- exactly the near-miss that makes an explicit
+    // record of what the preset owns necessary. The provider then changes its mind, which is what a
+    // deferred worker reply or a Simple/Advanced toggle looks like from here.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const CanvasSpins spins = canvasSpins(page);
+    QVERIFY2(spins.width && spins.height, "canvas spin boxes not found");
+
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan_preset_order.safetensors");
+    int width = 832;
+    int height = 480;
+    page.setModelDefaultsProvider([path, &width, &height](const QString &modelPath, const QString &,
+                                                          const QString &) -> QJsonObject {
+        if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("width"), entry(width, QStringLiteral("site:image-meta-mode"), 5, 5));
+        settings.insert(QStringLiteral("height"), entry(height, QStringLiteral("site:image-meta-mode"), 5, 5));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    selectVideoCheckpoint(page, path, QStringLiteral("wan preset order"));
+    page.refreshModelDefaults();
+    QCOMPARE(spins.width->value(), 832);
+    QCOMPARE(spins.height->value(), 480);
+
+    // The user chooses a preset. It states 832x480 -- the numbers already on screen.
+    choosePreset(page, QStringLiteral("Portrait Detail"));
+    QCOMPARE(spins.width->value(), 832);
+
+    width = 1280;
+    height = 704;
+    page.refreshModelDefaults();
+
+    QCOMPARE(spins.width->value(), 832);
+    QCOMPARE(spins.height->value(), 480);
+}
+
+void ModelDefaultsApplyTest::aFieldThePresetDoesNotSetStillGetsTheModelsValue()
+{
+    // "...must skip exactly the fields that preset owns -- not all of its fields, because the
+    // overlay's whole value is that a field the preset does not set still gets the model's answer."
+    // The video preset deliberately states no sampler (karras is not on wan's allow-list and LTX
+    // has no scheduler input at all), so the model's own sampler must still arrive after it.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    page.setOperatingPointsProvider([](const QString &) { return wanOperatingPointTable(); });
+    page.pinVideoFamily(QStringLiteral("wan"));
+
+    QComboBox *sampler = comboOffering(page, QStringLiteral("euler"));
+    QVERIFY2(sampler, "no combo offers the family's samplers");
+
+    const QString path = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan_partial_preset.safetensors");
+    page.setModelDefaultsProvider([path](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        if (modelPath.compare(path, Qt::CaseInsensitive) != 0)
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("steps"), entry(12, QStringLiteral("site:image-meta-mode"), 6, 6));
+        settings.insert(QStringLiteral("sampler"), entry(QStringLiteral("euler"),
+                                                        QStringLiteral("site:image-meta-mode"), 6, 6));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+    selectVideoCheckpoint(page, path, QStringLiteral("wan partial preset"));
+
+    choosePreset(page, QStringLiteral("Portrait Detail"));
+    QCOMPARE(stepsSpinOf(page)->value(), 30); // the preset's steps
+
+    page.refreshModelDefaults();
+
+    // The preset owns steps, so it keeps them. It states no sampler, so the model's own arrives.
+    QCOMPARE(stepsSpinOf(page)->value(), 30);
+    QCOMPARE(sampler->currentData().toString(), QStringLiteral("euler"));
+}
+
+void ModelDefaultsApplyTest::aModelChangeEndsThePresetsClaim()
+{
+    // The other order, and the "until" in "wins UNTIL THE MODEL CHANGES". Picking a different
+    // checkpoint is a request for THAT checkpoint's numbers, so every field the preset stated is
+    // released and the model's answer lands whole.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const CanvasSpins spins = canvasSpins(page);
+    QVERIFY2(spins.width && spins.height, "canvas spin boxes not found");
+
+    page.setModelDefaultsProvider([](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        if (!modelPath.contains(QStringLiteral("second")))
+            return {};
+        QJsonObject settings;
+        settings.insert(QStringLiteral("steps"), entry(14, QStringLiteral("site:image-meta-mode"), 7, 7));
+        settings.insert(QStringLiteral("width"), entry(1280, QStringLiteral("site:image-meta-mode"), 7, 7));
+        settings.insert(QStringLiteral("height"), entry(704, QStringLiteral("site:image-meta-mode"), 7, 7));
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    selectVideoCheckpoint(page, QStringLiteral("D:/m/first.safetensors"), QStringLiteral("first"));
+    choosePreset(page, QStringLiteral("Portrait Detail"));
+    QCOMPARE(stepsSpinOf(page)->value(), 30);
+    QCOMPARE(spins.width->value(), 832);
+
+    selectVideoCheckpoint(page, QStringLiteral("D:/m/second.safetensors"), QStringLiteral("second"));
+    page.refreshModelDefaults();
+
+    QCOMPARE(stepsSpinOf(page)->value(), 14);
+    QCOMPARE(spins.width->value(), 1280);
+    QCOMPARE(spins.height->value(), 704);
 }
 
 QTEST_MAIN(ModelDefaultsApplyTest)
