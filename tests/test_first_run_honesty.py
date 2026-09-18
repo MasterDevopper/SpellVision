@@ -135,6 +135,42 @@ def test_first_run_probes_do_not_block_the_dialog() -> None:
     assert "QueuedConnection" in start
 
 
+def test_the_dialog_states_no_backend_fact_it_has_not_measured() -> None:
+    """The constructor carried ``const bool comfyListening = false;``, so the first paint told
+    every user "folder present, 8188 not answering" with NEEDS SETUP beside it -- including the
+    user whose ComfyUI was up and answering. The async probe corrected it a moment later; the false
+    negative was still the first thing a new user read about their own install.
+
+    The fix could not be "probe in the constructor": the sibling test above holds
+    probeComfyProtocol out of both the ctor and refreshChecks, because that is where it used to
+    block the dialog's first paint. So the property asserted here is the general one -- a
+    reachability VERDICT may only be written where a probe result is actually in hand -- and it
+    would have failed on the old code for the same reason it fails on any future ctor that guesses.
+    """
+    text = DIALOG.read_text(encoding="utf-8")
+    ctor = text.split("void FirstRunDialog::showPage", 1)[0]
+    for verdict in ("not answering", "listening on"):
+        assert verdict not in ctor, (
+            f"the constructor states {verdict!r} before anything has been probed"
+        )
+    assert "CHECKING" in ctor, "the un-probed state needs a badge of its own, not NEEDS SETUP"
+
+    applied = definition_body("applyProbeResults", qualifier="FirstRunDialog")
+    assert "not answering" in applied, "the verdict belongs where a probe result is in hand"
+    assert "comfyChecked_" in applied and "workerChecked_" in applied, (
+        "both backend rows must distinguish 'asked and told no' from 'not asked yet'"
+    )
+
+    # A 350 ms timeout is not a verdict either. The negative gets a second ask on a longer budget,
+    # off the GUI thread like the first, and only that one may conclude.
+    start = definition_body("startReachabilityProbes", qualifier="FirstRunDialog")
+    assert "confirmComfyReachability" in start
+    confirm = definition_body("confirmComfyReachability", qualifier="FirstRunDialog")
+    assert "probeComfyProtocol" in confirm
+    assert "QThreadPool" in confirm and "QueuedConnection" in confirm
+    assert "comfyChecked_ = true" in confirm
+
+
 def test_launch_and_quit_do_not_block_the_window() -> None:
     """Runtimes start after the first paint; quit does not waitForFinished on Comfy."""
     main = MAIN.read_text(encoding="utf-8")

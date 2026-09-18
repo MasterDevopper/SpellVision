@@ -66,6 +66,10 @@ private:
     void refreshChecks();
     void persistFolders();
     void startReachabilityProbes();
+    // A 350 ms negative is not evidence that ComfyUI is down -- a starting runtime, or one busy
+    // with a render, does not answer /system_stats inside that budget. So a fast negative buys a
+    // second ask on a longer deadline, and the row stays CHECKING until one of the two answers.
+    void confirmComfyReachability();
     void applyProbeResults(bool workerReady, bool comfyListening);
 
     Action action_ = Action::Continue;
@@ -75,6 +79,12 @@ private:
     bool workerStarting_ = false;
     bool comfyStarting_ = false;
     bool probeInFlight_ = false;
+    bool comfyConfirmInFlight_ = false;
+    // Whether ANY probe has produced an answer worth stating. False until then, and while it is
+    // false the ComfyUI row says it is checking rather than asserting a reachability it has not
+    // measured. The constructor used to hardcode `comfyListening = false` here instead.
+    bool comfyChecked_ = false;
+    bool workerChecked_ = false;
     bool lastWorkerReady_ = false;
     bool lastComfyListening_ = false;
     QCheckBox *suppressCheck_ = nullptr;

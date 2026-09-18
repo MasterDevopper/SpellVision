@@ -38,9 +38,13 @@ struct SetupCheck
     bool ready = false;
     bool required = true;
     bool starting = false;
+    // Nothing has been asked yet. Distinct from `starting` (we know a runtime is coming up) and
+    // from !ready (we asked and it said no): this is the state the dialog is in for the few
+    // hundred milliseconds before its probes answer, and it used to be rendered as NEEDS SETUP.
+    bool checking = false;
 };
 
-void applyStatusBadge(QLabel *status, bool ready, bool required, bool starting)
+void applyStatusBadge(QLabel *status, bool ready, bool required, bool starting, bool checking = false)
 {
     if (!status)
         return;
@@ -50,6 +54,12 @@ void applyStatusBadge(QLabel *status, bool ready, bool required, bool starting)
     {
         statusName = QStringLiteral("FirstRunStatusReady");
         statusText = QStringLiteral("READY");
+    }
+    else if (checking)
+    {
+        // The neutral badge, not the red one: an unanswered probe is not a missing dependency.
+        statusName = QStringLiteral("FirstRunStatusOptional");
+        statusText = QStringLiteral("CHECKING");
     }
     else if (starting)
     {
@@ -89,7 +99,7 @@ QFrame *makeCheckRow(const SetupCheck &check, QWidget *parent, QLabel **detailOu
     copyLayout->addWidget(detail);
 
     auto *status = new QLabel(row);
-    applyStatusBadge(status, check.ready, check.required, check.starting);
+    applyStatusBadge(status, check.ready, check.required, check.starting, check.checking);
     status->setAlignment(Qt::AlignCenter);
     status->setMinimumWidth(92);
 
@@ -125,12 +135,22 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
     const bool hasApiKey = !qgetenv("BFL_API_KEY").trimmed().isEmpty();
 
     const bool comfyFolder = profile.comfyRootReady();
-    const bool comfyListening = false;
+    // NO reachability claim here, and this is the fix. A `const bool comfyListening = false;` used
+    // to sit on this line, so the dialog's very first paint reported the port as dead to every
+    // user -- including one whose ComfyUI was up -- with a NEEDS SETUP badge beside it. The async
+    // probe corrected it a moment later; the false negative was still the first thing a new user
+    // read about their own install. (Phrased without quoting that row's text: the test holding
+    // this greps the constructor for the verdict strings, and a comment quoting one would fail.)
+    //
+    // The probe cannot simply move here: it used to be in this constructor and in refreshChecks(),
+    // and 2b9e4bc moved BOTH to a QThreadPool because they blocked the dialog's first paint (a
+    // test holds them out of both). So the constructor states what it actually knows -- the folder
+    // is there, the port has not been asked yet -- and applyProbeResults() fills in the answer.
     QString comfyDetail = QStringLiteral("Open Runtime Setup to configure or install ComfyUI.");
     if (comfyFolder && comfyStarting)
         comfyDetail = profile.comfyRoot + QStringLiteral(" · starting, waiting for %1").arg(profile.comfyPort);
     else if (comfyFolder)
-        comfyDetail = profile.comfyRoot + QStringLiteral(" · folder present, %1 not answering").arg(profile.comfyPort);
+        comfyDetail = profile.comfyRoot + QStringLiteral(" · checking %1…").arg(profile.comfyPort);
 
     QString modelsDetail = QStringLiteral("Configure a model root before local generation.");
     bool modelsReady = profile.modelsRootReady();
@@ -157,14 +177,16 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
         {QStringLiteral("SpellVision worker"),
          profile.workerScriptReady() ? profile.workerScript : QStringLiteral("python/worker_service.py was not found under the project root."),
          profile.workerScriptReady(), true},
+        // The two rows that describe a BACKEND rather than a file on disk open as CHECKING. Every
+        // other row above and below is a filesystem fact the constructor really has measured.
         {QStringLiteral("Worker connection"),
          workerStarting
              ? QStringLiteral("Starting protocol ping on %1:%2").arg(profile.workerHost).arg(profile.workerPort)
              : QStringLiteral("Protocol ping on %1:%2").arg(profile.workerHost).arg(profile.workerPort),
-         false, true, workerStarting},
+         false, true, workerStarting, !workerStarting},
         {QStringLiteral("ComfyUI runtime"),
          comfyDetail,
-         comfyFolder && comfyListening, true, comfyFolder && comfyStarting && !comfyListening},
+         false, true, comfyFolder && comfyStarting, comfyFolder && !comfyStarting},
         {QStringLiteral("FLUX.3 hosted preview"),
          hasApiKey ? QStringLiteral("BFL_API_KEY is available to this process.")
                    : QStringLiteral("Requires a paid BFL account and BFL_API_KEY; local generation is unaffected."),
@@ -177,6 +199,9 @@ FirstRunDialog::FirstRunDialog(const QString &projectRoot, bool workerStarting, 
         if (check.required && !check.ready && !check.starting)
             otherRequiredReady_ = false;
     }
+    // A checking row is not a ready row: the Continue button opens as "Continue in limited mode"
+    // and applyProbeResults() relabels it the moment the probes answer. That is a statement about
+    // this dialog's own knowledge, not about the machine, so it is allowed to be pessimistic.
 
     const ThemeManager &theme = ThemeManager::instance();
 
@@ -541,7 +566,52 @@ void FirstRunDialog::startReachabilityProbes()
             if (!self)
                 return;
             self->probeInFlight_ = false;
-            self->applyProbeResults(workerReady, comfyListening);
+            // The worker probe has one budget and one answer; it is measured either way.
+            self->workerChecked_ = true;
+            if (comfyListening)
+            {
+                // A positive is authoritative at any budget: something answered /system_stats with
+                // a ComfyUI-shaped payload.
+                self->comfyChecked_ = true;
+                self->applyProbeResults(workerReady, true);
+                return;
+            }
+            // A negative at 350 ms is not. Leave the ComfyUI row saying whatever it last KNEW --
+            // CHECKING on the first pass -- and ask again with room to answer.
+            self->applyProbeResults(workerReady, self->lastComfyListening_);
+            self->confirmComfyReachability();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void FirstRunDialog::confirmComfyReachability()
+{
+    // The second ask, and the only place the dialog is allowed to conclude that ComfyUI is down.
+    //
+    // 350 ms is the right budget for the probe that paints the first frame, and the wrong budget
+    // for a verdict: ComfyUI answers /system_stats off its own event loop, so a runtime that is
+    // still importing torch, or busy with a render, misses it routinely. The dialog used to spend
+    // that one timeout and then tell the user their install was not answering.
+    //
+    // Runs off the GUI thread for the same reason the first probe does, and only one at a time.
+    if (comfyConfirmInFlight_)
+        return;
+    comfyConfirmInFlight_ = true;
+
+    const QString comfyHost = profile_.comfyHost;
+    const quint16 comfyPort = profile_.comfyPort;
+    QPointer<FirstRunDialog> self(this);
+    QThreadPool::globalInstance()->start([self, comfyHost, comfyPort]() {
+        const bool comfyListening = probeComfyProtocol(comfyHost, comfyPort, 2000);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self.data(), [self, comfyListening]() {
+            if (!self)
+                return;
+            self->comfyConfirmInFlight_ = false;
+            // Either way this is now a measured answer, so the row may state it.
+            self->comfyChecked_ = true;
+            self->applyProbeResults(self->lastWorkerReady_, comfyListening);
         }, Qt::QueuedConnection);
     });
 }
@@ -552,6 +622,7 @@ void FirstRunDialog::applyProbeResults(bool workerReady, bool comfyListening)
     lastComfyListening_ = comfyListening;
 
     const bool workerStarting = workerStarting_ && !workerReady;
+    const bool workerChecking = !workerChecked_ && !workerStarting;
     if (workerCheckDetail_)
         workerCheckDetail_->setText(workerStarting
                                         ? QStringLiteral("Starting protocol ping on %1:%2")
@@ -560,10 +631,13 @@ void FirstRunDialog::applyProbeResults(bool workerReady, bool comfyListening)
                                         : QStringLiteral("Protocol ping on %1:%2")
                                               .arg(profile_.workerHost)
                                               .arg(profile_.workerPort));
-    applyStatusBadge(workerCheckStatus_, workerReady, true, workerStarting);
+    applyStatusBadge(workerCheckStatus_, workerReady, true, workerStarting, workerChecking);
 
     const bool comfyFolder = profile_.comfyRootReady();
     const bool comfyStarting = comfyStarting_ && comfyFolder && !comfyListening;
+    // Until confirmComfyReachability() has answered once, the port has no measured state, and
+    // "%1 not answering" is a claim rather than a reading.
+    const bool comfyChecking = comfyFolder && !comfyChecked_ && !comfyStarting;
     if (comfyCheckDetail_)
     {
         QString comfyDetail = QStringLiteral("Open Runtime Setup to configure or install ComfyUI.");
@@ -571,11 +645,13 @@ void FirstRunDialog::applyProbeResults(bool workerReady, bool comfyListening)
             comfyDetail = profile_.comfyRoot + QStringLiteral(" · listening on %1").arg(profile_.comfyPort);
         else if (comfyFolder && comfyStarting)
             comfyDetail = profile_.comfyRoot + QStringLiteral(" · starting, waiting for %1").arg(profile_.comfyPort);
+        else if (comfyChecking)
+            comfyDetail = profile_.comfyRoot + QStringLiteral(" · checking %1…").arg(profile_.comfyPort);
         else if (comfyFolder)
             comfyDetail = profile_.comfyRoot + QStringLiteral(" · folder present, %1 not answering").arg(profile_.comfyPort);
         comfyCheckDetail_->setText(comfyDetail);
     }
-    applyStatusBadge(comfyCheckStatus_, comfyFolder && comfyListening, true, comfyStarting);
+    applyStatusBadge(comfyCheckStatus_, comfyFolder && comfyListening, true, comfyStarting, comfyChecking);
 
     otherRequiredReady_ = profile_.workerPythonReady() && profile_.workerScriptReady()
                           && (workerReady || workerStarting)
