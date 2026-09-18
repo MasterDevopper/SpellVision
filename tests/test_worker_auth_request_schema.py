@@ -253,6 +253,38 @@ def test_every_pathlike_request_key_the_generation_code_reads_is_covered() -> No
     )
 
 
+def test_every_alias_the_worker_fans_a_keyframe_across_is_contained() -> None:
+    """An alias set is only as gated as its least-gated member.
+
+    ``worker_service.normalize_video_input_fields`` reads six names for the same keyframe as one
+    ``or``-chain and then writes the winner back into ALL of them. ``request_violations`` runs at
+    the TCP entry, before any handler normalises -- so a caller that left the five gated names empty
+    and put an arbitrary path in the sixth (``i2v_source_image``) passed containment and had the
+    value copied into ``input_image`` a moment later. The uncovered-key ratchet above would have
+    named it eventually; this one says WHY it must be covered, and fails the same way if a seventh
+    alias is added to that fan-out without being declared here.
+    """
+    source = (ROOT / "python" / "worker_service.py").read_text(encoding="utf-8", errors="replace")
+    tree = ast.parse(source)
+    fan_out: set[str] = set()
+    for node in ast.walk(tree):
+        # `for key in ("input_image", ...): req[key] = input_image`
+        if not (isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple)):
+            continue
+        names = [e.value for e in node.iter.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        if "input_image" in names and any(
+            isinstance(t, ast.Subscript) for s in node.body
+            if isinstance(s, ast.Assign) for t in s.targets
+        ):
+            fan_out |= set(names)
+    assert "i2v_source_image" in fan_out, "the fan-out this guards moved; re-point the test"
+    uncovered = sorted(fan_out - INTEGRATION_LOCAL_INPUT_FIELDS - INTEGRATION_FORBIDDEN_FIELDS)
+    assert not uncovered, (
+        "these names are written into input_image by normalize_video_input_fields but are not "
+        f"contained by request_violations: {uncovered}"
+    )
+
+
 def test_the_not_a_local_path_reasons_describe_keys_that_exist() -> None:
     """An exemption for a key nothing reads is a memo about a past layout."""
     seen: set[str] = set()

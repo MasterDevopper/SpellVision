@@ -250,6 +250,14 @@ INTEGRATION_FORBIDDEN_FIELDS: frozenset[str] = frozenset({
 INTEGRATION_LOCAL_INPUT_FIELDS: frozenset[str] = frozenset({
     "input_image", "mask", "mask_image", "inpaint_mask",
     "video_input_image", "input_keyframe", "keyframe_image", "source_image",
+    # The SIXTH name for the keyframe, and it was the uncovered one. worker_service's
+    # `normalize_video_input_fields` reads all six as one `or`-chain and then writes the winner
+    # back into EVERY one of them, and native_runners' i2v path opens it directly. So this is not a
+    # missing declaration about a field nobody uses: request_violations runs at the TCP entry
+    # (worker_tcp:346), BEFORE any handler normalises, so a caller that left the five gated names
+    # empty and put an arbitrary path in this one passed the containment check and had the value
+    # copied into `input_image` immediately afterwards. Same value, same file, one alias short.
+    "i2v_source_image",
     "reference_image", "control_image",
 })
 
