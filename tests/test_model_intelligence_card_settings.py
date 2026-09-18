@@ -220,6 +220,33 @@ def test_the_first_repo_wins_when_its_own_card_states_something(tmp_path: Path):
     assert client.fetched[-1] == "someone/mirror"
 
 
+def test_the_mirror_walk_does_not_search_the_same_weight_twice(tmp_path: Path):
+    """The candidate list is a GENERATOR that issues a search only when asked for more, and the
+    mirror walk is a second consumer of it. Re-deriving it would re-issue up to 22 searches for a
+    weight already searched for -- and the anonymous SEARCH limit is what a library pass runs into
+    first, measured at 48 throttled weights in 172. `tee` is what makes one pass serve both.
+
+    Asserted as an exact list, not a count, because "no query is repeated" is the property; a
+    looser check would pass against a second pass that happened to be shorter.
+    """
+    weight = _weight(tmp_path, "ltx-2.3-22b-dev.safetensors")
+    digest = _digest(weight)
+    client = RecordingHf(
+        repos={"someone/mirror": _repo(("ltx.safetensors", digest)),
+               "Lightricks/LTX-2.3": _repo(("ltx.safetensors", digest))},
+        results={("ltx-2.3-22b-dev", None): ["someone/mirror"],
+                 ("ltx 2 3 22b", None): ["Lightricks/LTX-2.3"]},
+        readmes={"someone/mirror": "# A re-upload\n\nNo settings here.",
+                 "Lightricks/LTX-2.3": LTX_README},
+    )
+    reader = card_settings.CardReader(client)
+    _card, settings = reader.read(weight=weight, sha256=digest)
+
+    assert settings["steps"]["value"] == 8
+    assert len(client.searched) == len(set(client.searched)), \
+        f"a query was issued twice: {client.searched}"
+
+
 # --- the arm, inside the refresh ---------------------------------------------------------------
 
 

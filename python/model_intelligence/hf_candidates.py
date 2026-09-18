@@ -159,11 +159,18 @@ def candidate_repos(client: Any, weight: str | Path) -> Iterable[str]:
 
 
 def identify(client: Any, *, weight: str | Path, sha256: str, index: RepoIndex | None = None,
-             max_repos: int = MAX_REPOS_PER_WEIGHT) -> dict[str, Any] | None:
+             max_repos: int = MAX_REPOS_PER_WEIGHT,
+             candidates: Iterable[str] | None = None) -> dict[str, Any] | None:
     """The repo and path this weight's bytes are in, confirmed by sha256, or None.
 
     `index` is shared across a run so a repo is fetched once and a confirmed repo identifies the
     rest of its own bundle without a search at all -- which is why the cache is checked FIRST.
+
+    `candidates` lets a caller that ALSO wants to walk past the first match (see
+    `card_settings.CardReader`) compute the list once and hand the same one to both passes. Without
+    it that caller re-runs `candidate_repos`, which re-issues up to 22 SEARCHES per weight -- and
+    the anonymous search limit is what a library pass runs into first, measured at 48 throttled
+    weights in 172. The list is unchanged either way, so only the request count differs.
     """
     digest = str(sha256 or "").strip().lower()
     if len(digest) != 64:
@@ -175,7 +182,7 @@ def identify(client: Any, *, weight: str | Path, sha256: str, index: RepoIndex |
         return {"repo": found[0], "path": found[1], "via": "cache"}
 
     tried = 0
-    for repo in candidate_repos(client, weight):
+    for repo in (candidate_repos(client, weight) if candidates is None else candidates):
         if tried >= max_repos:
             break
         tried += 1

@@ -44,8 +44,9 @@ Cost, in the order the brief asked for it:
 """
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from model_intelligence import hf_candidates, hf_lookup
 
@@ -102,7 +103,7 @@ class CardReader:
         card.update({"repo": repo, "path": rfilename})
         return card
 
-    def _mirror_with_a_card(self, weight: str | Path, digest: str, confirmed: str
+    def _mirror_with_a_card(self, candidates: Iterable[str], digest: str, confirmed: str
                             ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]] | None:
         """Another repo holding the SAME bytes whose card actually states settings.
 
@@ -122,9 +123,15 @@ class CardReader:
         Bounded at `MAX_MIRROR_REPOS` because each extra candidate is one `model_info` request and
         HuggingFace's anonymous limit is what a library pass runs into first -- 48 of 172 weights
         were throttled on the second live pass even at two seconds a weight.
+
+        `candidates` is the `tee`d branch of the candidate generator `read` already started, handed
+        in rather than re-derived: calling `candidate_repos` again re-issues up to 22 SEARCHES for a
+        weight that has already been searched for, which is the expensive half of the request budget
+        and the half the rate limit actually bites on. It replays what the confirm pass pulled and
+        only then advances the generator further.
         """
         tried = 0
-        for repo in hf_candidates.candidate_repos(self.client, weight):
+        for repo in candidates:
             if repo == confirmed:
                 continue
             if tried >= MAX_MIRROR_REPOS:
@@ -147,7 +154,17 @@ class CardReader:
         if self.client is None or not sha256:
             return None, None
         digest = str(sha256).strip().lower()
-        found = hf_candidates.identify(self.client, weight=weight, sha256=digest, index=self.index)
+        # ONE search pass for this weight, shared by the confirm loop and the mirror walk below.
+        #
+        # `tee`, not `list`: `candidate_repos` is a GENERATOR that issues a search only when the
+        # consumer asks for more, and `identify` stops at the first repo whose sha256 matches -- so
+        # materialising the list would run all 22 searches for every weight, including the common
+        # case that matches on the first candidate. `tee` keeps that laziness and lets the mirror
+        # walk replay what the confirm loop already pulled without re-asking for it.
+        confirm_pass, mirror_pass = itertools.tee(
+            hf_candidates.candidate_repos(self.client, weight))
+        found = hf_candidates.identify(self.client, weight=weight, sha256=digest, index=self.index,
+                                       candidates=confirm_pass)
         if not found:
             return None, None
         self.repos_confirmed += 1
@@ -155,7 +172,7 @@ class CardReader:
         settings = hf_lookup.settings_from_readme(self.readme(found["repo"]))
         if settings:
             return card, settings
-        mirror = self._mirror_with_a_card(weight, digest, found["repo"])
+        mirror = self._mirror_with_a_card(mirror_pass, digest, found["repo"])
         if mirror:
             self.mirrors_used += 1
             return mirror
