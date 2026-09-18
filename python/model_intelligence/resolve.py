@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import family_operating_points as fop
-from model_intelligence import family_seed_table, recommended
+from model_intelligence import card_settings, family_seed_table, recommended
 
 # recommended.PROVENANCE_ORDER, plus the runtime table ranked above the thin-evidence site value it
 # already contains. Inserted above `site:image-meta-weak`, NOT above `table:family-default` -- see
@@ -157,11 +157,29 @@ def _is_sane(field: str, value: Any) -> bool:
     return bounds[0] <= number <= bounds[1]
 
 
+def _claims_a_canvas_from_a_card(field: str, entry: dict[str, Any]) -> bool:
+    """A `card:*` entry for width/height/frames/fps, which a card cannot honestly state.
+
+    `hf_lookup._SNIPPET_KEYS` stopped reading those out of a diffusers snippet on 2026-09-18,
+    because every value the route produced over the live library was wrong -- a snippet's
+    `height=512` is template boilerplate, not a statement about the weight. `settings_backfill.
+    prune_card_claims` removes them from a file on disk, but only on a pass; this is the same gate
+    applied HERE, on the read, so a sidecar from any version resolves the same way without one.
+
+    The same reasoning as `_apply_quorum` directly below, and the same reason it is not a schema
+    bump: invalidating old files handles them by discarding them.
+    """
+    return (str(entry.get("provenance") or "").startswith("card:")
+            and field not in card_settings.CARD_STATABLE_FIELDS)
+
+
 def _sidecar_entries(sidecar_payload: dict[str, Any] | None,
                      warnings: list[str] | None = None) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for field, entry in ((sidecar_payload or {}).get("recommended") or {}).items():
         if field not in recommended.FIELDS or not isinstance(entry, dict) or not entry.get("provenance"):
+            continue
+        if _claims_a_canvas_from_a_card(field, entry):
             continue
         if not _is_sane(field, entry.get("value")):
             if warnings is not None:

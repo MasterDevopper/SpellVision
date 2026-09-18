@@ -519,3 +519,28 @@ def test_the_prune_runs_even_on_a_sidecar_the_gate_skips(tmp_path: Path):
     assert (result["pruned"], result["skipped_has_site"]) == (1, 1)
     assert hf.searched == [] and hf.fetched == []
     assert "fps" not in sidecar.read(weight)["recommended"]
+
+
+def test_the_resolver_ignores_a_card_canvas_without_waiting_for_a_backfill(tmp_path: Path):
+    """The prune rewrites a file, and a file is only rewritten on a pass. This is the same gate on
+    the READ, so a sidecar from any version resolves the same way with no pass at all -- the
+    reasoning `resolve._apply_quorum` already carries for the mode quorum.
+
+    Both halves: the card canvas is refused AND the family's own value arrives in its place, so the
+    case cannot be satisfied by a resolver that simply answered nothing.
+    """
+    from model_intelligence import resolve
+
+    answer = resolve.resolve_model_defaults(
+        path="D:/m/checkpoints/x.safetensors", family="sdxl", mode="t2i",
+        sidecar_payload={"recommended": {
+            "width": {"value": 50, "provenance": "card:snippet-regex",
+                      "confidence": 1.0, "n": None, "total": None},
+            "steps": {"value": 8, "provenance": "card:prose-regex",
+                      "confidence": 1.0, "n": None, "total": None},
+        }},
+    )
+    settings = answer["settings"]
+    assert settings["width"]["value"] == 1024                      # sdxl's own, not the card's 50
+    assert settings["width"]["provenance"].startswith("table:")
+    assert (settings["steps"]["value"], settings["steps"]["provenance"]) == (8, "card:prose-regex")
