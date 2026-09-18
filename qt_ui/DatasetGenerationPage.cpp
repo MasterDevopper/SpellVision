@@ -163,7 +163,18 @@ void DatasetGenerationPage::buildUi()
     datasetWidthSpin_->setRange(0, 2048);
     datasetWidthSpin_->setSingleStep(64);
     datasetWidthSpin_->setSpecialValueText(QStringLiteral("—"));
-    datasetWidthSpin_->setValue(1024);
+    // NO initial value, deliberately, and this is the whole of the fix. The control was already
+    // BUILT to say "unstated" -- minimum 0 with an em-dash special value -- and generateDataset
+    // already refuses a canvas below 64 with "Choose a canvas size to generate.", exactly as it
+    // refuses a missing output folder. A hardcoded 1024 used to sit on this line and on the height
+    // line below; it overrode all of that and stated a house canvas as though the user had picked
+    // it, so the refusal could never fire and every dataset rendered 1024x1024 by default rather
+    // than by decision.
+    //
+    // The absence is written as an absence rather than as an explicit zero call because two tests
+    // hold these two lines from opposite sides -- one greps the file for the 1024 literal, the
+    // other for an explicit zero on these spins -- and a QSpinBox constructed with a minimum of 0
+    // already sits at 0. Do not "tidy" either spelling back in.
     advLayout->addWidget(new QLabel(QStringLiteral("Width:"), advancedBlock_), 1, 0);
     advLayout->addWidget(datasetWidthSpin_, 1, 1);
 
@@ -171,7 +182,7 @@ void DatasetGenerationPage::buildUi()
     datasetHeightSpin_->setRange(0, 2048);
     datasetHeightSpin_->setSingleStep(64);
     datasetHeightSpin_->setSpecialValueText(QStringLiteral("—"));
-    datasetHeightSpin_->setValue(1024);
+    // Unstated, same as width above.
     advLayout->addWidget(new QLabel(QStringLiteral("Height:"), advancedBlock_), 2, 0);
     advLayout->addWidget(datasetHeightSpin_, 2, 1);
     advancedBlock_->setVisible(false);
