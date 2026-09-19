@@ -937,10 +937,11 @@ void WorkflowLibraryPage::onApplyClicked()
         return;
 
     const WorkflowRecord &record = workflows_.at(index);
-    // The draft held on the record was extracted from a file this page NAMED but never verified --
-    // it answers "could this shape open as a draft at all", which is what the button's visibility
-    // needs, and it is not what gets handed over. The handoff is compiled first.
-    if (!record.reusableDraftPresent)
+    // Shape, not a draft extracted from a directory guess. The scan used to build reusableDraft
+    // from prompt_api.json so this flag meant "a file of that name parsed"; Open then compiled.
+    // After the builder refuses an unverified path, the flag is false for every UI graph until a
+    // compile names one -- which is this click. Asking the shape is what keeps the button honest.
+    if (!spellvision::workflows::WorkflowDraftBuilder::isDraftableShape(record.modeId, record.mediaType))
         return;
 
     requestVerifiedDraft(index);
@@ -2651,6 +2652,7 @@ void WorkflowLibraryPage::buildReusableDraft(WorkflowRecord &record)
     source.sourceWorkflowPath = record.sourceWorkflowPath;
     source.sourceWorkflowFormat = record.sourceWorkflowFormat;
     source.compiledPromptPath = record.compiledPromptPath;
+    source.compiledPromptVerified = record.compiledPromptVerified;
     source.modeId = record.modeId;
     source.mediaType = record.mediaType;
     source.backend = record.backend;
@@ -2674,6 +2676,7 @@ void WorkflowLibraryPage::buildUnverifiedDraft(WorkflowRecord &record, const QSt
     source.sourceWorkflowPath = record.sourceWorkflowPath;
     source.sourceWorkflowFormat = record.sourceWorkflowFormat;
     source.compiledPromptPath = record.compiledPromptPath;
+    source.compiledPromptVerified = record.compiledPromptVerified;
     source.modeId = record.modeId;
     source.mediaType = record.mediaType;
     source.backend = record.backend;
@@ -2933,9 +2936,8 @@ void WorkflowLibraryPage::updateDetailsPanel()
     detailStatusLabel_->setText(statusText);
     detailText_->setPlainText(workflowDetailsText(record));
 
-    const bool canApplyDraft = record.reusableDraftPresent
-        && (isImageMode(record.modeId, record.mediaType) || isVideoMode(record.modeId, record.mediaType))
-        && normalizedModeId(record.modeId) != QStringLiteral("v2v");
+    const bool canApplyDraft = spellvision::workflows::WorkflowDraftBuilder::isDraftableShape(
+                                   record.modeId, record.mediaType);
     if (applyButton_)
     {
         applyButton_->setVisible(canApplyDraft);

@@ -60,6 +60,10 @@ public:
         // prompt was written beside it.
         QString sourceWorkflowFormat;
         QString compiledPromptPath;
+        // False unless a compile named this path. The library scan constructs compiledPromptPath
+        // from the import directory; that file is "something wrote this name", not "this is the
+        // prompt". Reading it into a draft is how a stale width in batch_size reached the cockpit.
+        bool compiledPromptVerified = false;
         QString modeId;
         QString mediaType;
         QString backend;

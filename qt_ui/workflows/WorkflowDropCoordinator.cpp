@@ -430,6 +430,9 @@ WorkflowDraftBuilder::Source WorkflowDropCoordinator::draftSourceFor(const QJson
     source.profilePath = stringAt(artifacts, QStringLiteral("profile_path"));
     source.sourceWorkflowPath = stringAt(artifacts, QStringLiteral("workflow_path"));
     source.compiledPromptPath = compiledPromptPath;
+    // draftSourceFor is only reached after the compile verdict named this path (or left it empty
+    // because the source graph IS the prompt). An empty path is not "verified"; a named one is.
+    source.compiledPromptVerified = !compiledPromptPath.trimmed().isEmpty();
     // The source graph only stands in for a compiled prompt when it IS one; the compile step's own
     // answer is what decides that, and it has already been folded into compiledPromptPath.
     source.sourceWorkflowFormat = QStringLiteral("comfy_ui_graph");

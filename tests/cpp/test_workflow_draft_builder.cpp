@@ -72,6 +72,7 @@ WorkflowDraftBuilder::Source sourceForImport(const QString &slug)
     source.compiledPromptPath = QDir(root).filePath(QStringLiteral("prompt_api.json"));
     if (!QFileInfo::exists(source.compiledPromptPath))
         source.compiledPromptPath.clear();
+    source.compiledPromptVerified = !source.compiledPromptPath.isEmpty();
     source.sourceWorkflowFormat = QStringLiteral("comfy_ui_graph");
     source.modeId = profile.value(QStringLiteral("task_command")).toString();
     source.mediaType = profile.value(QStringLiteral("media_type")).toString();
@@ -409,7 +410,6 @@ void WorkflowDraftBuilderTest::theExtractionIsTheSameOneFlowsUses()
 
     const auto viaFiles = WorkflowDraftBuilder::build(sourceForImport(slug));
     WorkflowDraftBuilder::Source source = sourceForImport(slug);
-    source.compiledPromptPath = promptPath;
     const auto viaPrompt = WorkflowDraftBuilder::buildFromPrompt(readJsonObject(promptPath), source);
 
     QCOMPARE(viaPrompt.present, viaFiles.present);

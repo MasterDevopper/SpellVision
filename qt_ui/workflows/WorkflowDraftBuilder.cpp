@@ -865,7 +865,15 @@ QString WorkflowDraftBuilder::resolvePromptPath(const Source &source)
 {
     QString promptPath = source.compiledPromptPath.trimmed();
     if (!promptPath.isEmpty() && QFileInfo::exists(promptPath))
-        return promptPath;
+    {
+        const QString graph = source.sourceWorkflowPath.trimmed();
+        const bool namedIsTheSourceGraph = !graph.isEmpty()
+            && QFileInfo(promptPath).absoluteFilePath() == QFileInfo(graph).absoluteFilePath();
+        // A compile named it, or it IS the imported graph (an API prompt). Anything else is the
+        // directory guess -- the file whose age nobody vouched for.
+        if (source.compiledPromptVerified || namedIsTheSourceGraph)
+            return promptPath;
+    }
 
     // No compiled prompt on disk. If the source graph IS an API prompt there is nothing to compile
     // and it can be read directly; a UI graph cannot be, and saying so is the honest answer --

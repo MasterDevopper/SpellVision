@@ -150,6 +150,7 @@ private slots:
 
     void aRefusedCompileNamesNoPathThoughTheStalePromptIsRightThere();
     void thatSameStaleFileWouldHaveBuiltAPerfectlyHealthyLookingDraft();
+    void anUnverifiedDirectoryGuessIsNotReadEvenWhenTheFileWouldExtract();
     void theRefusalIsTheDropPathsOwnSentenceAndCarriesThePack();
     void anOldWorkerThatNamesAPathBesideItsRefusalIsStillRefused();
     void anUnreachableSchemaIsUnverifiedRatherThanRefused();
@@ -201,10 +202,27 @@ void WorkflowCompileVerdictTest::thatSameStaleFileWouldHaveBuiltAPerfectlyHealth
     // with values, ready for the cockpit. Nothing about the FILE says stop. Only the verdict does.
     WorkflowDraftBuilder::Source source = sourceForImport(slug_);
     source.compiledPromptPath = stalePromptPath(slug_);
+    source.compiledPromptVerified = true;
 
     const auto direct = WorkflowDraftBuilder::build(source);
     QVERIFY2(direct.present, qPrintable(direct.reason));
     QVERIFY(!direct.draft.isEmpty());
+}
+
+void WorkflowCompileVerdictTest::anUnverifiedDirectoryGuessIsNotReadEvenWhenTheFileWouldExtract()
+{
+    // The scan constructs compiledPromptPath from the import directory and never saw a compile.
+    // Default compiledPromptVerified is false. That is the Flows refresh path, and it must not
+    // fill a draft from the file thatSameStaleFileWouldHaveBuiltAPerfectlyHealthyLookingDraft
+    // just showed is extractable.
+    WorkflowDraftBuilder::Source source = sourceForImport(slug_);
+    source.compiledPromptPath = stalePromptPath(slug_);
+    QVERIFY(!source.compiledPromptVerified);
+
+    const auto guess = WorkflowDraftBuilder::build(source);
+    QVERIFY2(!guess.present, qPrintable(guess.reason));
+    QVERIFY2(guess.reason.contains(QStringLiteral("No compiled or API prompt")),
+             qPrintable(guess.reason));
 }
 
 void WorkflowCompileVerdictTest::theRefusalIsTheDropPathsOwnSentenceAndCarriesThePack()
@@ -337,6 +355,7 @@ void WorkflowCompileVerdictTest::aCleanCompileStillBuildsTheDraftItBuiltBefore()
     // a clean compile the file on disk IS the one the compile just wrote.
     WorkflowDraftBuilder::Source before = sourceForImport(slug_);
     before.compiledPromptPath = stalePromptPath(slug_);
+    before.compiledPromptVerified = true;
     const auto asItWas = WorkflowDraftBuilder::build(before);
 
     const auto compiled = WorkflowCompileVerdict::fromCompileReply(cleanCompileReply(slug_), QString());
@@ -344,6 +363,7 @@ void WorkflowCompileVerdictTest::aCleanCompileStillBuildsTheDraftItBuiltBefore()
 
     WorkflowDraftBuilder::Source after = sourceForImport(slug_);
     after.compiledPromptPath = compiled.path;
+    after.compiledPromptVerified = compiled.verified;
     const auto asItIs = WorkflowDraftBuilder::build(after);
 
     QCOMPARE(asItIs.present, asItWas.present);
