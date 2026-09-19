@@ -120,6 +120,24 @@ def test_a_refused_connection_gives_up_in_six_seconds_not_the_full_budget(fake_c
     assert len(calls) < 10, "must not spend the generation budget on a closed port"
 
 
+def test_a_timeout_after_a_refuse_does_not_reopen_the_generation_budget(fake_clock, monkeypatch):
+    """A short socket timeout after a refuse used to look like a reset and spend 120 s."""
+    calls: list[int] = []
+
+    def boom(api_url, path, *, timeout=None):  # noqa: ARG001
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionRefusedError(111, "Connection refused")
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(cpc, "_http_get_json", boom)
+    with pytest.raises(RuntimeError):
+        cpc._fetch_comfy_object_info("http://127.0.0.1:8188")
+    waited = sum(fake_clock["sleeps"])
+    assert waited < cpc._OBJECT_INFO_RETRY_BUDGET_SEC / 2
+    assert waited <= cpc._OBJECT_INFO_REFUSED_BUDGET_SEC + cpc._OBJECT_INFO_RETRY_MAX_DELAY_SEC
+
+
 def test_a_reset_is_still_a_busy_swap_and_keeps_the_full_budget(fake_clock, monkeypatch):
     """The refused short-circuit must not steal the reset path. 10054 is the observed
     mid-swap failure; it still has to outlast a multi-GB eviction.

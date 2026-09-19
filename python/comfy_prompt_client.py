@@ -821,6 +821,17 @@ _OBJECT_INFO_RETRY_MAX_DELAY_SEC = 8.0
 _OBJECT_INFO_REFUSED_BUDGET_SEC = 6.0
 
 
+def _is_socket_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, OSError) and "timed out" in str(exc).lower():
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None and cause is not exc:
+        return _is_socket_timeout(cause)
+    return False
+
+
 def _is_connection_refused(exc: BaseException) -> bool:
     if isinstance(exc, ConnectionRefusedError):
         return True
@@ -948,13 +959,15 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
     # riding out a model swap is worth a two-minute wait; a UI asking "what is missing?" must not
     # inherit that, and a connection actively refused for six seconds means ComfyUI is down, not busy.
     budget = _OBJECT_INFO_RETRY_BUDGET_SEC if budget_sec is None else max(0.0, float(budget_sec))
-    deadline = time.monotonic() + budget
+    started = time.monotonic()
+    deadline = started + budget
     delay = 1.0
     attempt = 0
     last_error: Exception | None = None
     refused_since: float | None = None
     while True:
         attempt += 1
+        attempt_started = time.monotonic()
         try:
             payload = _http_get_json(api_url, "/object_info", timeout=min(90.0, budget) if budget else 90.0)
             if not isinstance(payload, dict):
@@ -963,9 +976,11 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
         except Exception as exc:  # URLError, ConnectionResetError/OSError, JSON decode, etc.
             last_error = exc
             remaining = deadline - time.monotonic()
-            if _is_connection_refused(exc):
+            if _is_connection_refused(exc) or (
+                refused_since is not None and _is_socket_timeout(exc)
+            ):
                 if refused_since is None:
-                    refused_since = time.monotonic()
+                    refused_since = attempt_started
                 remaining = min(
                     remaining,
                     _OBJECT_INFO_REFUSED_BUDGET_SEC - (time.monotonic() - refused_since),
@@ -975,16 +990,19 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
             if remaining <= 0:
                 break
             if attempt == 1 or attempt % 4 == 0:
+                why = "ComfyUI is not running" if _is_connection_refused(exc) else (
+                    "ComfyUI is typically mid model-swap when this happens"
+                )
                 log.warning(
-                    "ComfyUI /object_info attempt %d failed (%s); retrying for another %.0fs "
-                    "-- ComfyUI is typically mid model-swap when this happens.",
-                    attempt, exc, remaining,
+                    "ComfyUI /object_info attempt %d failed (%s); retrying for another %.0fs -- %s.",
+                    attempt, exc, remaining, why,
                 )
             time.sleep(min(delay, remaining))
             delay = min(delay * 2.0, _OBJECT_INFO_RETRY_MAX_DELAY_SEC)
+    elapsed = time.monotonic() - started
     raise RuntimeError(
         f"Failed to read ComfyUI object_info from {api_url} after {attempt} attempts over "
-        f"{budget:.0f}s: {last_error}"
+        f"{elapsed:.0f}s: {last_error}"
     ) from last_error
 
 
