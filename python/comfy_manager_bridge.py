@@ -147,8 +147,12 @@ def run_cm_cli(
 # second. What it describes changes only when something is installed or removed, so it is cached and
 # the install paths invalidate it. The TTL is a backstop for a pack installed from outside this
 # process (ComfyUI's own Manager UI), not the mechanism.
+#
+# The CLI wait itself must fit inside the drop path's 120 s worker timeout (Doc 62 3b). Cold
+# `simple-show --mode cache` is ~128 s; the custom_nodes folder walk still answers after a kill.
 _INSTALLED_NODES_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 _INSTALLED_NODES_TTL_SEC = 300.0
+_INSTALLED_NODES_CLI_TIMEOUT_SEC = 20
 
 
 def invalidate_installed_nodes_cache(reason: str = "") -> None:
@@ -160,7 +164,7 @@ def list_installed_nodes(
     comfy_root: str | Path,
     *,
     python_executable: str = "python",
-    timeout_sec: int = 300,
+    timeout_sec: int = _INSTALLED_NODES_CLI_TIMEOUT_SEC,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     import time
