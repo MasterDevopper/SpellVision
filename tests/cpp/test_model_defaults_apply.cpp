@@ -310,6 +310,7 @@ private slots:
     void aPublishedGuidanceLandsInAControlAndSimpleGainsNoKnob();
     void aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob();
     void simpleKeepsStepsAndCfgHiddenOnAVideoPage();
+    void simpleShowsTheSamplerRowBecauseTheSHORTLISTIsTheDisclosure();
     // Doc 62 3f -- a preset and a model's defaults both write steps and CFG.
     void aPresetWinsOverALaterModelDefaultsApplication();
     void aFieldThePresetDoesNotSetStillGetsTheModelsValue();
@@ -737,6 +738,35 @@ void ModelDefaultsApplyTest::aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob()
     QVERIFY2(rowIsHidden(guidance),
              "Advanced revealed a Guidance box for a family that publishes none and whose builder "
              "never reads one");
+}
+
+void ModelDefaultsApplyTest::simpleShowsTheSamplerRowBecauseTheSHORTLISTIsTheDisclosure()
+{
+    // The owner's ruling: known-good samplers in Simple, everything else below a separator in
+    // Advanced, one dropdown. 0925a7f built the short list; the row was still gated on `advanced`,
+    // so in Simple there was no sampler control at all and the ruling was invisible.
+    //
+    // What discloses here is the LIST, not the row's existence. So the row shows in both modes,
+    // and Steps/CFG -- which are genuinely Advanced-only -- must stay hidden, or this case would
+    // pass on a page that simply revealed everything.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToImage);
+    page.updateDisclosure(false); // Simple
+
+    // BY NAME. The first version of this found "a combo offering auto", and sampler and scheduler
+    // are built from one factory with the same auto entry -- so it asserted about whichever
+    // findChildren returned first and PASSED with the defect planted back in. That near-miss is
+    // why these two controls carry object names at all.
+    QComboBox *sampler = page.findChild<QComboBox *>(QStringLiteral("samplingSamplerCombo"));
+    QVERIFY2(sampler, "no sampler combo was found on a text-to-image page");
+    QVERIFY2(!rowIsHidden(sampler), "Simple hides the sampler row, so the short list is invisible");
+
+    // The counterweight: Simple is still Simple. Seed is the anchor the other cases use.
+    QVERIFY2(rowIsHidden(seedSpinOf(page)),
+             "Seed is showing in Simple -- this page revealed everything, so the case above proves nothing");
+
+    page.updateDisclosure(true); // Advanced
+    QVERIFY2(!rowIsHidden(sampler), "Advanced hides the sampler row");
+    QVERIFY2(!rowIsHidden(seedSpinOf(page)), "Advanced hides Seed; the anchor for this case is wrong");
 }
 
 void ModelDefaultsApplyTest::simpleKeepsStepsAndCfgHiddenOnAVideoPage()

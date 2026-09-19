@@ -1101,14 +1101,22 @@ void ImageGenerationPage::updateDisclosure(bool advanced)
         guidanceRow_->setVisible(advanced && guidanceOffered_);
     if (seedRow_)
         seedRow_->setVisible(advanced);
+    // Sampler and scheduler show in BOTH modes, and this is the owner's ruling, not a relaxation:
+    // "the samplers that are known good with the models only in basic mode, but advanced mode will
+    // offer all as a distinctly separated continuation in the same dropdown". Simple is not gaining
+    // a knob it did not have -- the knob was always here, hidden -- it is gaining the SHORT list,
+    // while Advanced keeps the same control with the rest of the build's names below a separator.
+    //
+    // Gating these on `advanced` made that ruling invisible: 0925a7f shortened a list nobody in
+    // Simple could see. The list is the disclosure now; the row's presence is not.
     if (samplerRow_)
-        samplerRow_->setVisible(advanced && image);
+        samplerRow_->setVisible(image);
     if (schedulerRow_)
-        schedulerRow_->setVisible(advanced && image);
+        schedulerRow_->setVisible(image);
     if (videoSamplerRow_)
-        videoSamplerRow_->setVisible(advanced && !image);
+        videoSamplerRow_->setVisible(!image);
     if (videoSchedulerRow_)
-        videoSchedulerRow_->setVisible(advanced && !image);
+        videoSchedulerRow_->setVisible(!image);
 
     // Phase 7 step 4 -- Model tab: fake Workflow presets dropped (real drop/load below).
     // Video Components stay visible in Simple — auto-population is the product value.

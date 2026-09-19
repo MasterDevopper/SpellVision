@@ -66,6 +66,17 @@ QComboBox *makeAutoCombo(QWidget *parent)
     return combo;
 }
 
+// Sampler and scheduler are built from the same factory and carry the same "auto" entry, so a test
+// that finds one by its CONTENTS finds whichever `findChildren` returns first. That is not a
+// hypothetical: a row-visibility case written that way passed with the defect planted back in,
+// because it was asserting about the wrong combo. Naming them is what makes the assertion land on
+// the control it names.
+void nameSamplingCombo(QComboBox *combo, const char *name)
+{
+    if (combo)
+        combo->setObjectName(QString::fromUtf8(name));
+}
+
 QStringList entryNames(const QJsonArray &values)
 {
     QStringList names;
@@ -186,6 +197,8 @@ void SamplingController::create(QWidget *parent)
 {
     samplerCombo_ = makeAutoCombo(parent);
     schedulerCombo_ = makeAutoCombo(parent);
+    nameSamplingCombo(samplerCombo_, "samplingSamplerCombo");
+    nameSamplingCombo(schedulerCombo_, "samplingSchedulerCombo");
     videoSamplerCombo_ = makeAutoCombo(parent);
     videoSchedulerCombo_ = makeAutoCombo(parent);
 
