@@ -191,9 +191,16 @@ def sampling_for(family: str, req: dict[str, Any], object_info: dict[str, Any],
     submitting the two and getting an identical image back in 2.0s off ComfyUI's cache.
 
     Validation goes through ``family_sampling_choices``, which is the SAME resolver the UI populates
-    its dropdown from -- allow-list, intersected with the live KSampler choices, with the operating
-    point's pin as the default. Using a second, looser check here is how the UI and the graph would
-    drift into disagreeing about what is selectable.
+    its dropdown from, and it checks the value against **what this ComfyUI build offers** -- the
+    live KSampler choices, or the shipped catalog when no ``object_info`` is to hand. Using a
+    second, looser check here is how the UI and the graph would drift into disagreeing about what
+    is selectable.
+
+    It does NOT check the family's curated tuple, and this sentence used to say it did. Owner
+    ruling (Doc 62): that tuple decides what **Simple offers**; an Advanced user may pick anything
+    the build has. Refusing ``heun`` for krea2 -- a sampler ComfyUI would have run perfectly well --
+    was the dropdown telling the user yes and the builder quietly answering no, which is the same
+    defect class as the inert dropdown this function was written to fix, pointing the other way.
 
     An unrecognised value falls back rather than being forwarded: ComfyUI answers an unknown
     sampler with a 400, and a request that reached the queue should not die there over a stale

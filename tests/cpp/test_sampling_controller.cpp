@@ -10,6 +10,13 @@
 //
 // The second is the one the Python sweeps structurally cannot see: the value is corrected inside
 // the widget, before any request exists to inspect.
+//
+// 3. The Doc 62 ruling. ONE dropdown: Simple lists the samplers known good with the model, Advanced
+//    lists the same head, a labelled separation, then everything else the build offers. The head is
+//    identical in both modes -- that is what makes it "reveals in place" rather than a second list
+//    -- and a switch to Simple NEVER changes the selection: an Advanced choice from the tail is
+//    carried over under its own heading and stays selected. Silently replacing it would be the
+//    hidden output-changing state this codebase ran a hardening pass against, wearing a dropdown.
 
 #include <QtTest>
 // QTEST_MAIN builds a QApplication only when the widgets module is visible here; without
@@ -38,6 +45,10 @@ private slots:
     void aFamilyWithSamplersButNoSchedulersKeepsItsSamplers();
     void theComboKeepsAutoAndOffersTheFamilysSamplers();
     void aDeliberateChoiceSurvivesAFamilySwitchOnlyIfTheFamilyOffersIt();
+    void simpleListsOnlyTheKnownGoodAndAdvancedContinuesPastASeparator();
+    void theHeadOfTheListIsIdenticalInBothModes();
+    void anAdvancedChoiceSurvivesASwitchToSimpleStillSelectedAndStillVisible();
+    void aPreRulingTableStillRendersAsOneFlatList();
     void aStatedSeedOfZeroSurvives();
     void aStatedSeedIsNotOtherwiseAltered();
     void randomSeedsCanIncludeZero();
@@ -56,6 +67,56 @@ private:
         if (!defaultSampler.isEmpty())
             o.insert(QStringLiteral("default_sampler"), defaultSampler);
         return o;
+    }
+
+    // What the worker answers since the ruling: the flat list every pre-ruling reader still uses,
+    // PLUS the split. The two forms live side by side here deliberately -- one test below feeds the
+    // flat-only shape and asserts the control is unchanged by it.
+    static QJsonObject grouped(const QStringList &known, const QStringList &other,
+                               const QString &defaultSampler = QString())
+    {
+        QJsonArray k, o, all;
+        for (const QString &s : known) { k.append(s); all.append(s); }
+        for (const QString &s : other) { o.append(s); all.append(s); }
+        QJsonObject t{
+            {QStringLiteral("samplers"), all},
+            {QStringLiteral("schedulers"), QJsonArray{}},
+            {QStringLiteral("known_good_samplers"), k},
+            {QStringLiteral("other_samplers"), o},
+            {QStringLiteral("known_good_schedulers"), QJsonArray{}},
+            {QStringLiteral("other_schedulers"), QJsonArray{}},
+        };
+        if (!defaultSampler.isEmpty())
+            t.insert(QStringLiteral("default_sampler"), defaultSampler);
+        return t;
+    }
+
+    // The selectable entries, in order, skipping the Auto placeholder and any separator or heading
+    // (both of which carry no item data, which is also what stops either from ever being sent).
+    QStringList offered(const QComboBox *combo) const
+    {
+        QStringList names;
+        for (int i = 1; i < combo->count(); ++i)
+        {
+            const QString data = combo->itemData(i).toString();
+            if (!data.isEmpty())
+                names << data;
+        }
+        return names;
+    }
+
+    int headingCount(const QComboBox *combo) const
+    {
+        int n = 0;
+        for (int i = 0; i < combo->count(); ++i)
+        {
+            if (combo->itemData(i).toString().isEmpty() && !combo->itemText(i).isEmpty()
+                && i > 0)
+            {
+                ++n;
+            }
+        }
+        return n;
     }
 };
 
@@ -128,6 +189,93 @@ void SamplingControllerTest::aDeliberateChoiceSurvivesAFamilySwitchOnlyIfTheFami
     // never heard of, which is what the stale list used to make possible.
     controller_->applyFamilyChoices(table({"res_multistep", "euler"}, {"simple"}), false);
     QCOMPARE(controller_->imageSampler(), QStringLiteral("auto"));
+}
+
+void SamplingControllerTest::simpleListsOnlyTheKnownGoodAndAdvancedContinuesPastASeparator()
+{
+    const QStringList known{QStringLiteral("er_sde"), QStringLiteral("euler")};
+    const QStringList other{QStringLiteral("heun"), QStringLiteral("lms")};
+
+    controller_->setAdvanced(false);
+    controller_->applyFamilyChoices(grouped(known, other, QStringLiteral("er_sde")), false);
+    QCOMPARE(offered(controller_->samplerCombo()), known);
+    QCOMPARE(headingCount(controller_->samplerCombo()), 0);
+
+    controller_->setAdvanced(true);
+    QCOMPARE(offered(controller_->samplerCombo()), known + other);
+    // ONE separation, and it is readable -- a bare line does not say what is below it.
+    QCOMPARE(headingCount(controller_->samplerCombo()), 1);
+    bool labelled = false;
+    for (int i = 0; i < controller_->samplerCombo()->count(); ++i)
+    {
+        if (controller_->samplerCombo()->itemText(i).contains(QStringLiteral("other samplers")))
+            labelled = true;
+    }
+    QVERIFY(labelled);
+}
+
+void SamplingControllerTest::theHeadOfTheListIsIdenticalInBothModes()
+{
+    const QStringList known{QStringLiteral("dpmpp_2m"), QStringLiteral("euler"),
+                            QStringLiteral("ddim")};
+    const QStringList other{QStringLiteral("heun"), QStringLiteral("lms")};
+
+    controller_->setAdvanced(false);
+    controller_->applyFamilyChoices(grouped(known, other, QStringLiteral("dpmpp_2m")), false);
+    const QStringList simple = offered(controller_->samplerCombo());
+
+    controller_->setAdvanced(true);
+    const QStringList advanced = offered(controller_->samplerCombo());
+
+    // Not merely the same SET -- the same prefix, in the same order. Muscle memory has to survive
+    // the upgrade: an entry the user already found must not move when Advanced grows the list.
+    QCOMPARE(advanced.mid(0, simple.size()), simple);
+    QCOMPARE(controller_->samplerCombo()->itemData(1).toString(), QStringLiteral("dpmpp_2m"));
+}
+
+void SamplingControllerTest::anAdvancedChoiceSurvivesASwitchToSimpleStillSelectedAndStillVisible()
+{
+    controller_->setAdvanced(true);
+    controller_->applyFamilyChoices(
+        grouped({QStringLiteral("er_sde"), QStringLiteral("euler")},
+                {QStringLiteral("heun"), QStringLiteral("lms")}, QStringLiteral("er_sde")), false);
+    controller_->samplerCombo()->setCurrentIndex(
+        controller_->samplerCombo()->findData(QStringLiteral("heun")));
+    QCOMPARE(controller_->imageSampler(), QStringLiteral("heun"));
+
+    controller_->setAdvanced(false);
+
+    // STILL SELECTED -- the render must not change because a disclosure checkbox moved.
+    QCOMPARE(controller_->imageSampler(), QStringLiteral("heun"));
+    // STILL VISIBLE -- and marked, rather than sitting in the known-good head pretending it was
+    // always there. Dropping it from the list while leaving it selected would be the same lie.
+    QVERIFY(controller_->samplerCombo()->findData(QStringLiteral("heun")) > 0);
+    QCOMPARE(headingCount(controller_->samplerCombo()), 1);
+    // The rest of the tail does NOT come with it: Simple is still Simple.
+    QVERIFY(controller_->samplerCombo()->findData(QStringLiteral("lms")) < 0);
+
+    controller_->setAdvanced(true);
+    QCOMPARE(controller_->imageSampler(), QStringLiteral("heun"));
+    QVERIFY(controller_->samplerCombo()->findData(QStringLiteral("lms")) > 0);
+}
+
+void SamplingControllerTest::aPreRulingTableStillRendersAsOneFlatList()
+{
+    // A table with no groups -- a worker that predates the ruling, or any of this file's other
+    // cases -- is read as "all of these are known good, there is no remainder". Without that, every
+    // such table would render as an empty Simple dropdown, which is the outcome the fallback in
+    // family_sampling_choices exists to prevent, reintroduced on the other side of the wire.
+    controller_->setAdvanced(false);
+    controller_->applyFamilyChoices(table({QStringLiteral("euler"), QStringLiteral("dpmpp_2m")},
+                                          {QStringLiteral("normal")}), false);
+    QCOMPARE(offered(controller_->samplerCombo()),
+             QStringList({QStringLiteral("euler"), QStringLiteral("dpmpp_2m")}));
+    QCOMPARE(headingCount(controller_->samplerCombo()), 0);
+
+    controller_->setAdvanced(true);
+    QCOMPARE(offered(controller_->samplerCombo()),
+             QStringList({QStringLiteral("euler"), QStringLiteral("dpmpp_2m")}));
+    QCOMPARE(headingCount(controller_->samplerCombo()), 0);
 }
 
 void SamplingControllerTest::aStatedSeedOfZeroSurvives()

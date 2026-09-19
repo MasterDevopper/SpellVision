@@ -1047,6 +1047,18 @@ void ImageGenerationPage::applyModelDefaults()
     if (guidanceRow_)
         guidanceRow_->setVisible(advanced_ && guidanceOffered_);
 
+    // Doc 62 ruling: what is "known good" is per MODEL, not only per family -- 483 of 759 weights
+    // publish a sampler of their own, and a weight publishing er_sde makes er_sde known-good for it
+    // whatever its family table says. The worker folds that into the two groups and answers with
+    // the finished pair, so the merge has ONE home; the reply from a worker that predates it simply
+    // carries no `sampling` block and the family table already applied above still stands.
+    //
+    // BEFORE applyResolvedSettings, because that writes the resolved sampler into the combo and a
+    // value can only be selected in a list that already holds it.
+    const QJsonObject modelSampling = reply.value(QStringLiteral("sampling")).toObject();
+    if (sampling_ && !modelSampling.isEmpty())
+        sampling_->applyFamilyChoices(modelSampling, isVideoMode());
+
     applyResolvedSettings(values);
 
     refreshModelDefaultsCaption(reply);

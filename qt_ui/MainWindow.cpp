@@ -3415,6 +3415,29 @@ void MainWindow::resolveComponentStackViaWorker(
         12000);
 }
 
+namespace
+{
+// Every sampling field the family contract publishes, copied through verbatim. It is a LIST rather
+// than four `insert` lines because the Doc 62 ruling added two pairs -- the known-good group and
+// the remainder that Advanced reveals below the separation -- and the two copy sites here disagreed
+// about which fields existed for exactly as long as it took to notice. A field the worker adds and
+// this list does not name arrives at the cockpit as absent, and absent reads as "no grouping", so
+// the dropdown quietly falls back to its pre-ruling shape with nothing failing.
+QStringList samplingKeys()
+{
+    return {
+        QStringLiteral("samplers"),
+        QStringLiteral("schedulers"),
+        QStringLiteral("known_good_samplers"),
+        QStringLiteral("other_samplers"),
+        QStringLiteral("known_good_schedulers"),
+        QStringLiteral("other_schedulers"),
+        QStringLiteral("default_sampler"),
+        QStringLiteral("default_scheduler"),
+    };
+}
+} // namespace
+
 void MainWindow::fetchOperatingPointsAsync(std::function<void()> completion)
 {
     if (operatingPointsFetched_)
@@ -3445,10 +3468,8 @@ void MainWindow::fetchOperatingPointsAsync(std::function<void()> completion)
                 QJsonObject entry;
                 entry.insert(QStringLiteral("operating_points"), fam.value(QStringLiteral("operating_points")));
                 entry.insert(QStringLiteral("default_operating_point"), fam.value(QStringLiteral("default_operating_point")));
-                entry.insert(QStringLiteral("samplers"), fam.value(QStringLiteral("samplers")));
-                entry.insert(QStringLiteral("schedulers"), fam.value(QStringLiteral("schedulers")));
-                entry.insert(QStringLiteral("default_sampler"), fam.value(QStringLiteral("default_sampler")));
-                entry.insert(QStringLiteral("default_scheduler"), fam.value(QStringLiteral("default_scheduler")));
+                for (const QString &key : samplingKeys())
+                    entry.insert(key, fam.value(key));
                 operatingPointsByFamily_.insert(it.key().toLower(), entry);
             }
             const QJsonObject sampling = response.value(QStringLiteral("sampling")).toObject();
@@ -3457,10 +3478,8 @@ void MainWindow::fetchOperatingPointsAsync(std::function<void()> completion)
                 const QString skey = sit.key().toLower();
                 QJsonObject entry = operatingPointsByFamily_.value(skey);
                 const QJsonObject block = sit.value().toObject();
-                entry.insert(QStringLiteral("samplers"), block.value(QStringLiteral("samplers")));
-                entry.insert(QStringLiteral("schedulers"), block.value(QStringLiteral("schedulers")));
-                entry.insert(QStringLiteral("default_sampler"), block.value(QStringLiteral("default_sampler")));
-                entry.insert(QStringLiteral("default_scheduler"), block.value(QStringLiteral("default_scheduler")));
+                for (const QString &key : samplingKeys())
+                    entry.insert(key, block.value(key));
                 operatingPointsByFamily_.insert(skey, entry);
             }
                 operatingPointsFetched_ = true;

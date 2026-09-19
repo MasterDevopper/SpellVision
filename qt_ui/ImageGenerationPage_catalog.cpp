@@ -1039,6 +1039,12 @@ QString ImageGenerationPage::runOnEndpointId() const
 void ImageGenerationPage::updateDisclosure(bool advanced)
 {
     advanced_ = advanced;
+    // Doc 62 ruling: ONE sampler dropdown, whose known-good head is identical in both modes and
+    // whose tail -- everything else this build offers, under a labelled separation -- appears only
+    // in Advanced. The controller owns both the split and the promise that a switch never changes
+    // the selection, so the mode is handed to it and nothing here touches the lists.
+    if (sampling_)
+        sampling_->setAdvanced(advanced);
     ensureRunOnRow();
 
     // Phase 7 step 2: Output-tab raw knobs are Advanced-only (Width / Height / Batch / Prefix);

@@ -1,8 +1,10 @@
 #include "generation/SamplingController.h"
 
+#include "ThemeManager.h"
 #include "widgets/ClickOnlyComboBox.h"
 
 #include <QAbstractItemView>
+#include <QBrush>
 #include <QCheckBox>
 #include <QObject>
 #include <QComboBox>
@@ -12,6 +14,8 @@
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QStandardItemModel>
+#include <QStringList>
 #include <QtGlobal>
 #include <QWidget>
 
@@ -62,7 +66,57 @@ QComboBox *makeAutoCombo(QWidget *parent)
     return combo;
 }
 
-void rebuildSamplingCombo(QComboBox *combo, const QJsonArray &values, const QString &keep)
+QStringList entryNames(const QJsonArray &values)
+{
+    QStringList names;
+    for (const QJsonValue &value : values)
+    {
+        const QString name = value.toString().trimmed();
+        // "auto" is the placeholder this control writes itself; a table that also named it would
+        // produce two, one of which sends the string rather than the sentinel.
+        if (name.isEmpty() || name.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
+            continue;
+        if (!names.contains(name))
+            names.append(name);
+    }
+    return names;
+}
+
+// A readable heading rather than a bare rule. `insertSeparator` alone draws a line, and a line does
+// not say WHAT is below it -- the ruling is that the continuation is "distinctly separated", which
+// a user can only act on if the separation is labelled. Disabled and unselectable, so arrow keys
+// step over it and it can never become the value sent.
+void appendGroupHeading(QComboBox *combo, const QString &text)
+{
+    combo->insertSeparator(combo->count());
+    combo->addItem(text);
+    const int row = combo->count() - 1;
+    combo->setItemData(row,
+                       QBrush(::ThemeManager::instance().color(::ThemeManager::Color::TextLo)),
+                       Qt::ForegroundRole);
+    if (auto *model = qobject_cast<QStandardItemModel *>(combo->model()))
+    {
+        if (QStandardItem *item = model->item(row))
+            item->setFlags(item->flags() & ~(Qt::ItemIsEnabled | Qt::ItemIsSelectable));
+    }
+}
+
+// ONE dropdown, two groups, and the mode decides only how far down it goes.
+//
+// Simple  : Auto, then `known`.
+// Advanced: Auto, then `known`, a labelled separation, then `other`.
+//
+// The part above the separation is identical in both modes, which is what makes this "Advanced
+// reveals in place" (CLAUDE.md S2) rather than a second list: nothing a user already found moves
+// when they switch.
+//
+// AND THE SWITCH NEVER CHANGES THE VALUE. A sampler picked in Advanced that lives in `other` is
+// carried into Simple under its own heading and stays selected. Dropping it would silently swap the
+// render for one the user did not ask for, with the control showing the replacement as though it
+// had always been there -- the hidden output-changing state this codebase ran a whole hardening
+// pass against. Showing it, labelled as the outlier it is, is the honest form of the same screen.
+void rebuildSamplingCombo(QComboBox *combo, const QJsonArray &known, const QJsonArray &other,
+                          const QString &keep, bool advanced, const QString &noun)
 {
     if (!combo)
         return;
@@ -70,19 +124,47 @@ void rebuildSamplingCombo(QComboBox *combo, const QJsonArray &values, const QStr
     const QSignalBlocker blocker(combo);
     combo->clear();
     combo->addItem(QStringLiteral("Auto / family default"), QStringLiteral("auto"));
-    for (const QJsonValue &value : values)
-    {
-        const QString name = value.toString().trimmed();
-        if (name.isEmpty() || name.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
-            continue;
+
+    const QStringList knownNames = entryNames(known);
+    for (const QString &name : knownNames)
         combo->addItem(name, name);
+
+    const QStringList otherNames = entryNames(other);
+    if (advanced)
+    {
+        if (!otherNames.isEmpty())
+        {
+            appendGroupHeading(combo, QStringLiteral("other %1 this build offers").arg(noun));
+            for (const QString &name : otherNames)
+                combo->addItem(name, name);
+        }
     }
+    else if (!current.isEmpty() && !knownNames.contains(current) && otherNames.contains(current))
+    {
+        appendGroupHeading(combo, QStringLiteral("your Advanced choice"));
+        combo->addItem(current, current);
+    }
+
     const QString want = current.isEmpty() ? keep : current;
     if (want.isEmpty())
         return;
     const int idx = combo->findData(want);
     if (idx >= 0)
         combo->setCurrentIndex(idx);
+}
+
+// The two groups a table carries, with the pre-ruling shape read as "all known good, no remainder"
+// so a caller that still hands over the flat list gets exactly the control it had before.
+QJsonArray groupOf(const QJsonObject &table, const QString &groupKey, const QString &flatKey)
+{
+    if (table.contains(groupKey))
+        return table.value(groupKey).toArray();
+    return table.value(flatKey).toArray();
+}
+
+QJsonArray remainderOf(const QJsonObject &table, const QString &groupKey)
+{
+    return table.contains(groupKey) ? table.value(groupKey).toArray() : QJsonArray();
 }
 
 QString comboValue(const QComboBox *combo, const QString &fallback = QStringLiteral("auto"))
@@ -169,8 +251,6 @@ void SamplingController::create(QWidget *parent)
 
 void SamplingController::applyFamilyChoices(const QJsonObject &table, bool videoMode)
 {
-    const QJsonArray samplers = table.value(QStringLiteral("samplers")).toArray();
-    const QJsonArray schedulers = table.value(QStringLiteral("schedulers")).toArray();
     // An empty table used to return early, leaving the PREVIOUS family's samplers on screen. So
     // switching to a family that offers no choice -- cogvideox returns an empty table, and it is
     // right to -- showed sdxl's list, and picking one of those sent a sampler this family has never
@@ -179,10 +259,41 @@ void SamplingController::applyFamilyChoices(const QJsonObject &table, bool video
     // The two lists are handled independently on purpose: LTX has samplers and DELIBERATELY no
     // schedulers, because both its templates drive sigmas through ManualSigmas. Requiring both to
     // be non-empty would put it back in the stale case it was carved out of.
+    //
+    // The table is KEPT, because a disclosure toggle has to rebuild these lists and has no provider
+    // of its own to ask.
+    (videoMode ? videoTable_ : imageTable_) = table;
+    renderCombos(videoMode);
+}
+
+void SamplingController::setAdvanced(bool advanced)
+{
+    if (advanced_ == advanced)
+        return;
+    advanced_ = advanced;
+    // BOTH pairs, not just the one on screen. A page switches between image and video modes without
+    // passing through here, so re-rendering only the visible pair would leave the other built under
+    // the previous disclosure -- the stale-list defect this control already carries a test for,
+    // arriving by a door the test does not watch.
+    renderCombos(false);
+    renderCombos(true);
+}
+
+void SamplingController::renderCombos(bool videoMode)
+{
+    const QJsonObject &table = videoMode ? videoTable_ : imageTable_;
     QComboBox *sampler = videoMode ? videoSamplerCombo_ : samplerCombo_;
     QComboBox *scheduler = videoMode ? videoSchedulerCombo_ : schedulerCombo_;
-    rebuildSamplingCombo(sampler, samplers, table.value(QStringLiteral("default_sampler")).toString());
-    rebuildSamplingCombo(scheduler, schedulers, table.value(QStringLiteral("default_scheduler")).toString());
+    rebuildSamplingCombo(sampler,
+                         groupOf(table, QStringLiteral("known_good_samplers"), QStringLiteral("samplers")),
+                         remainderOf(table, QStringLiteral("other_samplers")),
+                         table.value(QStringLiteral("default_sampler")).toString(),
+                         advanced_, QStringLiteral("samplers"));
+    rebuildSamplingCombo(scheduler,
+                         groupOf(table, QStringLiteral("known_good_schedulers"), QStringLiteral("schedulers")),
+                         remainderOf(table, QStringLiteral("other_schedulers")),
+                         table.value(QStringLiteral("default_scheduler")).toString(),
+                         advanced_, QStringLiteral("schedulers"));
 }
 
 QString SamplingController::imageSampler() const

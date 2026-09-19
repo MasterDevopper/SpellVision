@@ -45,11 +45,26 @@ def test_no_request_falls_back_to_the_family_default():
     assert scheduler == "simple"
 
 
-def test_a_sampler_outside_the_family_allowlist_is_refused_not_forwarded():
-    """ComfyUI answers an unknown sampler with a 400. A request that reached the queue should not
-    die there because a stale dropdown entry was passed straight through."""
+def test_a_sampler_outside_the_family_allowlist_is_honoured_because_advanced_may_offer_it():
+    """WAS ``test_a_sampler_outside_the_family_allowlist_is_refused_not_forwarded``, and it asserted
+    the opposite of this line: that ``heun`` came back as anything but ``heun``.
+
+    Two things retired it. The first is the owner's ruling (Doc 62): the family's curated tuple
+    decides **what Simple offers**; Advanced offers the whole of what the build has, below a
+    labelled separation, in the same dropdown. A sampler the user deliberately reached for down
+    there must reach the graph, or the control says yes and the builder answers no -- the inert
+    dropdown this module was written about, pointing the other way.
+
+    The second is worth keeping even though the assertion inverted: the allow-list was NEVER
+    applied. ``family_sampling_choices`` returned the live/catalog KSampler list for every family
+    and applied ``allow["samplers"]`` to nothing, so this test never measured a refusal by the
+    family tuple -- it passed, when it passed, because ``heun`` was missing from a narrower live
+    list. The grouping added alongside this is the first code that ever reads those tuples.
+
+    What still refuses is a sampler THE BUILD DOES NOT HAVE, and that is the sibling below.
+    """
     sampler, _ = nig._sampling_for("krea2", {"sampler": "heun"}, OBJECT_INFO, "euler", "simple")
-    assert sampler != "heun"
+    assert sampler == "heun"
 
 
 def test_a_sampler_absent_from_the_live_list_is_refused():

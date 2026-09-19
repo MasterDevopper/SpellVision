@@ -125,12 +125,33 @@ def handle_model_recommended_settings_command(req: dict[str, Any]) -> dict[str, 
     )
     warnings.extend(resolved["warnings"])
 
+    # Owner ruling (Doc 62): Simple offers the samplers known good with THIS model; Advanced offers
+    # those, a labelled separation, then everything else the build has -- one dropdown. The split is
+    # resolved here, in Python, with the model's own published sampler folded in as an INPUT, so the
+    # cockpit receives a finished pair of lists and never merges anything itself. The family-keyed
+    # snapshot that `video_family_contracts` ships carries the same two groups; this reply is the
+    # only place the per-model half can be known, and 483 of 759 weights now publish one.
+    def _published(field: str) -> Any:
+        entry = resolved["settings"].get(field)
+        return entry.get("value") if isinstance(entry, dict) else None
+
+    from family_operating_points import family_sampling_choices
+
+    sampling = family_sampling_choices(
+        resolved["family"] or family,
+        model_sampler=_published("sampler"),
+        model_scheduler=_published("scheduler"),
+        live_samplers=list(live_samplers) if live_samplers else None,
+        live_schedulers=list(live_schedulers) if live_schedulers else None,
+    )
+
     return {
         "ok": True,
         "type": "model_recommended_settings",
         "path": str(path) if path else "",
         "family": resolved["family"] or family,
         "settings": resolved["settings"],
+        "sampling": sampling,
         "warnings": warnings,
         "operating_point": resolved["operating_point"],
     }

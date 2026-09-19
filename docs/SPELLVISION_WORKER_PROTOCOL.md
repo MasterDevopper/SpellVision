@@ -435,9 +435,31 @@ opinion.
       "total": null
     }
   },
+  "sampling": {
+    "known_good_samplers": ["er_sde", "euler"],
+    "other_samplers": ["ddim", "dpmpp_2m", "heun", "..."],
+    "known_good_schedulers": ["simple", "normal"],
+    "other_schedulers": ["beta", "karras", "..."],
+    "samplers": ["er_sde", "ddim", "..."],
+    "schedulers": ["simple", "..."],
+    "default_sampler": "er_sde",
+    "default_scheduler": "simple"
+  },
   "warnings": []
 }
 ```
+
+`sampling` is what the cockpit's ONE sampler dropdown draws, per the owner's ruling: Simple lists
+`known_good_samplers` and nothing else; Advanced lists the same entries in the same order, then a
+labelled separation, then `other_samplers`. "Known good" is the family's curated tuple unioned with
+the sampler THIS weight publishes, intersected with what the build offers -- which is why the split
+is answered here, where the model is known, rather than only in `video_family_contracts`'s
+family-keyed snapshot (which carries the same keys for a cockpit with no model chosen yet). A
+family with no curated tuple and a silent model still gets one entry, the default, because an empty
+Simple dropdown is worse than an over-broad one. The flat `samplers`/`schedulers` keep their old
+contents for readers that predate the ruling, and the graph builders still validate against those:
+an Advanced user may choose anything the build offers, and only a sampler the build does NOT have
+is refused.
 
 A field's `provenance` is one of `user`, `site:image-meta-mode`, `site:trainedWords`,
 `card:frontmatter`, `card:snippet-regex`, `card:prose-regex`, `site:image-meta-weak`,

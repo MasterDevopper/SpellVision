@@ -747,8 +747,59 @@ def _object_info_choices(object_info: dict[str, Any] | None, input_name: str) ->
     return None
 
 
-def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Auto default from the operating point. Dropdown is the full live/catalog KSampler list."""
+def _known_good(declared: tuple[str, ...] | None, default_name: str, model_name: Any,
+                available: set[str], *, family_has_no_such_choice: bool) -> tuple[list[str], list[str]]:
+    """(known-good, everything else) for ONE dropdown, both drawn from ``available``.
+
+    Known-good is the family's curated tuple UNIONED with what this model itself publishes, then
+    intersected with what the build offers -- the default first, then the table's own order (which
+    is meaningful: sdxl lists its five in the order a user should read them), then the model's.
+
+    Until this function existed, ``FAMILY_SAMPLER_ALLOWLISTS[...]["samplers"]`` was read by
+    ``model_intelligence.resolve`` to VALIDATE a published value and by nothing at all to shape the
+    dropdown -- so adding a family row changed no list anywhere. This is the first consumer.
+
+    THE FALLBACK IS THE POINT. A family with no curated tuple and a model publishing nothing still
+    gets one entry -- the default, which every family has (``_assert_every_family_declares_a_default``
+    refuses the import otherwise) -- because an EMPTY Simple dropdown is worse than an over-broad
+    one. The single exception is a family that declares an explicitly empty tuple: LTX's schedulers,
+    where both templates drive sigmas through ManualSigmas and there is genuinely nothing to choose.
+    Empty there is a statement, not an omission, and a sampler a MODEL published cannot overturn it.
+    """
+    known: list[str] = []
+
+    def _add(name: Any) -> None:
+        text = str(name or "").strip()
+        if text and text in available and text not in known:
+            known.append(text)
+
+    if not family_has_no_such_choice:
+        _add(default_name)
+        for entry in declared or ():
+            _add(entry)
+        _add(model_name)
+    chosen = set(known)
+    return known, sorted(name for name in available if name not in chosen)
+
+
+def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None = None,
+                            model_sampler: Any = None, model_scheduler: Any = None,
+                            live_samplers: Any = None, live_schedulers: Any = None) -> dict[str, Any]:
+    """Auto default from the operating point, plus the two GROUPS the cockpit's one dropdown draws.
+
+    Owner ruling (Doc 62): the samplers known good with the model in front of you are what Simple
+    offers; Advanced offers those first, then a visible separation, then everything else the build
+    has -- in the SAME dropdown, so the control never moves and the top of the list is identical in
+    both modes. ``known_good_samplers`` + ``other_samplers`` is that split, and the flat ``samplers``
+    key is kept exactly as it was for every reader that predates the ruling.
+
+    ``model_sampler``/``model_scheduler`` are what THIS weight publishes. They are an input here
+    rather than something the C++ merges in afterwards, because a rule that lives in two places
+    drifts in one of them. ``live_samplers``/``live_schedulers`` are an already-extracted live list,
+    for callers that have one without the whole ``/object_info`` body."""
+    # Captured before the ``/object_info`` extraction below reuses these two names for the derived
+    # sets. One name for the argument and the derivation would make the fallback read as a no-op.
+    live_samplers_arg, live_schedulers_arg = live_samplers, live_schedulers
     resolved = _FAMILY_SAMPLING_ALIASES.get(str(family or "").strip().lower(), str(family or "").strip().lower())
     allow = FAMILY_SAMPLER_ALLOWLISTS.get(resolved, {})
     default_name = default_operating_point(resolved) or default_operating_point(family)
@@ -762,6 +813,10 @@ def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None =
 
     live_samplers = _object_info_choices(object_info, "sampler_name")
     live_schedulers = _object_info_choices(object_info, "scheduler")
+    if live_samplers is None and live_samplers_arg:
+        live_samplers = {str(n).strip() for n in live_samplers_arg if str(n).strip()} or None
+    if live_schedulers is None and live_schedulers_arg:
+        live_schedulers = {str(n).strip() for n in live_schedulers_arg if str(n).strip()} or None
     samplers = set(live_samplers) if live_samplers is not None else set(COMFY_KSAMPLER_CATALOG)
     schedulers = set(live_schedulers) if live_schedulers is not None else set(COMFY_SCHEDULER_CATALOG)
     # The operating point's pin is a CLAIM about what this family wants, not evidence that this
@@ -794,9 +849,21 @@ def family_sampling_choices(family: Any, *, object_info: dict[str, Any] | None =
         default_scheduler = sorted(schedulers)[0]
         scheduler_source = "alphabetical"
 
+    explicit_empty_samplers = "samplers" in allow and not tuple(allow.get("samplers") or ())
+    known_samplers, other_samplers = _known_good(
+        tuple(allow.get("samplers") or ()), default_sampler, model_sampler, samplers,
+        family_has_no_such_choice=explicit_empty_samplers)
+    known_schedulers, other_schedulers = _known_good(
+        tuple(allow.get("schedulers") or ()), default_scheduler, model_scheduler, schedulers,
+        family_has_no_such_choice=explicit_empty_schedulers)
+
     return {
         "samplers": sorted(samplers, key=lambda name: (name != default_sampler, name)),
         "schedulers": sorted(schedulers, key=lambda name: (name != default_scheduler, name)),
+        "known_good_samplers": known_samplers,
+        "other_samplers": other_samplers,
+        "known_good_schedulers": known_schedulers,
+        "other_schedulers": other_schedulers,
         "default_sampler": default_sampler,
         "default_scheduler": default_scheduler,
         "default_sampler_source": sampler_source or "none",
