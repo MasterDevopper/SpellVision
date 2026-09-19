@@ -441,3 +441,160 @@ def test_recommend_file_still_narrows_a_raw_single_version_list():
         chosen = recommend_file(variant.files, vram_gb=vram)
         assert chosen is not None
         assert chosen.name not in companions, f"recommended a companion at vram={vram}"
+
+
+# --- the filename shape changed underneath us -------------------------------------------------
+#
+# Recorded VERBATIM from the LIVE Civitai API on 2026-09-18 (anonymous GET
+# /api/v1/models/{573152,2823011}), sizes in the API's own kB and precisions as typed by the
+# uploader. Civitai now appends each file's OWN id to its name, so the files that used to collide
+# under one identical name today carry different names -- and the grouping that keyed on the exact
+# name matched exactly one file per version. Both shapes are pinned below because the old one is
+# still what older cached payloads carry, and nothing says the site will not revert.
+
+
+def _live_file(fid, name, size_kb, fp, fmt="SafeTensor", primary=False):
+    return {"id": fid, "name": name, "sizeKB": size_kb, "primary": primary,
+            "downloadUrl": f"https://civitai.com/api/download/models/1?fileId={fid}",
+            "metadata": {"format": fmt, "fp": fp}}
+
+
+# Model 2823011, version 3184548 "V1.0 BF16" -- the same version as LOX_V1_BF16 above, as the API
+# returns it TODAY: the two checkpoints carry _<fileId>, while the text encoder, the VAE and the
+# workflow .json are untouched because their names never collided.
+LOX_V1_BF16_SUFFIXED = {"modelVersions": [{
+    "id": 3184548, "name": "V1.0 BF16", "baseModel": "Krea 2",
+    "files": [
+        _live_file(3065550, "loxsUtopicWorldKrea2_v10BF16_3065550.safetensors",
+                   25039249.234375, "bf16", primary=True),
+        _live_file(3070099, "loxsUtopicWorldKrea2_v10BF16_txt.safetensors",
+                   5119597.625, "fp8_scaled"),
+        {"id": 3070171, "name": "loxsUtopicWorldKrea2_v10BF16.json", "sizeKB": 62.8466796875,
+         "downloadUrl": "https://civitai.com/api/download/models/1?fileId=3070171",
+         "metadata": {}},
+        _live_file(3070170, "qwen_image_vae.safetensors", 247857.662109375, "bf16"),
+        _live_file(3065135, "loxsUtopicWorldKrea2_v10BF16_3065135.safetensors",
+                   12519657.34765625, "fp8"),
+    ],
+}]}
+
+# Model 573152, version 3112728 "v10 (Krea 2)", as the API returns it TODAY. SEVEN files, one
+# checkpoint: five .safetensors carrying _<fileId>, and two .gguf quantisations of the same
+# weights that declare no metadata.fp at all.
+LUSTIFY_V10_KREA2_SUFFIXED = {"name": "LUSTIFY! [NSFW checkpoint]", "modelVersions": [
+    {"id": 3112728, "name": "v10 (Krea 2)", "baseModel": "Krea 2", "files": [
+        _live_file(2997637, "lustifyNSFWCheckpoint_v10Krea2_2997637.safetensors",
+                   12519647.48046875, "fp8", primary=True),
+        _live_file(2996235, "lustifyNSFWCheckpoint_v10Krea2_2996235.safetensors",
+                   12840795.6171875, "bf16"),
+        _live_file(3015314, "lustifyNSFWCheckpoint_v10Krea2_3015314.safetensors",
+                   25667328.921875, "bf16"),
+        _live_file(3015315, "lustifyNSFWCheckpoint_v10Krea2_3015315.safetensors",
+                   25667294.21191406, "bf16"),
+        _live_file(3001078, "lustifyNSFWCheckpoint_v10Krea2_3001078.gguf",
+                   4902904, None, fmt="GGUF"),
+        _live_file(3002352, "lustifyNSFWCheckpoint_v10Krea2_3002352.gguf",
+                   8116372.03125, None, fmt="GGUF"),
+        _live_file(2997070, "lustifyNSFWCheckpoint_v10Krea2_2997070.safetensors",
+                   12840795.6171875, "bf16"),
+    ]},
+]}
+
+
+def test_a_fileid_suffix_does_not_split_one_checkpoints_precisions():
+    """The defect. Civitai renamed the colliding files apart and the exact-name grouping matched
+    one file per version, so the fp8 and int8 builds that are on the site became unreachable from
+    the app -- and ``precision_disputes``, which compares rows inside a group, had nothing left to
+    compare."""
+    variant = model_variants(LOX_V1_BF16_SUFFIXED)[0]
+    assert {f.precision for f in variant.precision_variants()} == {"bf16", "fp8"}
+    assert {f.file_id for f in variant.precision_variants()} == {"3065550", "3065135"}
+
+
+def test_both_filename_shapes_pick_out_the_same_files():
+    """One version, recorded before and after the rename. Older cached payloads still carry the
+    identical-name shape, so the rule has to answer the same on both rather than swapping which
+    one it understands."""
+    old = model_variants(LOX_V1_BF16)[0]
+    new = model_variants(LOX_V1_BF16_SUFFIXED)[0]
+    assert {f.file_id for f in old.precision_variants()} \
+        == {f.file_id for f in new.precision_variants()}
+    assert {f.file_id for f in old.companion_files()} \
+        == {f.file_id for f in new.companion_files()}
+
+
+def test_the_companions_stay_companions_under_the_new_shape():
+    """``_txt`` is not digits and ``qwen_image_vae`` shares no stem, so both fall out of the group
+    by construction -- which is the constraint this whole function exists for: a naive "highest
+    precision that fits" recommended the 0.24 GB bf16 VAE as the model."""
+    variant = model_variants(LOX_V1_BF16_SUFFIXED)[0]
+    assert {f.name for f in variant.companion_files()} == {
+        "loxsUtopicWorldKrea2_v10BF16_txt.safetensors", "qwen_image_vae.safetensors"}
+    for vram in (32.0, 12.0, 6.0, None):
+        chosen = recommend_file(variant.files, vram_gb=vram)
+        assert chosen is not None
+        assert chosen.name != "qwen_image_vae.safetensors", f"recommended the VAE at vram={vram}"
+    offered = {f.file_id for _, f in precision_candidates(model_variants(LOX_V1_BF16_SUFFIXED))}
+    assert "3070170" not in offered, "the VAE is not one of the checkpoint's precisions"
+
+
+def test_a_gguf_is_another_encoding_of_the_same_checkpoint():
+    """The extension is not part of the identity. LUSTIFY's v10 ships the same weights as
+    .safetensors at bf16/fp8 and as .gguf at two quantisations, which is exactly the choice the
+    user is making -- so all seven are precision variants and nothing is a companion."""
+    variant = model_variants(LUSTIFY_V10_KREA2_SUFFIXED)[0]
+    variants = variant.precision_variants()
+    assert len(variants) == 7
+    assert len({f.file_id for f in variants}) == 7, "file_id is the key, not the name"
+    assert variant.companion_files() == ()
+    assert {f.name for f in variants if f.name.endswith(".gguf")} == {
+        "lustifyNSFWCheckpoint_v10Krea2_3001078.gguf",
+        "lustifyNSFWCheckpoint_v10Krea2_3002352.gguf"}
+
+
+def test_the_dispute_fires_on_the_live_shape_gguf_and_all():
+    """The guard the rename switched off. Three rows at ~12.25 GB declare bf16 next to two at
+    24.48 GB that also declare bf16; half the bytes is what fp8 costs, so they cannot all be.
+
+    The two .gguf rows declare no precision at all, and that must not silence the check: a file
+    making no claim can neither agree nor disagree with the anchor, so the majority is counted
+    over the rows that DO claim one. Counted over all seven the best anchor explained three, the
+    version went unmeasured, and the mislabels went unflagged."""
+    disputes = precision_disputes(model_variants(LUSTIFY_V10_KREA2_SUFFIXED))
+    assert set(disputes) == {"2996235", "2997070"}
+    assert "8-bit" in disputes["2996235"] and "bf16" in disputes["2996235"]
+    assert "3001078" not in disputes and "3002352" not in disputes, \
+        "a file that declares nothing cannot contradict itself"
+
+    # The same version before the rename names the same two rows.
+    assert set(precision_disputes(model_variants(LUSTIFY_V10_KREA2))) == set(disputes)
+
+
+def test_exactly_one_row_is_marked_on_the_live_shape_and_never_a_disputed_one():
+    variants = model_variants(LUSTIFY_V10_KREA2_SUFFIXED)
+    candidates = precision_candidates(variants)
+    assert len(candidates) == 7
+    disputes = precision_disputes(variants)
+    for vram in (32.0, 24.0, 16.0, None):
+        picked = recommend_across_variants(variants, vram)
+        assert picked is not None
+        marked = [1 for v, f in candidates if (v.version_id, f.file_id) == picked]
+        assert len(marked) == 1, f"{len(marked)} rows marked at vram={vram}"
+        assert picked[1] not in disputes, f"recommended a disputed row at vram={vram}"
+    # Marked, never hidden: every disputed row is still offered with a usable url.
+    offered = {f.file_id: f for _, f in candidates}
+    for file_id in disputes:
+        assert offered[file_id].download_url
+
+
+def test_a_trailing_number_that_is_not_the_files_own_id_is_part_of_the_name():
+    """The suffix Civitai appends is the file's OWN id, and stripping any trailing ``_<digits>``
+    would fold two different models into one group -- ``_768`` and ``_512`` are a resolution, not
+    a precision, and merging them would offer one as a build of the other."""
+    payload = {"modelVersions": [{"id": 1, "name": "V", "baseModel": "SDXL 1.0", "files": [
+        _file(11, "mymodel_768.safetensors", 6.46, "fp16", primary=True),
+        _file(12, "mymodel_512.safetensors", 6.46, "fp16"),
+    ]}]}
+    variant = model_variants(payload)[0]
+    assert {f.file_id for f in variant.precision_variants()} == {"11"}
+    assert {f.file_id for f in variant.companion_files()} == {"12"}

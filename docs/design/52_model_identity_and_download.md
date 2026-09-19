@@ -86,12 +86,25 @@ F: drive sits alongside D: here), so "not there" is normal and must not drown th
 `model_sources.model_variants` reduces a `/api/v1/models/{id}` payload to `CivitaiVariant` per
 version, each carrying every `CivitaiFile` in it.
 
-**A filename is not a key.** Civitai reuses one filename across precisions inside a version —
-`loxsUtopicWorldKrea2_v20Quants.safetensors` is the name of the nvfp4, the int8 *and* the fp8. The
-key is `file_id`.
+**A filename is not a key**, and Civitai has demonstrated it from both directions. It used to
+reuse one filename across precisions inside a version — `loxsUtopicWorldKrea2_v20Quants.safetensors`
+was the name of the nvfp4, the int8 *and* the fp8. Since 2026-09 it appends each file's own id
+instead (`loxsUtopicWorldKrea2_v20Quants_3146156.safetensors`), so those same three files now carry
+three different names. The key is `file_id` either way.
+
+**The grouping is the stem, not the name.** `CivitaiFile.grouping_stem` is the name with that
+`_<fileId>` and the extension removed, and it is what says two files are the same checkpoint. The
+suffix is stripped only when the digits *are* that file's id — `mymodel_768` and `mymodel_512` are
+a resolution, not a precision. The extension is dropped because a `.gguf` is another *encoding* of
+the same weights, which is exactly the choice being offered.
+
+Grouping on the exact name was correct when written and silently became wrong when the site
+renamed: every group then matched one file, so most precisions of a model could not be reached
+through the app at all, and `precision_disputes` — which compares rows inside a group — had nothing
+to compare. Both shapes are pinned as recorded fixtures in `tests/test_civitai_model_variants.py`.
 
 **A version is not just the checkpoint.** It bundles the text encoder, the VAE and the workflow
-JSON. So `precision_variants()` (files sharing the primary weight's name) is what a user chooses
+JSON. So `precision_variants()` (files sharing the primary weight's stem) is what a user chooses
 *between*, and `companion_files()` is what comes along with whichever they pick. Without that split
 a "highest precision that fits" rule recommended a 0.24 GB bf16 VAE as the model.
 
@@ -139,20 +152,24 @@ smallest file present, so largest-that-fits can never surface it.
 ### Disputed precisions
 
 `precision_disputes` reports a declared precision that contradicts its measured size — **within one
-version, across files sharing one filename**, and nowhere else.
+version, across files sharing one grouping stem**, and nowhere else.
 
 The scope was set by measurement, not assumption. Across a model's *versions* the same code flagged
 **121 of 1101 candidates (11%)** over the 100 most-downloaded Civitai checkpoints: a model's
 versions span different architectures and parameter counts (Pony Diffusion V6 XL carries a 1.99 GB
 file and a 6.46 GB file, both honestly fp16), so a size ratio between them measures the
 architecture. Within one version it flags **3 of 1101 (0.27%)**, and those are real — LUSTIFY's
-"v10 (Krea 2)" publishes one filename at 24.48 GB and at 12.25 GB with every row declared `bf16`.
+"v10 (Krea 2)" publishes one checkpoint at 24.48 GB and at 12.25 GB with every row declared `bf16`.
 
 Two more of the original five survivors came from folding `fp32` into the 16-bit class, which made
 every honest fp16-alongside-fp32 SD1.5 pair look like a mislabel. `fp32` is 32.
 
 Three states, as always. A majority of the version's files must agree on a reading, or nothing is
-reported: two files that contradict each other are a tie, and nothing says which one is wrong.
+reported: two files that contradict each other are a tie, and nothing says which one is wrong. The
+majority is counted over the files that *declare* a precision — a `.gguf` with no `metadata.fp`
+makes no claim, so it can neither agree nor disagree, and counting it in the denominator only made
+the check harder to satisfy. LUSTIFY's v10 ships two such files next to five declared ones; against
+a denominator of seven the version went unmeasured and its mislabels went unflagged.
 
 **The stated cost:** a model publishing one precision per version has nothing to compare within a
 version, so 2726029's real mislabel goes unreported. "Cannot tell" is the honest answer there, and
@@ -194,8 +211,8 @@ provider that publishes no hash all proceed and are reported as `metadata["sha25
 False`. Refusing would break every Hugging Face and direct-URL download.
 
 Verified live against model 2823011: all eight per-precision URLs the dialog produces resolve to the
-correct digest, including the three files sharing one filename inside "V2.0 Quants" — where a wrong
-match would have been invisible.
+correct digest, including the three files sharing one grouping stem inside "V2.0 Quants" — where a
+wrong match would have been invisible.
 
 ### There is no hash *tier*
 

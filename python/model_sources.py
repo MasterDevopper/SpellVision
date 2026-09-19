@@ -3,21 +3,24 @@
 Parses the reference (``parse_asset_reference``), enumerates what is actually on offer
 (``model_variants``), and materialises the chosen one (``materialize_asset``).
 
-The hard-won part is that **a filename is not an identity**. One Civitai version ships the same
-checkpoint at several precisions under a single name -- ``file_id`` is the key, and ``metadata.fp``
-carries the precision. A version also bundles its text encoder, VAE and workflow JSON alongside the
-weights, so "the biggest file" and "the primary file" are both wrong selectors:
-``precision_variants()`` are the files sharing the PRIMARY file's name and ``companion_files()``
-are the rest. Without that split a naive "highest precision that fits" recommended a 0.24 GB VAE as
-the model.
+The hard-won part is that **a filename is not an identity** -- and Civitai has now demonstrated it
+from both directions. One version used to ship the same checkpoint at several precisions under a
+single identical name; today it appends the file's own id instead, so those same files carry
+different names. ``file_id`` is the key either way, ``metadata.fp`` carries the precision, and
+``CivitaiFile.grouping_stem`` -- the name with that ``_<fileId>`` and the extension removed -- is
+what says two files are the same checkpoint. A version also bundles its text encoder, VAE and
+workflow JSON alongside the weights, so "the biggest file" and "the primary file" are both wrong
+selectors: ``precision_variants()`` are the files sharing the PRIMARY weight's stem and
+``companion_files()`` are the rest. Without that split a naive "highest precision that fits"
+recommended a 0.24 GB VAE as the model.
 
 The second hard-won part is that **``metadata.fp`` is a field an uploader types, and it is wrong
 often enough to matter**. Ranking on it recommended an int8 checkpoint as "the highest precision
 available"; ranking on SIZE cannot go wrong the same way, because within one model more bytes is
 more precision. ``precision_disputes`` reports the contradiction where it is measurable -- inside a
-version, between files sharing one filename -- and stays silent across versions, where a size ratio
-measures the architecture rather than the precision (measured: 11% false-positive rate across
-versions against 0.27% within one, over the 100 most-downloaded Civitai checkpoints).
+version, between files sharing one grouping stem -- and stays silent across versions, where a
+size ratio measures the architecture rather than the precision (measured: 11% false-positive rate
+across versions against 0.27% within one, over the 100 most-downloaded Civitai checkpoints).
 
 ``recommend_file`` and ``recommend_across_variants`` therefore only ever RECOMMEND. Doc 19's rule
 holds throughout this module: never auto-download on a guess, and never silently substitute --
@@ -107,10 +110,15 @@ _NON_WEIGHT_SUFFIXES = (".json", ".yaml", ".yml", ".txt", ".md", ".png", ".webp"
 class CivitaiFile:
     """One downloadable file inside a model version.
 
-    Identified by ``file_id``, never by name. Civitai reuses one filename across precisions --
-    ``loxsUtopicWorldKrea2_v20Quants.safetensors`` is the name of the nvfp4, the int8 AND the fp8
-    file in a single version -- so a name is not a key, and picking by name would fetch whichever
-    happened to be first.
+    Identified by ``file_id``, never by name, and Civitai has now published BOTH reasons why.
+
+    It used to serve several precisions of one checkpoint under a single identical name
+    (``loxsUtopicWorldKrea2_v20Quants.safetensors`` was the nvfp4, the int8 AND the fp8 of one
+    version). It now disambiguates them itself by appending the file's own id --
+    ``loxsUtopicWorldKrea2_v20Quants_3146156.safetensors`` -- so the same three files today carry
+    three different names. Either way a NAME is not a key: on the old shape it collided, on the new
+    one it is unique per file and therefore cannot group the files that belong together. The id is
+    the key; ``grouping_stem`` is what groups.
     """
 
     file_id: str
@@ -130,6 +138,36 @@ class CivitaiFile:
     @property
     def is_weights(self) -> bool:
         return not self.name.lower().endswith(_NON_WEIGHT_SUFFIXES)
+
+    @property
+    def grouping_stem(self) -> str:
+        """The name with Civitai's own disambiguating ``_<fileId>`` and the extension removed.
+
+        What makes two files "the same checkpoint at a different precision". Measured live
+        (2026-09-18) on the two shapes that exist:
+
+        * old -- several files share one identical name, so the stems are already equal;
+        * new -- Civitai appends the file's OWN id: ``lustifyNSFWCheckpoint_v10Krea2_2997637``
+          (id 2997637) and ``lustifyNSFWCheckpoint_v10Krea2_2996235`` (id 2996235) both reduce to
+          ``lustifynsfwcheckpoint_v10krea2``.
+
+        The suffix is stripped only when the digits ARE this file's id, which is what Civitai
+        actually appends. A looser "trailing ``_<digits>``" rule would also fold
+        ``model_768.safetensors`` and ``model_512.safetensors`` -- two different renders of a
+        model, not two precisions of one -- into a single group.
+
+        The extension is dropped because a ``.gguf`` is a different ENCODING of the same
+        checkpoint, which is exactly the choice the user is making: LUSTIFY's v10 version offers
+        ``.safetensors`` at bf16/fp8 and ``.gguf`` at two quantisations, all one checkpoint. The
+        companions keep distinct stems for free -- ``_txt`` is not digits, and
+        ``qwen_image_vae`` shares nothing.
+        """
+        stem = self.name.strip().lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+        suffix = f"_{self.file_id.strip()}"
+        if self.file_id.strip().isdigit() and stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+        return stem
 
     @property
     def size_gb(self) -> float:
@@ -162,11 +200,16 @@ class CivitaiVariant:
     def precision_variants(self) -> tuple[CivitaiFile, ...]:
         """The same checkpoint at different precisions -- the set a user chooses BETWEEN.
 
-        Identified by sharing the PRIMARY file's name. Civitai reuses one filename across
-        precisions inside a version (nvfp4, int8 and fp8 of "V2.0 Quants" are all
-        ``loxsUtopicWorldKrea2_v20Quants.safetensors``), while the companions it bundles alongside
-        -- a ``_txt`` text encoder, ``qwen_image_vae.safetensors``, the workflow ``.json`` -- carry
-        distinct names.
+        Identified by sharing the PRIMARY weight's ``grouping_stem``, while the companions bundled
+        alongside -- a ``_txt`` text encoder, ``qwen_image_vae.safetensors``, the workflow
+        ``.json`` -- reduce to different stems.
+
+        This grouped on the exact NAME until 2026-09-18, and that stopped working without anything
+        in the repo changing: Civitai began appending each file's own id to its name, so every
+        group matched exactly one file. The visible cost was that most precisions of a model could
+        not be reached through the app at all (the fp8 and int8 of "V2.0 Quants" were on the site
+        and unreachable here), and the silent one was that ``precision_disputes`` -- which compares
+        rows inside a group -- could never fire, because there was never a second row.
 
         Without this split a naive "highest precision that fits" recommended the 0.24 GB bf16 VAE
         as the model to download: it is bf16, it is weights, and it fits easily.
@@ -174,8 +217,10 @@ class CivitaiVariant:
         weights = self.weight_files()
         if not weights:
             return ()
-        target = (self.filename or weights[0].name).strip().lower()
-        same = tuple(f for f in weights if f.name.strip().lower() == target)
+        anchor = next((f for f in weights if f.name == self.filename), None)
+        if anchor is None:
+            anchor = next((f for f in weights if f.primary), weights[0])
+        same = tuple(f for f in weights if f.grouping_stem == anchor.grouping_stem)
         return same or (weights[0],)
 
     def companion_files(self) -> tuple[CivitaiFile, ...]:
@@ -217,9 +262,9 @@ def _fitting(files: Sequence[CivitaiFile], vram_gb: float | None) -> list[Civita
 def _precisions_of(files: Sequence[CivitaiFile]) -> list[CivitaiFile]:
     """Narrow a raw file list to the precisions of ONE checkpoint -- what a user chooses between.
 
-    The same rule ``CivitaiVariant.precision_variants`` applies: Civitai reuses one filename across
-    precisions inside a version, while the companions bundled alongside (a ``_txt`` text encoder,
-    ``qwen_image_vae.safetensors``, the workflow ``.json``) carry distinct names.
+    The same rule ``CivitaiVariant.precision_variants`` applies: the precisions of one checkpoint
+    share a ``grouping_stem``, while the companions bundled alongside (a ``_txt`` text encoder,
+    ``qwen_image_vae.safetensors``, the workflow ``.json``) reduce to different stems.
 
     Applied here for callers holding a raw list. It must be applied exactly ONCE, and at this
     level: ``recommend_across_variants`` works on a pool where each version has already been
@@ -230,8 +275,7 @@ def _precisions_of(files: Sequence[CivitaiFile]) -> list[CivitaiFile]:
     if len(weights) < 2:
         return weights
     primary = next((f for f in weights if f.primary), weights[0])
-    target = primary.name.strip().lower()
-    same = [f for f in weights if f.name.strip().lower() == target]
+    same = [f for f in weights if f.grouping_stem == primary.grouping_stem]
     return same if len(same) > 1 else weights
 
 
@@ -299,7 +343,7 @@ def measured_bit_classes(files: Sequence[CivitaiFile]) -> dict[str, int]:
     """Bit-width MEASURED from each file's size, keyed by file id. ``{}`` when unmeasurable.
 
     **Only valid on files already established to be the same weights** -- i.e. the output of
-    ``CivitaiVariant.precision_variants()``, which are the files sharing one filename inside one
+    ``CivitaiVariant.precision_variants()``, which are the files sharing one grouping stem inside one
     version. There the ratio argument holds: 16-bit is about twice 8-bit, which is about twice
     4-bit, so a SIZE converts to a bit-width, and a bit-width is the thing an uploader cannot
     mistype.
@@ -309,7 +353,7 @@ def measured_bit_classes(files: Sequence[CivitaiFile]) -> dict[str, int]:
     flagged **121 of 1101 candidates, 11%** -- almost none of them mislabels. A model's versions
     routinely span different architectures and parameter counts (Pony Diffusion V6 XL carries a
     1.99 GB file and a 6.46 GB file, both honestly fp16), so a size ratio between them measures the
-    architecture, not the precision. Restricted to one version's shared-name files the same code
+    architecture, not the precision. Restricted to one version's shared-stem files the same code
     flags essentially nothing, because there the comparison is between two encodings of one
     artifact.
 
@@ -337,12 +381,19 @@ def measured_bit_classes(files: Sequence[CivitaiFile]) -> dict[str, int]:
     def agreement(anchor: CivitaiFile) -> int:
         measured = measured_under(anchor)
         return sum(
-            1 for file in sized
+            1 for file in anchors
             if measured.get(file.file_id) == _PRECISION_BITS.get(file.precision.strip().lower())
         )
 
     best = max(anchors, key=agreement)
-    if agreement(best) * 2 <= len(sized):
+    # The majority is counted over the files that DECLARE a precision, not over every sized file.
+    # A file with no ``metadata.fp`` makes no claim, so it can neither agree nor disagree, and
+    # counting it in the denominator only makes the check harder to satisfy. Measured: LUSTIFY's
+    # "v10 (Krea 2)" version ships two undeclared .gguf files alongside five declared ones, and
+    # against a denominator of 7 the best anchor explained 3 -- so the whole version went
+    # unmeasured and its two mislabelled bf16 rows went unflagged. Against the 5 that make a claim
+    # the same anchor explains 3, a majority, and the two are flagged.
+    if agreement(best) * 2 <= len(anchors):
         # No reading of the set explains most of it. Returning a class here would mean picking a
         # winner among mutually inconsistent metadata -- a guess wearing a verdict's clothes.
         return {}
@@ -352,7 +403,7 @@ def measured_bit_classes(files: Sequence[CivitaiFile]) -> dict[str, int]:
 def precision_disputes(variants: Sequence["CivitaiVariant"]) -> dict[str, str]:
     """File ids whose declared precision contradicts their measured size, and why.
 
-    Computed **per version**, over the files that share one filename there -- the only place the
+    Computed **per version**, over the files that share one grouping stem there -- the only place the
     comparison means anything (see ``measured_bit_classes``). A dispute is therefore always
     "these two encodings of the same checkpoint cannot both be what they say they are".
 
