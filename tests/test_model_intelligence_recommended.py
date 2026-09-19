@@ -61,8 +61,8 @@ def test_a_card_snippet_beats_the_family_table_but_loses_to_the_site():
         family="krea2",
     )
     assert block["steps"]["value"] == 10           # site wins
-    assert block["guidance"]["value"] == 3.5       # card fills what the site lacked
-    assert block["guidance"]["provenance"] == "card:snippet-regex"
+    assert "guidance" not in block                 # krea2 does not steer with distilled guidance
+    assert block["cfg"]["provenance"] == "site:image-meta-mode"  # site cfg outranks the remapped card
 
 
 def test_a_user_value_beats_everything():
@@ -167,3 +167,23 @@ def test_three_agreeing_examples_clear_the_gate():
     version = {"images": [{"meta": {"steps": 7}} for _ in range(3)]}
     block = recommended.build(civitai_version=version, card_settings=None, family=None)
     assert block["steps"]["provenance"] == "site:image-meta-mode"
+
+
+def test_a_card_guidance_scale_is_cfg_unless_the_family_steers_with_guidance() -> None:
+    """Diffusers calls CFG `guidance_scale`. Flux and Hunyuan steal the name for distilled
+    guidance. The seed table is the data answer: a family that publishes `guidance` steers
+    that way; everyone else must not grow a Guidance row that no builder reads.
+    """
+    card = {"guidance": {"value": 7.0, "provenance": "card:snippet-regex"}}
+    sdxl = recommended.build(civitai_version=None, card_settings=card, family="sdxl")
+    assert sdxl["cfg"]["value"] == 7.0
+    assert sdxl["cfg"]["provenance"] == "card:snippet-regex"
+    assert sdxl.get("guidance", {}).get("provenance") != "card:snippet-regex"
+
+    flux = recommended.build(civitai_version=None, card_settings=card, family="flux")
+    assert flux["guidance"]["value"] == 7.0
+    assert flux["guidance"]["provenance"] == "card:snippet-regex"
+
+    hunyuan = recommended.build(civitai_version=None, card_settings=card, family="hunyuan_video")
+    assert hunyuan["guidance"]["value"] == 7.0
+    assert hunyuan["guidance"]["provenance"] == "card:snippet-regex"

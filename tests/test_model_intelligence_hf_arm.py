@@ -364,3 +364,7 @@ def test_a_throttled_arm_is_recorded_as_an_error_not_as_a_missing_weight(tmp_pat
     assert result["examined"] == 1
     assert any("huggingface" in error["error"] for error in result["errors"])
     assert sidecar.read(weight) is not None
+    # The error list is not the summary. `no_match` is "HuggingFace does not host this";
+    # a 429 is "we could not ask". Those used to collapse, which is how a throttled pass
+    # reported `no_match: 79, lookup_failed: 0` while identifying nothing.
+    assert (result["no_match"], result["lookup_failed"]) == (0, 1)

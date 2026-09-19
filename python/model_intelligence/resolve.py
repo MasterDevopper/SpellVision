@@ -175,20 +175,27 @@ def _claims_a_canvas_from_a_card(field: str, entry: dict[str, Any]) -> bool:
 
 def _sidecar_entries(sidecar_payload: dict[str, Any] | None,
                      warnings: list[str] | None = None) -> dict[str, dict[str, Any]]:
+    family = ((sidecar_payload or {}).get("identity") or {}).get("family")
     out: dict[str, dict[str, Any]] = {}
     for field, entry in ((sidecar_payload or {}).get("recommended") or {}).items():
         if field not in recommended.FIELDS or not isinstance(entry, dict) or not entry.get("provenance"):
             continue
         if _claims_a_canvas_from_a_card(field, entry):
             continue
-        if not _is_sane(field, entry.get("value")):
+        dest = field
+        if str(entry.get("provenance") or "").startswith("card:"):
+            dest = recommended.card_field_for(field, family)
+        if not _is_sane(dest, entry.get("value")):
             if warnings is not None:
                 warnings.append(
                     f"{field} {entry.get('value')!r} from {entry.get('provenance')} is outside "
-                    f"{_SANE_RANGE[field]}; using the family's value instead."
+                    f"{_SANE_RANGE.get(dest, _SANE_RANGE.get(field))}; using the family's value instead."
                 )
             continue
-        out[field] = _apply_quorum(dict(entry))
+        candidate = _apply_quorum(dict(entry))
+        current = out.get(dest)
+        if current is None or _rank(candidate["provenance"]) < _rank(current["provenance"]):
+            out[dest] = candidate
     return out
 
 

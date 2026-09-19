@@ -25,6 +25,7 @@ from request_payload import (  # noqa: E402
     FIELD_BOUNDS,
     _bounds_for,
     bounded_option,
+    guidance_from_request,
     numeric_option,
 )
 
@@ -174,3 +175,25 @@ def test_every_field_with_bounds_has_aliases_and_the_reverse() -> None:
     assert set(FIELD_BOUNDS) == set(FIELD_ALIASES)
     for field, names in FIELD_ALIASES.items():
         assert names[0] == field, f"{field}'s own name must be its first alias"
+
+
+def test_table_guidance_is_used_when_the_request_left_it_on_auto() -> None:
+    """The Hunyuan builder passes the family point as `table`. Auto (no `guidance` key, or 0)
+    used to skip that table and follow cfg -- so a family that publishes guidance 6 and pins
+    cfg 1 rendered at 1. The table is the family point; cfg is what a user who never opens
+    Advanced is steering with only when the family did not publish a guidance of its own.
+    """
+    table = {"guidance": 6.0, "cfg": 1.0}
+    assert guidance_from_request({}, fallback=3.5, table=table) == 6.0
+    assert guidance_from_request({"cfg": 1.0}, fallback=3.5, table=table) == 6.0
+    assert guidance_from_request({"guidance": 0}, fallback=3.5, table=table) == 6.0
+
+
+def test_a_stated_guidance_still_outranks_the_table() -> None:
+    table = {"guidance": 6.0, "cfg": 1.0}
+    assert guidance_from_request({"guidance": 4.0}, fallback=3.5, table=table) == 4.0
+
+
+def test_cfg_is_the_fallback_when_nobody_published_guidance() -> None:
+    assert guidance_from_request({"cfg": 2.0}, fallback=3.5, table={"cfg": 1.0}) == 2.0
+    assert guidance_from_request({}, fallback=3.5, table={}) == 3.5

@@ -95,12 +95,12 @@ def accel_loras_for(params: dict[str, Any] | None, command: Any) -> dict[str, st
 # the C++ never branched a family at all, exactly what its generic fallback produced); the C++ keeps
 # only the act of applying them.
 #
-# denoise/guidance_default were already present on some points before W2 (wan_wrapper /
+# denoise/guidance were already present on some points before W2 (wan_wrapper /
 # native_split_generic / flux_image) but never named in the vocabulary; they are listed here for the
 # same reason width/height/frames/fps are -- so a caller that iterates the field set sees the whole
 # shape, not a guess reconstructed from whichever points happen to set it.
 OPERATING_POINT_FIELDS: tuple[str, ...] = (
-    "steps", "cfg", "guidance", "guidance_default", "sampler", "scheduler", "shift", "denoise",
+    "steps", "cfg", "guidance", "sampler", "scheduler", "shift", "denoise",
     "clip_skip", "width", "height", "frames", "fps", "lora", "acceleration",
 )
 
@@ -230,7 +230,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             # ensureCanvasSizeDefault's QSize(832, 480) and the frameCountSpin_/fpsSpin_ construction
             # defaults 81 / 16 (ImageGenerationPage_catalog.cpp:929; ImageGenerationPage.cpp:1787-1812).
             "default": {
-                "steps": 20, "cfg": 6.0, "shift": 7.0,
+                "steps": 20, "cfg": 1.0, "guidance": 6.0, "shift": 7.0,
                 "sampler": "euler", "scheduler": "simple",
                 "width": 832, "height": 480, "frames": 81, "fps": 16,
             },
@@ -305,7 +305,7 @@ FAMILY_OPERATING_POINTS: dict[str, dict[str, Any]] = {
             "default": {
                 "steps": 20,               # routed -- lifted verbatim (provenance unknown)
                 "cfg": 1.0,                # PINNED / recorded only -- GROUNDED (KSampler cfg; Flux uses guidance, not cfg)
-                "guidance_default": 3.5,   # recorded only -- GROUNDED (_flux_guidance_from_request fallback, Flux sweet spot)
+                "guidance": 3.5,           # GROUNDED -- FluxGuidance sweet spot; same key the cockpit and guidance_from_request read
                 "sampler": "euler",        # PINNED / recorded only -- GROUNDED
                 "scheduler": "simple",     # PINNED / recorded only -- GROUNDED
                 "width": 1024, "height": 1024,  # W2: published canvas, copied from model_intelligence.family_seed_table["flux"]

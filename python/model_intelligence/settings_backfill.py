@@ -88,7 +88,9 @@ def apply_to_payload(payload: dict[str, Any], card: dict[str, Any] | None,
                      settings: dict[str, dict[str, Any]] | None) -> tuple[dict[str, Any], list[str]]:
     """Return (payload, the fields actually changed). Never mutates the argument."""
     block = payload.get("recommended") or {}
-    merged = recommended.overlay(block, settings)
+    merged = recommended.overlay(
+        block, settings, family=((payload.get("identity") or {}).get("family")),
+    )
     changed = [field for field, entry in merged.items()
                if (block.get(field) or {}).get("provenance") != entry.get("provenance")
                or (block.get(field) or {}).get("value") != entry.get("value")]

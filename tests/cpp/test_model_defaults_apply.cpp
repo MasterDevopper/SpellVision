@@ -309,6 +309,7 @@ private slots:
     // Doc 62 3e -- guidance had a consumer and no producer.
     void aPublishedGuidanceLandsInAControlAndSimpleGainsNoKnob();
     void aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob();
+    void switchingAwayFromAGuidanceFamilyZerosTheSentinel();
     void simpleKeepsStepsAndCfgHiddenOnAVideoPage();
     void simpleShowsTheSamplerRowBecauseTheSHORTLISTIsTheDisclosure();
     // Doc 62 3f -- a preset and a model's defaults both write steps and CFG.
@@ -738,6 +739,40 @@ void ModelDefaultsApplyTest::aFamilyThatPublishesNoGuidanceIsNotOfferedTheKnob()
     QVERIFY2(rowIsHidden(guidance),
              "Advanced revealed a Guidance box for a family that publishes none and whose builder "
              "never reads one");
+}
+
+void ModelDefaultsApplyTest::switchingAwayFromAGuidanceFamilyZerosTheSentinel()
+{
+    // The row hid. The spin did not. GenerationRequestBuilder sends any draft.guidance > 0, so a
+    // Hunyuan 6.0 leftover on a later Wan/SDXL request still left the box -- a hidden control
+    // changing the payload, which is the class this codebase spent a hardening pass removing.
+    ImageGenerationPage page(ImageGenerationPage::Mode::TextToVideo);
+    const QString hunyuan = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/hunyuan_video_t2v.safetensors");
+    const QString wan = QStringLiteral("D:/AI_ASSETS/models/diffusion_models/wan2.2_t2v.safetensors");
+    page.setModelDefaultsProvider([=](const QString &modelPath, const QString &, const QString &) -> QJsonObject {
+        QJsonObject settings;
+        if (modelPath.compare(hunyuan, Qt::CaseInsensitive) == 0)
+            settings.insert(QStringLiteral("guidance"), entry(6.0, QStringLiteral("table:family-default")));
+        else if (modelPath.compare(wan, Qt::CaseInsensitive) == 0)
+            settings.insert(QStringLiteral("steps"), entry(28, QStringLiteral("table:family-default")));
+        else
+            return {};
+        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("settings"), settings}};
+    });
+
+    QDoubleSpinBox *guidance = guidanceSpinOf(page);
+    QVERIFY2(guidance, "the Guidance spin box was not found");
+
+    selectVideoCheckpoint(page, hunyuan, QStringLiteral("hunyuan t2v"));
+    page.refreshModelDefaults();
+    QCOMPARE(guidance->value(), 6.0);
+
+    selectVideoCheckpoint(page, wan, QStringLiteral("wan t2v"));
+    page.refreshModelDefaults();
+    QCOMPARE(stepsSpinOf(page)->value(), 28);
+    QCOMPARE(guidance->value(), 0.0);
+    QVERIFY2(rowIsHidden(guidance),
+             "the Guidance row stayed up after leaving the family that publishes one");
 }
 
 void ModelDefaultsApplyTest::simpleShowsTheSamplerRowBecauseTheSHORTLISTIsTheDisclosure()

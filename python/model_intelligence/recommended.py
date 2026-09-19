@@ -125,8 +125,22 @@ def _offer(out: dict[str, dict[str, Any]], field: str, candidate: dict[str, Any]
         out[field] = candidate
 
 
+def card_field_for(field: str, family: str | None) -> str:
+    """Where a card's field lands for this family.
+
+    Diffusers calls CFG `guidance_scale`, and `hf_lookup` records that as `guidance`. Flux and
+    Hunyuan-video steal the name for distilled guidance. The seed table is the data answer: a
+    family that publishes `guidance` steers that way; everyone else must not grow a Guidance
+    row that no builder reads.
+    """
+    if field != "guidance":
+        return field
+    return "guidance" if "guidance" in family_seed_table.seed_for(family) else "cfg"
+
+
 def overlay(block: dict[str, dict[str, Any]] | None,
-            card_settings: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+            card_settings: dict[str, dict[str, Any]] | None,
+            family: str | None = None) -> dict[str, dict[str, Any]]:
     """Offer card-stated settings into an ALREADY-BUILT block, by the order `build` uses.
 
     For the sidecar backfill, which has the block a previous run wrote and not the CivitAI payload
@@ -143,7 +157,7 @@ def overlay(block: dict[str, dict[str, Any]] | None,
     for field, entry in (card_settings or {}).items():
         provenance = str((entry or {}).get("provenance") or "card:prose-regex")
         if provenance in CARD_PROVENANCES:
-            _offer(out, field, _entry((entry or {}).get("value"), provenance))
+            _offer(out, card_field_for(field, family), _entry((entry or {}).get("value"), provenance))
     return out
 
 
@@ -179,7 +193,7 @@ def build(
         # CARD_PROVENANCES, so a card entry forging it is silently ignored rather than trusted.
         provenance = str(entry.get("provenance") or "card:prose-regex")
         if provenance in CARD_PROVENANCES:
-            _offer(out, field, _entry(entry.get("value"), provenance))
+            _offer(out, card_field_for(field, family), _entry(entry.get("value"), provenance))
 
     for field, value in family_seed_table.seed_for(family, variant_of(civitai_version)).items():
         _offer(out, field, _entry(value, "table:family-default"))

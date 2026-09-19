@@ -113,11 +113,10 @@ def test_wan_diffusers_defaults_lifted_verbatim():
 
 def test_hunyuan_defaults_lifted_verbatim():
     # shift 7.0 recorded for provenance; the builder keeps it hardcoded (not routed).
-    # W2: sampler/scheduler added (GROUNDED -- what the builder actually patches into
-    # KSamplerSelect/BasicScheduler); width/height/frames/fps added (the generic video widget
-    # defaults, since applyOptimalVideoSamplingDefaults has no hunyuan branch).
+    # Distilled guidance lives on `guidance`, not on `cfg`. cfg 1.0 is the pinned KSampler
+    # figure; 6.0 is what FluxGuidance actually steers with (family_seed_table, Doc 62 3e).
     assert _op("hunyuan_video") == {
-        "steps": 20, "cfg": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
+        "steps": 20, "cfg": 1.0, "guidance": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
         "width": 832, "height": 480, "frames": 81, "fps": 16,
     }
 
@@ -137,8 +136,11 @@ def test_generic_fallback_defaults_retuned():
 
 def test_flux_image_defaults_lifted_verbatim():
     # W2: width/height added (published canvas, copied from family_seed_table).
+    # `guidance` not `guidance_default`: C++ applyResolvedSettings reads `guidance`, and
+    # guidance_from_request reads the same key off the table. The old name was recorded-only
+    # and unreachable from either.
     assert _op("flux_image") == {
-        "steps": 20, "cfg": 1.0, "guidance_default": 3.5, "sampler": "euler", "scheduler": "simple",
+        "steps": 20, "cfg": 1.0, "guidance": 3.5, "sampler": "euler", "scheduler": "simple",
         "width": 1024, "height": 1024,
     }  # cfg/guidance/sampler grounded (pinned); only steps is routed
 
@@ -230,7 +232,7 @@ def test_payload_single_point_family():
     assert [op["name"] for op in p["operating_points"]] == ["default"]
     # W2: params grew sampler/scheduler/width/height/frames/fps alongside steps/cfg/shift.
     assert p["operating_points"][0]["params"] == {
-        "steps": 20, "cfg": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
+        "steps": 20, "cfg": 1.0, "guidance": 6.0, "shift": 7.0, "sampler": "euler", "scheduler": "simple",
         "width": 832, "height": 480, "frames": 81, "fps": 16,
     }
     assert p["operating_points"][0]["lora"] == {} and p["operating_points"][0]["acceleration"] == {}

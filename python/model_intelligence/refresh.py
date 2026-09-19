@@ -177,21 +177,24 @@ class RefreshJob:
         FAILED must not be treated as "CivitAI does not have it". Before this existed the summary
         said `no_match: 79, lookup_failed: 0`, which reads as "both sites were asked". One was.
 
-        Returns (card, settings). `card` is the block `build_payload(hf=...)` wants; `settings` is
-        what the repo's README states. Both None when nothing confirmed, which is the common answer
-        and costs only searches.
+        Returns (card, settings, failed). `failed` is the same bit `_lookup` returns: we could not
+        ask. A 429 used to fall through as `(None, None)` and get tallied as `no_match` -- "HuggingFace
+        does not host this weight" -- which is the costume `HfThrottled` exists to stop. A confirmed
+        miss is `(None, None, False)`.
 
         It is also reached on a CivitAI HIT whose settings are empty -- see `_card_settings_for`.
         That is not a contradiction of the paragraph above: a hit ends the search for IDENTITY, and
-        identity is all a hit establishes.
+        identity is all a hit establishes. A throttle on THAT path stays an error on the file, not
+        a `lookup_failed` of the identity -- CivitAI already answered.
         """
         if self.hf is None or not digest:
-            return None, None
+            return None, None, False
         try:
-            return self._cards.read(weight=path, sha256=digest)
+            card, settings = self._cards.read(weight=path, sha256=digest)
+            return card, settings, False
         except Exception as exc:  # noqa: BLE001 -- a per-file failure never aborts the run
             errors.append({"path": str(path), "error": f"huggingface: {exc}"})
-            return None, None
+            return None, None, True
 
     def _card_settings_for(self, block: dict[str, dict[str, Any]], digest: str, path: Path,
                            errors: list[dict[str, str]]) -> tuple[Any, dict[str, dict[str, Any]] | None]:
@@ -214,7 +217,7 @@ class RefreshJob:
         """
         if self.hf is None or not digest or not card_settings.needs_card_settings(block):
             return None, None
-        card, settings = self._hf(digest, path, errors)
+        card, settings, _failed = self._hf(digest, path, errors)
         return card, (settings or None)
 
     def run(self) -> dict[str, Any]:
@@ -256,6 +259,12 @@ class RefreshJob:
             kind, family = self._kind_and_family(path)
             existing = sidecar.read(path)
             card: Any = None  # the HuggingFace card, when the second arm confirmed a repo
+            card_values: Any = None
+            if not failed and not version:
+                card, card_values, hf_failed = self._hf(digest, path, errors)
+                if hf_failed:
+                    # Same fact as a CivitAI throttle: we could not ask. Carry-forward, not no_match.
+                    failed = True
 
             if failed:
                 # We could not ask. Carry forward everything a previous successful run learned
@@ -278,10 +287,6 @@ class RefreshJob:
                     except Exception as exc:  # noqa: BLE001 -- pictures never cost an identity
                         errors.append({"path": str(path), "error": f"previews: {exc}"})
                 parent = self._parent(version, path, errors) if version else None
-                # The local is `card_values`, not `card_settings`: that name is now the MODULE
-                # holding the one rule for when a card is worth reading, and shadowing it here
-                # would make the gate below resolve to a dict.
-                card, card_values = (None, None) if version else self._hf(digest, path, errors)
                 block = recommended.build(
                     civitai_version=version,
                     card_settings=card_values,

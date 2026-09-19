@@ -1046,6 +1046,16 @@ void ImageGenerationPage::applyModelDefaults()
     guidanceOffered_ = settings.contains(QStringLiteral("guidance"));
     if (guidanceRow_)
         guidanceRow_->setVisible(advanced_ && guidanceOffered_);
+    // The row hid. The spin did not -- and GenerationRequestBuilder sends any value above zero,
+    // so a Hunyuan 6.0 leftover on a later Wan/SDXL request still left the box. Auto is 0.0.
+    // Inside the same ProgrammaticWrite applyResolvedSettings opens, so this does not freeze
+    // the field as a user edit. A value the user typed is left alone.
+    if (!guidanceOffered_ && sampling_ && sampling_->guidanceSpin()
+        && !userEdited(ResolvedField::Guidance))
+    {
+        const ProgrammaticWrite guard(this);
+        sampling_->guidanceSpin()->setValue(0.0);
+    }
 
     // Doc 62 ruling: what is "known good" is per MODEL, not only per family -- 483 of 759 weights
     // publish a sampler of their own, and a weight publishing er_sde makes er_sde known-good for it

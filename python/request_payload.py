@@ -199,12 +199,13 @@ def guidance_from_request(
     Flux model's published guidance was fetched, shown in the Models inspector under a provenance
     caption that reads as a promise, and then replaced by the cfg slider at render time.
 
-    So the order is inverted, once, here:
+    So the order is, once, here:
 
     1. a STATED `guidance` -- the Advanced control, or the model's own published figure
-    2. else `cfg`, which is what the cockpit has always meant on these families and what a user
-       who never opens Advanced is still steering with
-    3. else `fallback`, the family's own sweet spot
+    2. else the family's published `guidance` in `table` (the operating point)
+    3. else `cfg`, which is what the cockpit has always meant on these families and what a user
+       who never opens Advanced is still steering with when the family did not publish one
+    4. else `fallback`, the family's own sweet spot
 
     **Zero is the cockpit's "Auto" sentinel and is deliberately not honoured here**, which is the
     one place in this module that departs from "a stated zero is a value". It is honest for this
@@ -216,6 +217,9 @@ def guidance_from_request(
     stated = bounded_option(req, "guidance", 0.0)
     if stated > 0:
         return float(stated)
+    from_table = bounded_option(None, "guidance", 0.0, table=table)
+    if from_table > 0:
+        return float(from_table)
     from_cfg = bounded_option(req, "cfg", 0.0, table=table)
     if from_cfg > 0:
         return float(from_cfg)
