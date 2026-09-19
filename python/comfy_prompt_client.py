@@ -10,6 +10,7 @@ from comfy_endpoint import comfy_endpoint
 import json
 import logging
 import os
+import errno
 import threading
 import time
 import uuid
@@ -814,6 +815,26 @@ _OBJECT_INFO_TTL_SEC = 60.0
 # failure, not for a permanently-down server (that still fails, just after the budget).
 _OBJECT_INFO_RETRY_BUDGET_SEC = 120.0
 _OBJECT_INFO_RETRY_MAX_DELAY_SEC = 8.0
+# A refused connection is nobody listening, not a busy swap. Six seconds is long enough to
+# distinguish a restart blip from a ComfyUI that is simply down; the 120 s budget is for
+# ConnectionResetError while a multi-GB checkpoint is being evicted (Doc 62 3s).
+_OBJECT_INFO_REFUSED_BUDGET_SEC = 6.0
+
+
+def _is_connection_refused(exc: BaseException) -> bool:
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if isinstance(exc, OSError):
+        refused = getattr(errno, "ECONNREFUSED", 111)
+        win_refused = 10061  # WSAECONNREFUSED
+        if getattr(exc, "errno", None) in (refused, win_refused):
+            return True
+        if getattr(exc, "winerror", None) == win_refused:
+            return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None and cause is not exc:
+        return _is_connection_refused(cause)
+    return False
 
 
 def invalidate_comfy_object_info(reason: str = "") -> None:
@@ -931,6 +952,7 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
     delay = 1.0
     attempt = 0
     last_error: Exception | None = None
+    refused_since: float | None = None
     while True:
         attempt += 1
         try:
@@ -941,6 +963,15 @@ def _fetch_comfy_object_info(api_url: str, *, budget_sec: float | None = None) -
         except Exception as exc:  # URLError, ConnectionResetError/OSError, JSON decode, etc.
             last_error = exc
             remaining = deadline - time.monotonic()
+            if _is_connection_refused(exc):
+                if refused_since is None:
+                    refused_since = time.monotonic()
+                remaining = min(
+                    remaining,
+                    _OBJECT_INFO_REFUSED_BUDGET_SEC - (time.monotonic() - refused_since),
+                )
+            else:
+                refused_since = None
             if remaining <= 0:
                 break
             if attempt == 1 or attempt % 4 == 0:

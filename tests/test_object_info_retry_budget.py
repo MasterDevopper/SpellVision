@@ -95,3 +95,38 @@ def test_a_non_dict_body_still_raises(fake_clock, monkeypatch):
     monkeypatch.setattr(cpc, "_http_get_json", lambda *a, **k: "not an object")
     with pytest.raises(RuntimeError):
         cpc._fetch_comfy_object_info("http://127.0.0.1:8188")
+
+
+def test_a_refused_connection_gives_up_in_six_seconds_not_the_full_budget(fake_clock, monkeypatch):
+    """ComfyUI is not running. ConnectionResetError is a busy swap and must keep retrying;
+    ConnectionRefusedError is nobody home. Doc 62 3s: a drop while ComfyUI is down used to
+    burn the full 120 s generation budget before the page opened.
+    """
+    calls: list[int] = []
+
+    def boom(api_url, path, *, timeout=None):  # noqa: ARG001
+        calls.append(1)
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    monkeypatch.setattr(cpc, "_http_get_json", boom)
+    with pytest.raises(RuntimeError) as exc:
+        cpc._fetch_comfy_object_info("http://127.0.0.1:8188")
+
+    assert "refused" in str(exc.value).lower() or "111" in str(exc.value)
+    waited = sum(fake_clock["sleeps"])
+    assert waited <= cpc._OBJECT_INFO_REFUSED_BUDGET_SEC + cpc._OBJECT_INFO_RETRY_MAX_DELAY_SEC
+    assert waited >= cpc._OBJECT_INFO_REFUSED_BUDGET_SEC - 1.0
+    assert waited < cpc._OBJECT_INFO_RETRY_BUDGET_SEC / 2
+    assert len(calls) < 10, "must not spend the generation budget on a closed port"
+
+
+def test_a_reset_is_still_a_busy_swap_and_keeps_the_full_budget(fake_clock, monkeypatch):
+    """The refused short-circuit must not steal the reset path. 10054 is the observed
+    mid-swap failure; it still has to outlast a multi-GB eviction.
+    """
+    calls: list[int] = []
+    _always_reset(monkeypatch, calls)
+    with pytest.raises(RuntimeError):
+        cpc._fetch_comfy_object_info("http://127.0.0.1:8188")
+    assert sum(fake_clock["sleeps"]) >= cpc._OBJECT_INFO_RETRY_BUDGET_SEC - cpc._OBJECT_INFO_RETRY_MAX_DELAY_SEC
+    assert len(calls) > 5
