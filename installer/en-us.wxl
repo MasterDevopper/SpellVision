@@ -1,0 +1,7 @@
+<WixLocalization Culture="en-US" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <String Id="WelcomeDlgDescription" Value="This installs SpellVision and the ComfyUI 0.34.0 engine this release was proven against. That engine is pinned to this build. Updating it by hand is unsupported until a later release can adopt a newer one. Model files are not included. First launch asks where your library is. Click Next to continue or Cancel to exit." />
+  <String Id="LicenseAgreementDlgDescription" Value="Read this. Accepting means you understand the pinned engine, that models are not included, and the licences below." />
+  <String Id="LicenseAgreementDlgLicenseAcceptedCheckBox" Value="I understand the notes above and &amp;accept the licence terms" />
+  <String Id="InstallDirDlgDescription" Value="About 30 GB after unpack, not counting models. Click Change to choose another folder." />
+  <String Id="VerifyReadyDlgInstallText" Value="Click Install to copy the pinned ComfyUI 0.34.0 engine and SpellVision. Models are not part of this step. Click Back to change the folder, or Cancel to exit." />
+</WixLocalization>

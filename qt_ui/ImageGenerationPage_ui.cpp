@@ -197,6 +197,9 @@ void ImageGenerationPage::buildUi()
 {
     setObjectName(QStringLiteral("ImageGenerationPage"));
     setAcceptDrops(true);
+    // Slice 1. Descendants with svSurface paint matte unless they are Surface::Glass.
+    // SvStyle walks parents for this property. Do not set it on other pages.
+    setProperty("svCockpitMatte", true);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug), ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
@@ -347,7 +350,7 @@ void ImageGenerationPage::buildUi()
         inputChipDropzone_ = new DropTargetFrame(promptCard_);
         inputChipDropzone_->setObjectName(QStringLiteral("PromptInputDropzone"));
         setSurface(inputChipDropzone_, svstyle::Surface::Inset);
-        inputChipDropzone_->setFixedSize(84, 84);
+        inputChipDropzone_->setFixedSize(96, 96);
         inputChipDropzone_->setCursor(Qt::PointingHandCursor);
         inputChipDropzone_->onFileDropped = [this](const QString &path) {
             acceptDroppedLocalFile(path);
@@ -357,14 +360,14 @@ void ImageGenerationPage::buildUi()
         // WA_TransparentForMouseEvents so the click falls through; the clear button is raised on top.
         inputChipClickCatcher_ = new QPushButton(inputChipDropzone_);
         inputChipClickCatcher_->setObjectName(QStringLiteral("PromptInputClickCatcher"));
-        inputChipClickCatcher_->setGeometry(0, 0, 84, 84);
+        inputChipClickCatcher_->setGeometry(0, 0, 96, 96);
         inputChipClickCatcher_->setFlat(true);
         inputChipClickCatcher_->setCursor(Qt::PointingHandCursor);
         inputChipClickCatcher_->setStyleSheet(QStringLiteral("#PromptInputClickCatcher{background:transparent;border:0;}"));
         connect(inputChipClickCatcher_, &QPushButton::clicked, this, [this]() { openInputImageBrowse(); });
 
         inputChipThumb_ = new QLabel(inputChipDropzone_);
-        inputChipThumb_->setGeometry(1, 1, 82, 82);
+        inputChipThumb_->setGeometry(1, 1, 94, 94);
         inputChipThumb_->setAlignment(Qt::AlignCenter);
         inputChipThumb_->setAttribute(Qt::WA_TransparentForMouseEvents);
         inputChipThumb_->setVisible(false);
@@ -372,15 +375,17 @@ void ImageGenerationPage::buildUi()
         inputChipHint_ = new QLabel(isVideoMode() ? QStringLiteral("⬆\nDrop keyframe\nor browse")
                                                   : QStringLiteral("⬆\nDrop image\nor browse"),
                                     inputChipDropzone_);
-        inputChipHint_->setGeometry(0, 0, 84, 84);
+        inputChipHint_->setGeometry(0, 0, 96, 96);
+        inputChipHint_->setWordWrap(true);
         inputChipHint_->setAlignment(Qt::AlignCenter);
         inputChipHint_->setAttribute(Qt::WA_TransparentForMouseEvents);
-        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
-            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
+        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;%2background:transparent;border:0;")
+            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
+                 ThemeManager::instance().fontCss(ThemeManager::Type::Label)));
 
         inputChipClear_ = new QPushButton(QStringLiteral("×"), inputChipDropzone_);
         inputChipClear_->setObjectName(QStringLiteral("PromptInputClear"));
-        inputChipClear_->setGeometry(84 - 21, 3, 18, 18);
+        inputChipClear_->setGeometry(96 - 21, 3, 18, 18);
         inputChipClear_->setCursor(Qt::PointingHandCursor);
         inputChipClear_->setFlat(true);
         inputChipClear_->setStyleSheet(
@@ -395,13 +400,16 @@ void ImageGenerationPage::buildUi()
         // T2I+still remaps to i2i. Caption on the chip so Generate cannot look like a style-ref.
         inputChipVerb_ = new QLabel(QStringLiteral("Edit (I2I)"), inputChipDropzone_);
         inputChipVerb_->setObjectName(QStringLiteral("PromptInputVerb"));
-        inputChipVerb_->setGeometry(1, 84 - 16, 82, 15);
+        inputChipVerb_->setGeometry(1, 96 - 20, 94, 18);
         inputChipVerb_->setAlignment(Qt::AlignCenter);
         inputChipVerb_->setAttribute(Qt::WA_TransparentForMouseEvents);
         inputChipVerb_->setStyleSheet(
-            QStringLiteral("#PromptInputVerb{min-height:14px;max-height:14px;padding:0;margin:0;border:0;"
-                           "border-radius:%1;background:rgba(12,10,18,0.72);color:#f4f0ff;font-size:9px;}")
-                .arg(QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px")));
+            QStringLiteral("#PromptInputVerb{min-height:16px;padding:0 2px;margin:0;border:0;"
+                           "border-radius:@r@;background:@wash@;color:@ink@;@label@}")
+                .replace(QLatin1String("@r@"), QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px"))
+                .replace(QLatin1String("@wash@"), rgbaToken(ThemeManager::Color::Surface0, 0.72))
+                .replace(QLatin1String("@ink@"), ThemeManager::instance().css(ThemeManager::Color::TextHi))
+                .replace(QLatin1String("@label@"), ThemeManager::instance().fontCss(ThemeManager::Type::Label)));
         inputChipVerb_->setVisible(false);
         inputChipVerb_->raise();
         inputChipClear_->raise();
@@ -452,11 +460,13 @@ void ImageGenerationPage::buildUi()
     negativeRowLayout->setContentsMargins(0, ThemeManager::instance().spacing(ThemeManager::Spacing::Tight), 0, 0);
     negativeRowLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
     auto *negLabel = new QLabel(QStringLiteral("NEG"), negativeRow_);
+    negLabel->setObjectName(QStringLiteral("NegativeEyebrow"));
     negLabel->setFixedWidth(48);
     negLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
     negLabel->setStyleSheet(QStringLiteral(
-        "color:%1;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1px;background:transparent;border:0;")
-        .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo)));
+        "color:%1;%2letter-spacing:0.08em;background:transparent;border:0;")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextLo),
+             ThemeManager::instance().fontCss(ThemeManager::Type::Caption)));
     negativeRowLayout->addWidget(negLabel, 0, Qt::AlignTop);
     negativeRowLayout->addWidget(negativePromptEdit_, 1);
 
@@ -789,7 +799,10 @@ void ImageGenerationPage::buildUi()
     centerLayout->setSpacing(0);
 
     canvasCard_ = createCard(QStringLiteral("CanvasCard"));
-    setSurface(canvasCard_, svstyle::Surface::Glass);
+    // The card is the work surface (prompt footer, session strip, action row). The well
+    // inside it is the only glass. A C++ test requires the action row to stay this card's
+    // footer, so the glass moved inward instead of the row moving out.
+    setSurface(canvasCard_, svstyle::Surface::Panel);
     auto *canvasLayout = new QVBoxLayout(canvasCard_);
     canvasLayout->setContentsMargins(ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card), ThemeManager::instance().spacing(ThemeManager::Spacing::Card));
     canvasLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
@@ -800,7 +813,13 @@ void ImageGenerationPage::buildUi()
     // T2I / I2I / I2V: dropping a still on the canvas fills the same chip as the 84px dropzone.
     // T2V stills are ignored in the handler. Workflow .json is accepted on every family — T2 drop
     // on the canvas must not die because T2V had acceptDrops off.
-    auto *previewDrop = new DropTargetFrame(canvasCard_);
+    auto *previewWell = createCard(QStringLiteral("PreviewWell"));
+    setSurface(previewWell, svstyle::Surface::Glass);
+    auto *wellLayout = new QVBoxLayout(previewWell);
+    wellLayout->setContentsMargins(0, 0, 0, 0);
+    wellLayout->setSpacing(0);
+
+    auto *previewDrop = new DropTargetFrame(previewWell);
     previewArea_ = previewDrop;
     previewArea_->setObjectName(QStringLiteral("PreviewArea"));
     previewArea_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -842,38 +861,30 @@ void ImageGenerationPage::buildUi()
 
     // Sigil + glow: a fixed 240px container with a radial violet glow behind a 190px sigil.
     auto *sigilStack = new QWidget(canvasEmptyState_);
-    sigilStack->setFixedSize(240, 240);
-    auto *canvasEmptyGlow = new QLabel(sigilStack);
-    canvasEmptyGlow->setGeometry(0, 0, 240, 240);
-    canvasEmptyGlow->setAttribute(Qt::WA_TransparentForMouseEvents);
-    // Static glow (no arcanePulse animation -- intentionally skipped, see commit msg).
-    canvasEmptyGlow->setStyleSheet(QStringLiteral(
-        "background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,"
-        " stop:0 %1, stop:0.62 %2); border:0;")
-        .arg(rgbaToken(ThemeManager::Color::Accent, 0.25),
-             rgbaToken(ThemeManager::Color::Accent, 0.0)));
+    sigilStack->setFixedSize(48, 48);
     auto *canvasEmptySigil = new QLabel(sigilStack);
-    canvasEmptySigil->setGeometry(25, 25, 190, 190);
+    canvasEmptySigil->setGeometry(4, 4, 40, 40);
     canvasEmptySigil->setAttribute(Qt::WA_TransparentForMouseEvents);
     canvasEmptySigil->setAlignment(Qt::AlignCenter);
     {
         // Mockup's exact sigil path data; rgba() rewritten as hex + *-opacity for QtSvg's parser.
-        static const char *kSigilSvg =
+        const QString ink = ThemeManager::instance().css(ThemeManager::Color::TextLo);
+        const QString sigilSvg = QStringLiteral(
             "<svg viewBox='0 0 48 48' fill='none' xmlns='http://www.w3.org/2000/svg'>"
-            "<circle cx='24' cy='24' r='22' stroke='#96A0BA' stroke-opacity='0.18' stroke-width='0.6'/>"
-            "<circle cx='24' cy='24' r='18' stroke='#96A0BA' stroke-opacity='0.12' stroke-width='0.6'/>"
-            "<path d='M24 6 L31 14 L24 14 Z M24 6 L17 14 L24 14 Z M7 24 C13 16 35 16 41 24 C35 32 13 32 7 24 Z M24 42 L31 34 L24 34 Z M24 42 L17 34 L24 34 Z' stroke='#C3C9DC' stroke-opacity='0.5' stroke-width='1.1' stroke-linejoin='round'/>"
-            "<circle cx='24' cy='24' r='6' fill='#7C5CFF' fill-opacity='0.35'/>"
-            "<circle cx='24' cy='24' r='6' stroke='#34D6E6' stroke-opacity='0.4' stroke-width='0.8'/>"
-            "</svg>";
-        const QByteArray sigilBytes(kSigilSvg);
+            "<circle cx='24' cy='24' r='22' stroke='%1' stroke-opacity='0.35' stroke-width='0.6'/>"
+            "<circle cx='24' cy='24' r='18' stroke='%1' stroke-opacity='0.22' stroke-width='0.6'/>"
+            "<path d='M24 6 L31 14 L24 14 Z M24 6 L17 14 L24 14 Z M7 24 C13 16 35 16 41 24 C35 32 13 32 7 24 Z M24 42 L31 34 L24 34 Z M24 42 L17 34 L24 34 Z' stroke='%1' stroke-opacity='0.8' stroke-width='1.1' stroke-linejoin='round'/>"
+            "<circle cx='24' cy='24' r='6' fill='%1' fill-opacity='0.22'/>"
+            "<circle cx='24' cy='24' r='6' stroke='%1' stroke-opacity='0.45' stroke-width='0.8'/>"
+            "</svg>").replace(QLatin1String("%1"), ink);
+        const QByteArray sigilBytes = sigilSvg.toUtf8();
         QSvgRenderer sigilRenderer(sigilBytes);
         const qreal dpr = 2.0;
-        QPixmap sigilPm(static_cast<int>(190 * dpr), static_cast<int>(190 * dpr));
+        QPixmap sigilPm(static_cast<int>(40 * dpr), static_cast<int>(40 * dpr));
         sigilPm.fill(Qt::transparent);
         QPainter sigilPainter(&sigilPm);
         sigilPainter.setRenderHint(QPainter::Antialiasing, true);
-        sigilPainter.setOpacity(0.55); // mockup sigil opacity
+        sigilPainter.setOpacity(0.35);
         sigilRenderer.render(&sigilPainter);
         sigilPainter.end();
         sigilPm.setDevicePixelRatio(dpr);
@@ -881,53 +892,24 @@ void ImageGenerationPage::buildUi()
     }
     emptyLayout->addWidget(sigilStack, 0, Qt::AlignHCenter);
 
-    canvasEmptyTitle_ = new QLabel(QStringLiteral("Ready when you are."), canvasEmptyState_);
+    canvasEmptyTitle_ = new QLabel(QStringLiteral("Write the picture."), canvasEmptyState_);
     canvasEmptyTitle_->setObjectName(QStringLiteral("CanvasEmptyTitle"));
     canvasEmptyTitle_->setAlignment(Qt::AlignHCenter);
+    canvasEmptyTitle_->setWordWrap(true);
+    canvasEmptyTitle_->setMinimumWidth(280);
+    canvasEmptyTitle_->setMinimumHeight(32);
+    canvasEmptyTitle_->setMaximumWidth(360);
+    canvasEmptyTitle_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     canvasEmptyTitle_->setStyleSheet(QStringLiteral(
-        "color:%1;font-size:15px;font-weight:600;letter-spacing:0.2px;background:transparent;border:0;")
-        .arg(ThemeManager::instance().css(ThemeManager::Color::TextHi)));
-    canvasEmptySub_ = new QLabel(
-        QStringLiteral("Write a prompt, lock a model, then Generate — results land here."),
-        canvasEmptyState_);
+        "color:%1;%2background:transparent;border:0;")
+        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
+             ThemeManager::instance().fontCss(ThemeManager::Type::Body)));
+    canvasEmptySub_ = new QLabel(canvasEmptyState_);
     canvasEmptySub_->setObjectName(QStringLiteral("CanvasEmptySub"));
-    canvasEmptySub_->setAlignment(Qt::AlignHCenter);
-    canvasEmptySub_->setWordWrap(true);
-    canvasEmptySub_->setMaximumWidth(360);
-    canvasEmptySub_->setStyleSheet(QStringLiteral(
-        "color:%1;font-size:12px;background:transparent;border:0;")
-        .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid)));
-    emptyLayout->addSpacing(14);
+    canvasEmptySub_->setVisible(false);
+    emptyLayout->addSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Hairline));
     emptyLayout->addWidget(canvasEmptyTitle_, 0, Qt::AlignHCenter);
-    emptyLayout->addSpacing(5);
-    emptyLayout->addWidget(canvasEmptySub_, 0, Qt::AlignHCenter);
     emptyLayout->addStretch(1);
-
-    // Metric chips, centred with STRETCHES: AlignHCenter gives an item its hint, not the space there
-    // is -- it laid this row out at 120px inside a 1390px state, with the four chips at 24px each.
-    auto *chipsRow = new QWidget(canvasEmptyState_);
-    auto *chipsLayout = new QHBoxLayout(chipsRow);
-    chipsLayout->setContentsMargins(0, 0, 0, ThemeManager::instance().spacing(ThemeManager::Spacing::Snug));
-    chipsLayout->setSpacing(ThemeManager::instance().spacing(ThemeManager::Spacing::Tight));
-    chipsLayout->setAlignment(Qt::AlignHCenter);
-    const auto makeChip = [chipsRow, chipsLayout]() {
-        auto *chip = new QLabel(chipsRow);
-        chip->setObjectName(QStringLiteral("CanvasMetricChip"));
-        chip->setStyleSheet(QStringLiteral(
-            "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
-            "border:1px solid %2;border-radius:%4;padding:3px 8px;background:%3;")
-            .arg(ThemeManager::instance().css(ThemeManager::Color::TextMid),
-                 ThemeManager::instance().css(ThemeManager::Color::Border),
-                 ThemeManager::instance().css(ThemeManager::Color::Surface0),
-                 QString::number(ThemeManager::instance().radiusControl()) + QStringLiteral("px")));
-        chipsLayout->addWidget(chip);
-        return chip;
-    };
-    canvasEmptyChipDim_ = makeChip();
-    canvasEmptyChipSteps_ = makeChip();
-    canvasEmptyChipCfg_ = makeChip();
-    canvasEmptyChipSeed_ = makeChip();
-    emptyLayout->addWidget(chipsRow);
 
     previewImageInnerStack_ = new QStackedWidget(previewImagePage_);
     previewImageInnerStack_->setObjectName(QStringLiteral("PreviewImageInnerStack"));
@@ -1064,12 +1046,12 @@ void ImageGenerationPage::buildUi()
     // Glyph prefixes stand in for the mockup's Tabler icons (unicode stand-ins; a real
     // SVG icon set is a follow-up). Generate's violet-hero look comes from Role::Primary, said here
     // at the creation site rather than read off the object name, so it is NOT restyled inline.
-    generateButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("✦  Generate"), QStringLiteral("PrimaryActionButton"), canvasCard_);
-    queueButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("≡  Queue"), QStringLiteral("SecondaryActionButton"), canvasCard_);
-    prepLatestForI2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Prep for I2I"), QStringLiteral("SecondaryActionButton"), canvasCard_);
-    useLatestT2IButton_ = kit::button(svstyle::Role::Secondary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard_);
-    savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("❖  Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard_);
-    clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("⟳  Reset"), QStringLiteral("TertiaryActionButton"), canvasCard_);
+    generateButton_ = kit::button(svstyle::Role::Primary, QStringLiteral("Generate"), QStringLiteral("PrimaryActionButton"), canvasCard_);
+    queueButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Queue"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    prepLatestForI2IButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Prep for I2I"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    useLatestT2IButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Use Last Image"), QStringLiteral("SecondaryActionButton"), canvasCard_);
+    savePresetButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Save Snapshot"), QStringLiteral("TertiaryActionButton"), canvasCard_);
+    clearButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Reset"), QStringLiteral("TertiaryActionButton"), canvasCard_);
     unloadButton_ = kit::button(svstyle::Role::Tertiary, QStringLiteral("Unload models"), QStringLiteral("TertiaryActionButton"), canvasCard_);
     unloadButton_->setToolTip(QStringLiteral("Unload models from VRAM. Does not restart Comfy."));
 
@@ -1206,7 +1188,8 @@ void ImageGenerationPage::buildUi()
     previewCentreColumn->addStretch(0);
     previewCentreColumn->addLayout(previewCentreRow, 1);
     previewCentreColumn->addStretch(0);
-    canvasLayout->addWidget(previewArea_, 1);
+    canvasLayout->addWidget(previewWell, 1);
+    wellLayout->addWidget(previewArea_, 1);
     canvasLayout->addWidget(sessionStrip_, 0);
     canvasLayout->addWidget(actionRow_, 0);
     centerLayout->addWidget(canvasCard_, 1);
@@ -1865,7 +1848,7 @@ void ImageGenerationPage::buildUi()
         aiReadinessDot_->setFixedSize(10, 10);
         stripLayout->addWidget(aiReadinessDot_, 0, Qt::AlignVCenter);
 
-        aiReadinessText_ = new QLabel(QStringLiteral("Ready to generate"), aiReadinessStrip_);
+        aiReadinessText_ = new QLabel(aiReadinessStrip_);
         aiReadinessText_->setObjectName(QStringLiteral("AiReadinessText"));
         stripLayout->addWidget(aiReadinessText_, 0, Qt::AlignVCenter);
 

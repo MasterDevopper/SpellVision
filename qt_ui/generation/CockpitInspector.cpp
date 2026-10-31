@@ -160,11 +160,20 @@ CockpitInspector::CockpitInspector(QWidget *parent)
     spellvision::kit::setSurface(readiness, spellvision::style::Surface::Inset);
     auto *readinessLayout = new QHBoxLayout(readiness);
     readinessLayout->setContentsMargins(12, 8, 12, 8);
-    readinessText_ = new QLabel(QStringLiteral("Readiness — select a checkpoint to generate."), readiness);
+    readinessText_ = new QLabel(readiness);
     readinessText_->setObjectName(QStringLiteral("InspectorReadinessText"));
     readinessText_->setWordWrap(true);
     readinessLayout->addWidget(readinessText_, 1);
     col->addWidget(readiness, 0);
+    readiness->setVisible(false);
+}
+
+void CockpitInspector::setReadinessSentence(const QString &text)
+{
+    if (readinessText_)
+        readinessText_->setText(text);
+    if (readinessStrip_ && !collapsed_)
+        readinessStrip_->setVisible(!text.trimmed().isEmpty());
 }
 
 QVBoxLayout *CockpitInspector::tabContentLayout(Tab tab) const
@@ -325,6 +334,6 @@ void CockpitInspector::applyExpandedForm()
     if (stack_)
         stack_->setVisible(true);
     if (readinessStrip_)
-        readinessStrip_->setVisible(true);
+        readinessStrip_->setVisible(readinessText_ && !readinessText_->text().trimmed().isEmpty());
     applyWidthBudget();
 }

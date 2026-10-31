@@ -212,10 +212,6 @@ const KnownStripOverflow kKnownStripOverflows[] = {
     // Ready's rung back to 48 made "Ready" spill its box by 2 px and this guard stayed silent,
     // because "IMPORTING" had already bought that label a pardon. Only the criterion-4 scan caught
     // it. The pair is the unit that was actually measured, so it is the unit that is excused.
-    {"BottomPageLabel", "Character Studio",        "85 px in an 82 px box"},
-    {"BottomPageLabel", "Concept Reference",       "96 px in an 82 px box"},
-    {"BottomPageLabel", "Runtime / Comfy Manager", "132 px in an 82 px box; 132 in 104 even at 1600"},
-    {"BottomReadyLabel", "IMPORTING",              "63 px in a 34 px box, written by the import path"},
     {"BottomStateLabel", "Workflow import running", "125 px in a 56 px box, same path"},
 };
 

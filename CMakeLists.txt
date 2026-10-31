@@ -73,6 +73,7 @@ include(cmake/SpellVisionQtDeploy.cmake)
 qt_add_library(SpellVisionCore STATIC
     qt_ui/MainWindow.h
     qt_ui/MainWindow.cpp
+    qt_ui/StartupFilm.cpp
 
     qt_ui/HomePage.h
     qt_ui/HomePage.cpp
@@ -424,6 +425,10 @@ add_custom_command(TARGET SpellVision POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${SPELLVISION_RAIL_ICONS}
         "$<TARGET_FILE_DIR:SpellVision>/icons"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpellVision>/brand"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/qt_ui/brand/spellvision_open.mp4"
+        "$<TARGET_FILE_DIR:SpellVision>/brand/spellvision_open.mp4"
     COMMENT "Copy brand + rail icons next to SpellVision.exe"
 )
 

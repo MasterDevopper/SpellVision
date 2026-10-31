@@ -163,6 +163,24 @@ def test_the_live_root_is_not_redirected_by_its_own_prefix() -> None:
 
 # --- the shape is the same on both sides ------------------------------------------------------------
 
+def test_an_install_tree_is_used_when_the_dev_trees_are_absent(monkeypatch, tmp_path) -> None:
+    """The MSI puts the proven Comfy tree at <install>/engines/ComfyUI. That path wins only
+    when the live install and both rollback trees are absent -- a stranger machine."""
+    monkeypatch.setattr(comfy_root, "LIVE_COMFY", tmp_path / "no-live")
+    monkeypatch.setattr(comfy_root, "SUPERSEDED_COMFY", (tmp_path / "no-roll-a", tmp_path / "no-roll-b"))
+    engines = tmp_path / "engines" / "ComfyUI"
+    engines.mkdir(parents=True)
+    (engines / "main.py").write_text("# bundled\n", encoding="utf-8")
+    assert comfy_root.comfy_root(project_root=tmp_path) == engines.resolve()
+
+
+def test_the_qt_resolver_names_the_install_layout() -> None:
+    source = (Path(__file__).resolve().parents[1] / "qt_ui" / "shell" / "RuntimeProfile.cpp").read_text(
+        encoding="utf-8", errors="replace")
+    assert 'QStringLiteral("engines/ComfyUI")' in source
+    assert 'filePath(QStringLiteral("runtime/comfy/ComfyUI"))' not in source
+
+
 def test_the_qt_resolver_knows_the_same_names() -> None:
     """The two halves are only useful if they agree. RuntimeProfile.cpp declares the same list in
     the same order; a name added to one and not the other puts the halves back out of step, which

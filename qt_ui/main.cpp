@@ -23,6 +23,7 @@
 #include <QStringList>
 #include <QTextStream>
 #include "MainWindow.h"
+#include "StartupFilm.h"
 #include "ImageGenerationPage.h"
 #include "chain/ChainSelfTest.h"
 #include "assets/AssetCatalogScanner.h"
@@ -337,6 +338,11 @@ int main(int argc, char *argv[])
     if (QCoreApplication::arguments().contains(QStringLiteral("--video-render-selftest")))
         return runVideoRenderSelfTest(QCoreApplication::arguments());
 
+    StartupFilm film;
+    const bool opening = film.start();
+    if (opening)
+        film.waitUntilDone(4000);
+
     MainWindow window;
     QFile logFile(QDir::currentPath() + QStringLiteral("/build/ui_startup_trace.log"));
     logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
@@ -344,6 +350,7 @@ int main(int argc, char *argv[])
     log << "main: before show\n";
     log.flush();
     window.show();
+    film.finish();
     log << "main: after show visible=" << window.isVisible()
         << " winId=" << window.winId() << " geometry=" << window.geometry().x()
         << "," << window.geometry().y() << " " << window.geometry().width()

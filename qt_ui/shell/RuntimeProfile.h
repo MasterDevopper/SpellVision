@@ -54,6 +54,8 @@ bool probeWorkerProtocol(const QString &host, quint16 port, int timeoutMs = 350)
 bool probeTcpPort(const QString &host, quint16 port, int timeoutMs = 350);
 bool probeComfyProtocol(const QString &host, quint16 port, int timeoutMs = 350);
 ComfyQueueState probeComfyQueueState(const QString &host, quint16 port, int timeoutMs = 500);
+// Precedence matches python/comfy_root.py: env, then the saved path, then the live install,
+// then rollback, then <projectRoot>/engines/ComfyUI when that tree's main.py is present.
 QString resolvePreferredComfyRoot(const QString &configured);
 // The environment value overriding the saved ComfyUI root, and (optionally) which name carried it.
 // Empty when nothing in the environment overrides it.

@@ -74,12 +74,7 @@ QString ModelStackState::summaryText(const QVector<LoraStackEntry> &stack)
         return QStringLiteral("No LoRAs in stack");
 
     const int enabledCount = enabledLoraCount(stack);
-    const LoraStackEntry &first = stack.first();
-    return QStringLiteral("%1 in stack • %2 enabled • first: %3 @ %4")
-        .arg(stack.size())
-        .arg(enabledCount)
-        .arg(first.display)
-        .arg(QString::number(first.weight, 'f', 2));
+    return QStringLiteral("%1 in stack · %2 enabled").arg(stack.size()).arg(enabledCount);
 }
 
 } // namespace spellvision::assets

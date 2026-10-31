@@ -909,20 +909,25 @@ void ImageGenerationPage::applyThemeStyling()
             .arg(tm.css(ThemeManager::Color::TextHi), tm.fontCss(ThemeManager::Type::Caption)));
 
     if (inputChipHint_)
-        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;font-size:9px;background:transparent;border:0;")
-            .arg(tm.css(ThemeManager::Color::TextMid)));
+        inputChipHint_->setStyleSheet(QStringLiteral("color:%1;%2background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextMid), tm.fontCss(ThemeManager::Type::Label)));
     if (inputChipVerb_)
         inputChipVerb_->setStyleSheet(
-            QStringLiteral("#PromptInputVerb{min-height:14px;max-height:14px;padding:0;margin:0;border:0;"
-                           "border-radius:%1;background:rgba(12,10,18,0.72);color:#f4f0ff;font-size:9px;}")
-                .arg(QString::number(tm.radiusControl()) + QStringLiteral("px")));
+            QStringLiteral("#PromptInputVerb{min-height:16px;padding:0 2px;margin:0;border:0;"
+                           "border-radius:@r@;background:@wash@;color:@ink@;@label@}")
+                .replace(QLatin1String("@r@"), QString::number(tm.radiusControl()) + QStringLiteral("px"))
+                .replace(QLatin1String("@wash@"), rgbaToken(ThemeManager::Color::Surface0, 0.72))
+                .replace(QLatin1String("@ink@"), tm.css(ThemeManager::Color::TextHi))
+                .replace(QLatin1String("@label@"), tm.fontCss(ThemeManager::Type::Label)));
+    if (auto *neg = findChild<QLabel *>(QStringLiteral("NegativeEyebrow")))
+        neg->setStyleSheet(QStringLiteral("color:%1;%2letter-spacing:0.08em;background:transparent;border:0;")
+                               .arg(tm.css(ThemeManager::Color::TextLo), tm.fontCss(ThemeManager::Type::Caption)));
     if (canvasEmptyTitle_)
         canvasEmptyTitle_->setStyleSheet(QStringLiteral(
-            "color:%1;font-size:14px;letter-spacing:0.3px;background:transparent;border:0;")
-            .arg(tm.css(ThemeManager::Color::TextMid)));
+            "color:%1;%2background:transparent;border:0;")
+            .arg(tm.css(ThemeManager::Color::TextMid), tm.fontCss(ThemeManager::Type::Body)));
     if (canvasEmptySub_)
-        canvasEmptySub_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;background:transparent;border:0;")
-            .arg(tm.css(ThemeManager::Color::TextLo)));
+        canvasEmptySub_->setVisible(false);
     const QString chipStyle = QStringLiteral(
         "font-family:'IBM Plex Mono',monospace;font-size:10px;color:%1;"
         "border:1px solid %2;border-radius:%3;padding:3px 8px;background:transparent;")
@@ -1414,7 +1419,7 @@ void ImageGenerationPage::updateAssetIntelligenceUi()
             spellvision::widgets::repolishWidget(aiReadinessDot_);
         }
         if (aiReadinessText_)
-            aiReadinessText_->setText(ready ? QStringLiteral("Ready to generate") : blockReason);
+            aiReadinessText_->clear();
 
         if (aiReadinessSub_)
         {
@@ -1951,11 +1956,10 @@ void ImageGenerationPage::applyActionReadinessStyle(QPushButton *button, bool en
     if (button->property("readinessBlocked").toBool() != blocked)
         button->setProperty("readinessBlocked", blocked);
 
-    // Keep action buttons clickable when a request is blocked so the click can
-    // surface the exact readiness reason instead of feeling dead. The click
-    // handler still prevents submission while blocked. Busy state remains a
-    // true hard-disable because the page is already handing work to the worker.
-    button->setEnabled(!busy_);
+    // Clickable-when-blocked was so a click could surface the reason. The footer sentence
+    // is that reason now, so a blocked Generate is actually disabled. Busy is already a
+    // block reason, so `enabled` covers both.
+    button->setEnabled(enabled);
     button->setToolTip(tooltip);
     repolishWidget(button);
 }
@@ -1972,32 +1976,13 @@ void ImageGenerationPage::updatePrimaryActionAvailability()
                               enabled ? QStringLiteral("Add this job to the queue.")
                                       : blockReason);
 
-    // Keep the inspector footer's readiness strip in lockstep with Asset Intelligence + action row.
-    // It used to stay on the construction-time default ("select a checkpoint") even when ready.
-    if (cockpitInspector_ && cockpitInspector_->readinessLabel()) {
-        cockpitInspector_->readinessLabel()->setText(
-            enabled
-                ? ((!isVideoMode() && !isImageInputMode() && inputImageEdit_
-                    && !inputImageEdit_->text().trimmed().isEmpty())
-                       ? QStringLiteral("This will Edit (I2I), not reference.")
-                       : ((isVideoMode() && !isImageInputMode() && inputImageEdit_
-                           && !inputImageEdit_->text().trimmed().isEmpty())
-                              ? QStringLiteral("T2V ignores the still — use I2V for a keyframe.")
-                              : QStringLiteral("Ready to generate.")))
-                : (blockReason.trimmed().isEmpty()
-                       ? QStringLiteral("Not ready.")
-                       : QStringLiteral("Readiness — %1").arg(blockReason)));
-    }
+    // A ready Generate is the sentence. A blocked one says why in the gap immediately
+    // left of the button. The inspector footer is not a place for either.
+    if (cockpitInspector_)
+        cockpitInspector_->setReadinessSentence(QString());
 
-    // Don't clobber an active error banner with the normal readiness hint — it stays
-    // until clearGenerationError() (next submit / next completed output).
     if (readinessHintLabel_ && !errorBannerActive_)
     {
-        // setHint, not setText. This is the site the responsive matrix measured: the pill only
-        // elided what arrived through setMessage(), so the most-shown string it carries was hard
-        // cut at half-screen width -- 183 px of "Choose an output folder to generate." in a 66 px
-        // box on I2V. setHint installs the plain tooltip too, so the full string stays reachable on
-        // hover by construction rather than by each caller remembering the second line.
         readinessHintLabel_->setHint(enabled ? QString() : blockReason);
         readinessHintLabel_->setVisible(!enabled && !blockReason.trimmed().isEmpty());
     }

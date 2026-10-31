@@ -38,6 +38,10 @@ public:
     QVBoxLayout *tabContentLayout(Tab tab) const;
     QLabel *readinessLabel() const { return readinessText_; }
 
+    // Empty hides the strip. A ready state is not a sentence. applyExpandedForm does not
+    // bring an empty strip back.
+    void setReadinessSentence(const QString &text);
+
     // Phase 7: show/hide a whole tab (its tab-bar button). Hiding the currently-selected tab moves
     // selection to the first visible tab so the body never goes blank.
     void setTabVisible(Tab tab, bool visible);

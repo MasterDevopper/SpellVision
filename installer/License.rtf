@@ -1,0 +1,28 @@
+{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fswiss Tahoma;}}
+\viewkind4\uc1\pard\f0\fs18
+\b What you are installing\b0\par
+\par
+SpellVision, the worker that runs it, and the ComfyUI 0.34.0 engine this release was proven against. Node packs that engine needs are included. Model files are not.\par
+\par
+\b ComfyUI is pinned to this build\b0\par
+\par
+This installer does not fetch a newer ComfyUI, and it will not heal a ComfyUI you replace by hand. The graphs SpellVision builds assume the node names in this pinned 0.34.0 tree. A later release is planned to adopt a newer engine on its own. Until then, updating Comfy from inside Comfy, or swapping the folder, is unsupported.\par
+\par
+\b Models are a separate decision\b0\par
+\par
+Checkpoints, VAEs, text encoders, CLIP-vision models, and LoRAs are not in this box. First launch asks you to choose a model library. Nothing is downloaded until you ask.\par
+\par
+About 30 GB of disk is required after unpack. The figure on the folder page includes the engines and the space the unpack needs. It does not include your models.\par
+\par
+\b Licences\b0\par
+\par
+SpellVision is Apache-2.0. The text ships as licenses\SpellVision-Apache-2.0.txt.\par
+\par
+Qt 6.10.2 is LGPL-3.0, linked dynamically so you can replace the Qt DLLs beside SpellVision.exe. The licence text ships as licenses\Qt-LGPL-GPL.txt. Corresponding source is at https://download.qt.io/archive/qt/6.10/6.10.2/single/.\par
+\par
+ComfyUI 0.34.0 is GPL-3.0. SpellVision does not link it. It talks to it over HTTP on this machine, with Comfy's own Python. The licence text ships as licenses\ComfyUI-GPL-3.0.txt.\par
+\par
+The aggregate notice is NOTICE, next to SpellVision.exe.\par
+\par
+Accepting continues the install of that pinned engine, without models. Cancel leaves the machine unchanged.\par
+}

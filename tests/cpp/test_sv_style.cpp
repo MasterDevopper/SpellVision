@@ -517,6 +517,83 @@ private slots:
                                 .arg(platePair, 0, 'f', 4)));
     }
 
+    // Slice 1. RefinedGlass glasses every surface. The cockpit sets svCockpitMatte on the page
+    // so a panel descendant paints matte anyway, and a Glass descendant stays the well.
+    void cockpit_matte_overrides_refined_glass()
+    {
+        auto &tm = ThemeManager::instance();
+        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        SvStyle::refreshAll();
+
+        QWidget page;
+        page.setProperty("svCockpitMatte", true);
+
+        QFrame panel;
+        panel.setParent(&page);
+        panel.setFrameShape(QFrame::StyledPanel);
+        panel.setProperty("svSurface", "panel");
+
+        QFrame well;
+        well.setParent(&page);
+        well.setFrameShape(QFrame::StyledPanel);
+        well.setProperty("svSurface", "glass");
+
+        QFrame freePanel;
+        freePanel.setFrameShape(QFrame::StyledPanel);
+        freePanel.setProperty("svSurface", "panel");
+
+        const QImage cockpitPanel = grab(panel, 160, 80);
+        const QImage cockpitWell = grab(well, 160, 80);
+        const QImage refinedPanel = grab(freePanel, 160, 80);
+
+        const auto moved = [](const QImage &a, const QImage &b) {
+            int n = 0;
+            for (int y = 0; y < a.height(); ++y)
+                for (int x = 0; x < a.width(); ++x)
+                {
+                    const QColor p = a.pixelColor(x, y);
+                    const QColor q = b.pixelColor(x, y);
+                    if (qAbs(p.red() - q.red()) > 8 || qAbs(p.green() - q.green()) > 8
+                        || qAbs(p.blue() - q.blue()) > 8)
+                        ++n;
+                }
+            return double(n) / double(a.width() * a.height());
+        };
+
+        const double againstRefined = moved(cockpitPanel, refinedPanel);
+        const QColor wellTop = cockpitWell.pixelColor(80, 1);
+        const QColor panelTop = cockpitPanel.pixelColor(80, 1);
+        const bool highlight = qAbs(wellTop.red() - panelTop.red()) > 8
+                               || qAbs(wellTop.green() - panelTop.green()) > 8
+                               || qAbs(wellTop.blue() - panelTop.blue()) > 8;
+        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        SvStyle::refreshAll();
+        QVERIFY2(againstRefined >= 0.10,
+                 qPrintable(QStringLiteral("cockpit panel still glasses under RefinedGlass: %1")
+                                .arg(againstRefined, 0, 'f', 4)));
+        // Fills land within 8 levels after composite, so an area percent does not separate the well
+        // from the matte panel. The glass path is the top highlight the matte path does not draw.
+        QVERIFY2(highlight, "cockpit well has no glass highlight against the matte panel");
+
+        // MatteInstrument zeroes GlassHighlight and solids GlassFill. The well must still separate.
+        tm.setStyle(ThemeManager::Style::MatteInstrument);
+        SvStyle::refreshAll();
+        QFrame matteWell;
+        matteWell.setParent(&page);
+        matteWell.setFrameShape(QFrame::StyledPanel);
+        matteWell.setProperty("svSurface", "glass");
+        QFrame mattePanel;
+        mattePanel.setParent(&page);
+        mattePanel.setFrameShape(QFrame::StyledPanel);
+        mattePanel.setProperty("svSurface", "panel");
+        const double matteSplit = moved(grab(matteWell, 160, 80), grab(mattePanel, 160, 80));
+        tm.setStyle(ThemeManager::Style::RefinedGlass);
+        SvStyle::refreshAll();
+        QVERIFY2(matteSplit >= 0.10,
+                 qPrintable(QStringLiteral("cockpit well collapses under MatteInstrument: %1")
+                                .arg(matteSplit, 0, 'f', 4)));
+    }
+
     // A DISABLED button looked exactly like a live one, which is a regression the wave introduced:
     // the platform style greyed these before SvStyle took the paint over. buttonPaint read
     // State_Enabled for the label colour and the hover lift and nothing else, so a disabled Primary

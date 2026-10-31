@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hybrid payload MSI. Engines in the box, models on demand.
+  The venvs and Comfy tree are zip parts because an MSI cannot hold more than
+  65536 components or a file of 2GB. extract_engines.ps1 unpacks them after copy.
+  Build: wix build installer/SpellVision.wxs -b Payload=build/installer/msi-root -arch x64 -dcl none -o build/installer/SpellVision.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="SpellVision"
+           Manufacturer="DarkDuck"
+           Version="1.0.0.0"
+           UpgradeCode="8f3c2a1e-6b47-4d91-9e05-1c7a4b8d2f60"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+    <SummaryInformation Description="SpellVision. Engines in the box, models on demand. ComfyUI 0.34.0 is pinned to this build." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of SpellVision is already installed." />
+    <Launch Condition="VersionNT64 &gt;= 603" Message="SpellVision requires 64-bit Windows 10 or later." />
+    <Icon Id="SpellVision.ico" SourceFile="qt_ui\icons\SpellVision.ico" />
+    <Property Id="ARPPRODUCTICON" Value="SpellVision.ico" />
+    <Property Id="ARPCOMMENTS" Value="ComfyUI 0.34.0 is pinned to this SpellVision build. Model files are not included." />
+    <WixVariable Id="WixUILicenseRtf" Value="installer\License.rtf" />
+    <WixVariable Id="WixUIDialogBmp" Value="installer\chrome\dialog.png" />
+    <WixVariable Id="WixUIBannerBmp" Value="installer\chrome\banner.png" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch SpellVision" />
+    <SetProperty Id="WixShellExecTarget" Value="[INSTALLFOLDER]SpellVision.exe" After="CostFinalize" Sequence="ui" />
+    <MediaTemplate EmbedCab="no"
+                   CompressionLevel="low"
+                   CabinetTemplate="SpellVision{0}.cab"
+                   MaximumUncompressedMediaSize="2000" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="SpellVision" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="SpellVisionMenu" Name="SpellVision">
+        <Component Id="StartMenuShortcut" Guid="c4e1a8b2-9d37-4f6a-8b15-2e7d0a9c4f11">
+          <Shortcut Id="SpellVisionStart"
+                    Name="SpellVision"
+                    Description="SpellVision"
+                    Target="[INSTALLFOLDER]SpellVision.exe"
+                    WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveSpellVisionMenu" On="uninstall" />
+          <RegistryValue Root="HKLM"
+                         Key="Software\DarkDuck\SpellVision"
+                         Name="Installed"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="Payload" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Payload)\**" />
+      <Component Id="UnpackedReserve" Guid="b7e2c4a1-5d80-4f33-9a16-6c8d0e1f2a44">
+        <!-- ReserveCost is a signed 32-bit count of bytes, so 18 GB is nine entries. -->
+        <ReserveCost Id="UnpackedEngines1" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines2" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines3" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines4" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines5" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines6" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines7" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines8" RunLocal="2000000000" RunFromSource="0" />
+        <ReserveCost Id="UnpackedEngines9" RunLocal="2000000000" RunFromSource="0" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Engines" Title="SpellVision" Level="1">
+      <ComponentGroupRef Id="Payload" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <SetProperty Id="ExtractEngines"
+                 Before="ExtractEngines"
+                 Sequence="execute"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]extract_engines.ps1&quot;" />
+    <SetProperty Id="RemoveUnpackedEngines"
+                 Before="RemoveUnpackedEngines"
+                 Sequence="execute"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]remove_unpacked.ps1&quot;" />
+    <SetProperty Id="RollbackUnpackedEngines"
+                 Before="RollbackUnpackedEngines"
+                 Sequence="execute"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]remove_unpacked.ps1&quot;" />
+    <CustomAction Id="ExtractEngines"
+                  BinaryRef="Wix4UtilCA_X64"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <CustomAction Id="RemoveUnpackedEngines"
+                  BinaryRef="Wix4UtilCA_X64"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <CustomAction Id="RollbackUnpackedEngines"
+                  BinaryRef="Wix4UtilCA_X64"
+                  DllEntry="WixQuietExec"
+                  Execute="rollback"
+                  Impersonate="no"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RollbackUnpackedEngines" Before="ExtractEngines" Condition="NOT REMOVE" />
+      <Custom Action="ExtractEngines" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RemoveUnpackedEngines" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+    <UI>
+      <ProgressText Action="ExtractEngines" Message="Unpacking the pinned ComfyUI 0.34.0 engine and the worker. This takes several minutes." />
+    </UI>
+  </Package>
+</Wix>

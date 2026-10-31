@@ -28,7 +28,9 @@ Highest to lowest, first non-empty wins:
 5. the live install, ``C:/sv_comfynext_v034/ComfyUI``, if it is there;
 6. the most recent superseded install, ``C:/sv_comfynext/ComfyUI``, if it is there -- **with a
    warning**, because per CLAUDE.md 9.2 a superseded tree is kept for rollback and is not live;
-7. ``<projectRoot>/runtime/comfy/ComfyUI``.
+7. ``<projectRoot>/engines/ComfyUI`` when ``main.py`` is there -- the hybrid installer layout,
+   used only when the live and rollback trees are absent;
+8. ``<projectRoot>/runtime/comfy/ComfyUI``.
 
 Every historical name is honoured, so nothing that worked stops working -- they feed one chain now
 instead of four. New configuration should use ``SPELLVISION_COMFY``, which is the name the shell
@@ -152,6 +154,12 @@ def comfy_root(
         return superseded.resolve()
 
     base = Path(project_root) if project_root else Path(__file__).resolve().parent.parent
+    # The MSI lays the proven Comfy tree here, beside the exe. It is not a substitute for the
+    # live install on a machine that has one -- those returns already happened -- and it is not
+    # the old ``runtime/comfy/ComfyUI`` drift, which nothing populates.
+    bundled = base / "engines" / "ComfyUI"
+    if (bundled / "main.py").is_file():
+        return bundled.resolve()
     return (base / "runtime" / "comfy" / "ComfyUI").resolve()
 
 

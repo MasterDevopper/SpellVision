@@ -1,5 +1,6 @@
 #include "RuntimeProfile.h"
 #include "ModelsLibraryPaths.h"
+#include "shell/ProjectRoot.h"
 
 #include <QDir>
 #include <QHash>
@@ -429,6 +430,13 @@ QString resolvePreferredComfyRoot(const QString &configured)
         return normalized(rollback);
     }
 
+    // Hybrid installer layout. Reached only when the live tree and the rollback trees are absent,
+    // which is a machine that did not grow the dev cutover paths. The sentinel walk is the same
+    // one that finds python/worker_client.py, so the bundled engines sit next to the exe.
+    const QString bundled = QDir(resolveProjectRoot()).filePath(QStringLiteral("engines/ComfyUI"));
+    if (QFileInfo(QDir(bundled).filePath(QStringLiteral("main.py"))).isFile())
+        return normalized(bundled);
+
     return {};
 }
 
@@ -539,10 +547,62 @@ bool RuntimeProfile::comfyEndpointIsLocal() const
     return QHostAddress(host).isLoopback();
 }
 
+// A copied venv's pyvenv.cfg names the machine it was created on. The installer ships that
+// interpreter beside the exe as python-runtime/. Rewrite home only when that copy is present,
+// so a dev tree (no python-runtime/) is left alone and an installed tree follows the folder
+// the user chose.
+void retargetBundledVenvs(const QString &projectRoot)
+{
+    const QString runtime = QDir(projectRoot).filePath(QStringLiteral("python-runtime"));
+    const QString python = QDir(runtime).filePath(QStringLiteral("python.exe"));
+    if (!QFileInfo(python).isFile())
+        return;
+    const QString home = QDir::toNativeSeparators(QDir(runtime).absolutePath());
+    const QStringList cfgs{
+        QDir(projectRoot).filePath(QStringLiteral(".venv/pyvenv.cfg")),
+        QDir(projectRoot).filePath(QStringLiteral("engines/.venv/pyvenv.cfg")),
+    };
+    for (const QString &path : cfgs)
+    {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const QString text = QString::fromUtf8(file.readAll());
+        file.close();
+        QStringList lines = text.split(QLatin1Char('\n'));
+        bool changed = false;
+        for (QString &line : lines)
+        {
+            const QString trimmed = line.trimmed();
+            if (!trimmed.startsWith(QLatin1String("home")) && !trimmed.startsWith(QLatin1String("executable")))
+                continue;
+            const QString replacement = trimmed.startsWith(QLatin1String("home"))
+                ? QStringLiteral("home = ") + home
+                : QStringLiteral("executable = ") + QDir::toNativeSeparators(python);
+            if (line.trimmed() == replacement)
+                continue;
+            line = replacement;
+            changed = true;
+        }
+        if (!changed)
+            continue;
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        {
+            qWarning("Could not retarget %s. The install extract is supposed to do this "
+                     "before the app runs. A Program Files copy that still names another "
+                     "machine's Python will not start the worker.",
+                     qPrintable(path));
+            continue;
+        }
+        file.write(lines.join(QLatin1Char('\n')).toUtf8());
+    }
+}
+
 RuntimeProfile RuntimeProfile::load(const QString &projectRoot)
 {
     RuntimeProfile profile;
     profile.projectRoot = normalized(projectRoot);
+    retargetBundledVenvs(profile.projectRoot);
     profile.workerScript = QDir(profile.projectRoot).filePath(QStringLiteral("python/worker_service.py"));
 
     const QString virtualEnv = QString::fromLocal8Bit(qgetenv("VIRTUAL_ENV")).trimmed();

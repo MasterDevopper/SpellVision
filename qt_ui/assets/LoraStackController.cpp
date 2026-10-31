@@ -134,7 +134,7 @@ void LoraStackController::rebuild()
             auto *weightSpin = new QDoubleSpinBox(row);
             weightSpin->setDecimals(2);
             weightSpin->setSingleStep(0.05);
-            weightSpin->setRange(0.0, 2.0);
+            weightSpin->setRange(0.0, 5.0);
             weightSpin->setValue(entry.weight);
             weightSpin->setButtonSymbols(QAbstractSpinBox::PlusMinus);
             weightSpin->setKeyboardTracking(false);

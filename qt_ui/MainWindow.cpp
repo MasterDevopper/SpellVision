@@ -2437,8 +2437,10 @@ void MainWindow::reflowBottomTelemetryWidths(int windowWidth)
     //
     // The `tight` rung (< 1100 px) is not covered: MainWindow::setMinimumSize is 1180x760, so no
     // window reaches it and no test can measure it.
-    setW(bottomReadyLabel_, pick(52, 52, 44), true);
-    setW(bottomPageLabel_, pick(110, 88, 68), true);
+    // Ready and Idle said the same thing. The state chip is the job. The backend dots are reachability.
+    setW(bottomReadyLabel_, pick(52, 52, 44), false);
+    // The page name lives in the title bar. This chip was the same string again.
+    setW(bottomPageLabel_, pick(110, 88, 68), false);
     setW(bottomBackendLabel_, pick(96, 84, 72), true);
     setW(bottomQueueLabel_, pick(78, 68, 60), true);
     setW(bottomVramLabel_, pick(128, 108, 88), true);

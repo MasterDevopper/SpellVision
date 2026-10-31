@@ -310,33 +310,60 @@ void paintFocusRing(Role role, const QStyleOption *opt, QPainter *painter, const
     painter->restore();
 }
 
-void paintSurface(Surface surface, const QStyleOption *opt, QPainter *painter)
+void paintSurface(Surface surface, const QStyleOption *opt, QPainter *painter, const QWidget *widget)
 {
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
     const QRectF r = strokeRect(opt->rect);
     const qreal radius = surface == Surface::Inset ? theme().radiusControl() : theme().radiusCard();
     const QPainterPath path = rounded(r, radius);
-    // Which surfaces are "hero" is the material axis's whole hinge: Refined glasses everything,
-    // Matte glasses nothing, and Hybrid glasses the hero surfaces only -- which is what the
-    // material is FOR. Asking with a hardcoded true was asking the one question whose answer is
-    // the same for Refined and Hybrid, which is why the two rendered within 0.0006 of each other.
-    // Inset stays out of it: a recessed field is not a lit surface in any material.
+    // Slice 1 of the cockpit uplift. The page sets svCockpitMatte; every framed descendant
+    // except Surface::Glass paints the matte branch even when the app style is RefinedGlass
+    // (which glasses every surface). Glass is the preview well only, and it does not get the
+    // radial — one fill, one hairline, one top highlight. Other pages do not set the property,
+    // so their Refined/Hybrid/Matte split is unchanged.
+    bool cockpitMatte = false;
+    for (const QWidget *w = widget; w; w = w->parentWidget())
+    {
+        if (w->property("svCockpitMatte").toBool())
+        {
+            cockpitMatte = true;
+            break;
+        }
+    }
     const bool hero = surface == Surface::Glass || surface == Surface::Plate;
-    if (surface != Surface::Inset && theme().styleUsesGlass(hero))
+    const bool useGlass = surface != Surface::Inset
+                          && (cockpitMatte ? surface == Surface::Glass : theme().styleUsesGlass(hero));
+    if (useGlass)
     {
         painter->setPen(Qt::NoPen);
-        painter->setBrush(tok(Color::GlassFill));
+        QColor fill = tok(Color::GlassFill);
+        QColor highlight = tok(Color::GlassHighlight);
+        // MatteInstrument flattens GlassFill to solid Surface1 and zeroes GlassHighlight, so a
+        // well that reads those tokens is invisible on the style this machine actually uses.
+        // The well is the one surface that stays glass. Body is Surface0 at the ArcaneGlass
+        // glass alpha (220/255); the hairline is TextHi, not a new color role.
+        if (cockpitMatte && fill.alpha() >= 250)
+        {
+            fill = tok(Color::Surface0);
+            fill.setAlpha(220);
+            highlight = tok(Color::TextHi);
+            highlight.setAlpha(46);
+        }
+        painter->setBrush(fill);
         painter->drawPath(path);
-        QRadialGradient glow(r.topLeft() + QPointF(r.width() * 0.2, 0), r.width() * 0.6);
-        glow.setColorAt(0.0, tok(Color::GlassGlow));
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0));
-        painter->setBrush(glow);
-        painter->drawPath(path);
+        if (!cockpitMatte)
+        {
+            QRadialGradient glow(r.topLeft() + QPointF(r.width() * 0.2, 0), r.width() * 0.6);
+            glow.setColorAt(0.0, tok(Color::GlassGlow));
+            glow.setColorAt(1.0, QColor(0, 0, 0, 0));
+            painter->setBrush(glow);
+            painter->drawPath(path);
+        }
         painter->setPen(QPen(tok(Color::Border), 1.0));
         painter->setBrush(Qt::NoBrush);
         painter->drawPath(path);
-        painter->setPen(QPen(tok(Color::GlassHighlight), 1.0));
+        painter->setPen(QPen(highlight, 1.0));
         painter->drawLine(QPointF(r.left() + radius, r.top() + 1), QPointF(r.right() - radius, r.top() + 1));
         painter->restore();
         return;
@@ -345,7 +372,7 @@ void paintSurface(Surface surface, const QStyleOption *opt, QPainter *painter)
     painter->setBrush(tok(surface == Surface::Inset ? Color::Surface0 : Color::Surface1));
     painter->setPen(QPen(tok(surface == Surface::Inset ? Color::BorderSubtle : Color::Border), 1.0));
     painter->drawPath(path);
-    if (plate)
+    if (plate && !cockpitMatte)
     {
         painter->setPen(QPen(tok(Color::GlassHighlight), 1.0));
         painter->drawLine(QPointF(r.left() + radius, r.top() + 1), QPointF(r.right() - radius, r.top() + 1));
@@ -563,7 +590,7 @@ void SvStyle::drawPrimitive(PrimitiveElement element, const QStyleOption *option
         const Surface surface = surfaceOf(widget);
         if (surface != Surface::None)
         {
-            paintSurface(surface, option, painter);
+            paintSurface(surface, option, painter, widget);
             return;
         }
         // Only the controls that behave like a text field get the dark field panel: a text edit,

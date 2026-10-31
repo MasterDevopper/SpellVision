@@ -1251,13 +1251,14 @@ QString ThemeManager::shellStyleSheet() const
         "QLabel#SideRailCaption { color: @textLo@; @caption@ letter-spacing: 0.08em; }"
         "QLabel#RailSectionHeader { color: @textLo@; @micro@ letter-spacing: 0.16em; padding: 10px 0 4px 0; background: transparent; }"
         /* Studio-layout CockpitInspector (phase 2 scaffold) -- 340px tabbed right column */
-        "#CockpitInspector { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 @cardTop@, stop:1 @cardBottom@); border-left: 1px solid @cardEdge@; }"
+        "#CockpitInspector { background: @cockpitMatte@; border-left: 1px solid @cardEdge@; }"
         "#InspectorTabBar { background: transparent; }"
         "#InspectorTab { padding: 7px 4px; @label@ }"
         "#InspectorPlaceholder { color: @textLo@; @body@ }"
         // No rule for #InspectorReadinessStrip: it is Surface::Inset in CockpitInspector now, and a
         // background here would paint over the surface the style draws.
-        "#InspectorReadinessText { color: @textMid@; @label@ }"
+        "#InspectorReadinessText { color: @textMid@; @body@ }"
+        "#InspectorReadinessText[blocked=\"true\"] { color: @warnDot@; }"
         /* Phase 5 activity drawer (queueOverlay_): the solid container fill comes from
            autoFillBackground + an opaque palette (MainWindow), so the drawer is never see-through.
            The header (a QFrame, paints natively) sits on that base in the rail/status tone (@railBand@),
@@ -1307,6 +1308,7 @@ QString ThemeManager::shellStyleSheet() const
         .replace(QLatin1String("@titleBarCenter@"), rgba(titleBarB, 1.0))  // title-bar band, centre
         .replace(QLatin1String("@badgeEdge@"), rgba(withAlpha(color(Color::TextHi), preset_ == Preset::IvoryHolograph ? 0.20 : 0.36)))  // logo badge hairline
         .replace(QLatin1String("@panelFill@"), panelFillCss(Color::Surface1))
+        .replace(QLatin1String("@cockpitMatte@"), color(Color::Surface1).name())
         .replace(QLatin1String("@panelFillRaised@"), panelFillCss(Color::Surface2))
         .replace(QLatin1String("@hairline@"), rgba(softBorder, 0.95))
         .replace(QLatin1String("@hairlineSoft@"), rgba(softBorder, 0.70))
@@ -1331,6 +1333,7 @@ QString ThemeManager::shellStyleSheet() const
         .replace(QLatin1String("@micro@"), fontCss(Type::Micro))
         .replace(QLatin1String("@successBg@"), rgba(withAlpha(color(Color::Success), 0.14), 1.0))
         .replace(QLatin1String("@successFg@"), color(Color::Success).name())
+        .replace(QLatin1String("@warnDot@"), color(Color::Warning).name())
         .replace(QLatin1String("@successBd@"), rgba(withAlpha(color(Color::Success), 0.40), 1.0))
         // Style-aware geometry: the radius is part of the material, so it is read at build time.
         .replace(QLatin1String("@rcard@"), QString::number(radiusCard()) + QLatin1String("px"))
@@ -1407,7 +1410,7 @@ QString ThemeManager::imageGenerationStyleSheet() const
         "QLabel#AssetIntelligenceBody { color: @textMid@; @detail@ background: transparent; padding-top: 2px; }"
         "QLabel#StackSummary { color: @textMid@; @body@ background: transparent; }"
         "QLabel#PreviewSummary { color: @textLo@; @body@ background: transparent; padding-right: 12px; }"
-        "QLabel#ReadinessHint { color: @textLo@; @label@ background: @disabledFill@; border: 1px solid @disabledEdge@; border-radius: @rcard@; padding: 6px 10px; min-height: 26px; }"
+        "QLabel#ReadinessHint { color: @warnDot@; @body@ background: transparent; border: 0; padding: 0; }"
         // Shares the readiness hint's shape so the action row keeps one visual language. Muted
         // rather than accented: it reports that Advanced settings are in force, which is
         // information, not a warning -- the user chose those values.

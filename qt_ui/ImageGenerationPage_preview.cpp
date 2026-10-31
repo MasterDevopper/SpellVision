@@ -1,5 +1,6 @@
 #include "ImageGenerationPage.h"
 #include "ImageGenerationPage_units.h"
+#include "generation/ErrorPillLabel.h"
 #include "generation/GenerationResultRouter.h"
 #include "style/SvKit.h"
 
@@ -277,39 +278,13 @@ void ImageGenerationPage::updatePreviewEmptyStateSizing()
 
 void ImageGenerationPage::updateCanvasEmptyState(const QString &message)
 {
-    // Split the "Title\n\nSub" empty-state message into the mockup's title + subtitle.
+    // One sentence. The old split put a title and a subsystem lecture on the empty well.
     if (canvasEmptyTitle_)
+        canvasEmptyTitle_->setText(message.trimmed());
+    if (canvasEmptySub_)
     {
-        const int sep = message.indexOf(QStringLiteral("\n\n"));
-        if (sep >= 0)
-        {
-            canvasEmptyTitle_->setText(message.left(sep).trimmed());
-            if (canvasEmptySub_)
-                canvasEmptySub_->setText(message.mid(sep + 2).trimmed());
-        }
-        else
-        {
-            canvasEmptyTitle_->setText(message.trimmed());
-            if (canvasEmptySub_)
-                canvasEmptySub_->clear();
-        }
-    }
-
-    // Metric chips reflect the LIVE control values (seed 0 == random, the app convention).
-    if (canvasEmptyChipDim_)
-        canvasEmptyChipDim_->setText(QStringLiteral("%1 × %2")
-                                         .arg(widthSpin_ ? widthSpin_->value() : 1024)
-                                         .arg(heightSpin_ ? heightSpin_->value() : 1024));
-    if (canvasEmptyChipSteps_)
-        canvasEmptyChipSteps_->setText(QStringLiteral("%1 steps").arg(sampling_->stepsSpin() ? sampling_->stepsSpin()->value() : 28));
-    if (canvasEmptyChipCfg_)
-        canvasEmptyChipCfg_->setText(QStringLiteral("cfg %1")
-                                         .arg(QString::number(sampling_->cfgSpin() ? sampling_->cfgSpin()->value() : 7.0, 'f', 1)));
-    if (canvasEmptyChipSeed_)
-    {
-        const int seed = sampling_->seedSpin() ? sampling_->seedSpin()->value() : 0;
-        canvasEmptyChipSeed_->setText(seed == 0 ? QStringLiteral("seed · random")
-                                                : QStringLiteral("seed · %1").arg(seed));
+        canvasEmptySub_->clear();
+        canvasEmptySub_->setVisible(false);
     }
 }
 
@@ -428,17 +403,12 @@ void ImageGenerationPage::refreshPreview()
 
     if (previewLabel_->property("emptyState").toBool())
     {
-        const QString reason = readinessBlockReason();
         const QString message =
-            isImageInputMode()
-                ? (isVideoMode()
-                       ? QStringLiteral("No keyframe loaded yet.\n\nDrop or browse a source keyframe from the prompt strip.")
-                       : QStringLiteral("No source image loaded yet.\n\nDrop or browse an input image from the prompt strip."))
-                : (reason.isEmpty()
-                       ? (isVideoMode()
-                              ? QStringLiteral("Ready when you are.\n\nText to video. Stills belong on I2V as a keyframe.")
-                              : QStringLiteral("Ready when you are.\n\nDrop a plate only if you mean Edit (I2I), not a style reference."))
-                       : QStringLiteral("Almost ready.\n\n%1").arg(reason));
+            isVideoMode()
+                ? (isImageInputMode() ? QStringLiteral("A keyframe starts the shot.")
+                                      : QStringLiteral("Write the shot."))
+                : (isImageInputMode() ? QStringLiteral("Lock needs a plate.")
+                                      : QStringLiteral("Write the picture."));
         imagePreviewController_->showText(message);
         updateCanvasEmptyState(message); // arcane empty-state title/sub + live metric chips
         return;
@@ -752,9 +722,9 @@ void ImageGenerationPage::setInputImagePath(const QString &path)
             QPixmap thumb;
             if (!source.isNull())
             {
-                thumb = source.scaled(82, 82, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-                if (thumb.width() > 82 || thumb.height() > 82)
-                    thumb = thumb.copy((thumb.width() - 82) / 2, (thumb.height() - 82) / 2, 82, 82);
+                thumb = source.scaled(94, 94, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+                if (thumb.width() > 94 || thumb.height() > 94)
+                    thumb = thumb.copy((thumb.width() - 94) / 2, (thumb.height() - 94) / 2, 94, 94);
             }
             inputChipThumb_->setPixmap(thumb);
         }
@@ -902,13 +872,15 @@ void ImageGenerationPage::setBusy(bool busy, const QString &message)
     if (busy && !stateChanged && messageChanged)
     {
         busyMessage_ = normalizedMessage;
-        if (cockpitInspector_ && cockpitInspector_->readinessLabel())
-            cockpitInspector_->readinessLabel()->setText(
-                QStringLiteral("Readiness — %1").arg(normalizedMessage));
+        if (cockpitInspector_)
+            cockpitInspector_->setReadinessSentence(QString());
         if (aiReadinessText_)
-            aiReadinessText_->setText(normalizedMessage);
-        if (canvasEmptyTitle_)
-            canvasEmptyTitle_->setText(normalizedMessage);
+            aiReadinessText_->clear();
+        if (readinessHintLabel_ && !errorBannerActive_)
+        {
+            readinessHintLabel_->setHint(normalizedMessage);
+            readinessHintLabel_->setVisible(!normalizedMessage.isEmpty());
+        }
         if (imagePreviewController_ && previewLabel_ && !previewLabel_->property("emptyState").toBool())
             imagePreviewController_->showText(normalizedMessage);
         return;
